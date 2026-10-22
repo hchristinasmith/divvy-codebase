@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "env": {
+    "BASELINE_MODEL_RATES": "{\"claude-opus-5\":{\"in\":\"5\",\"cacheRead\":\"0.50\",\"cacheWrite\":\"6.25\",\"out\":\"25\"},\"claude-opus-5-5\":{\"in\":\"4\",\"cacheRead\":\"0.20\",\"cacheWrite\":\"5\",\"out\":\"20\"},\"claude-sonnet-5\":{\"in\":\"2\",\"cacheRead\":\"0.20\",\"cacheWrite\":\"2.50\",\"out\":\"10\"},\"claude-haiku-4-5-20251001\":{\"in\":\"1\",\"cacheRead\":\"0.10\",\"cacheWrite\":\"1.25\",\"out\":\"5\"},\"claude-fable-5\":{\"in\":\"10\",\"cacheRead\":\"1.00\",\"cacheWrite\":\"12.50\",\"out\":\"50\"},\"claude-fable-5-1\":{\"in\":\"10\",\"cacheRead\":\"0.25\",\"cacheWrite\":\"12.50\",\"out\":\"50\"}}"
+  }
+}
