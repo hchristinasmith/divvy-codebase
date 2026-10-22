@@ -9,8 +9,6 @@ import { useState } from 'react'
 import { Target } from 'lucide-react'
 import Subscriptions from './ManageSubscriptions/Subscriptions.tsx'
 import Transactions from './Transactions/TransactionsPage.tsx'
-import AuthButtons from './Auth/AuthButtons.tsx'
-import UserProfile from './Auth/UserProfile.tsx'
 import DarkModeToggle from './DarkMode.tsx'
 import Targets from './Targets/targets.tsx'
 export default function App() {
@@ -31,8 +29,6 @@ export default function App() {
           }`}
         >
           <div className="mb-4 flex justify-end items-center space-x-4">
-            <UserProfile />
-            <AuthButtons />
             <DarkModeToggle />
           </div>
 
