@@ -13,7 +13,7 @@ beforeEach(async () => {
 afterAll(closeDb)
 
 describe('GET /api/v1/categories', () => {
-  it('lists categories as { items: [{ id, name, color }] }', async () => {
+  it('lists category groups as { items: [{ name, categories }] }', async () => {
     const res = await request(app).get('/api/v1/categories')
 
     expect(res.status).toBe(200)
@@ -23,17 +23,21 @@ describe('GET /api/v1/categories', () => {
     const items: Record<string, unknown>[] = res.body.items
     expect(items.length).toBeGreaterThan(0)
     for (const item of items) {
-      expect(Object.keys(item).sort()).toEqual(['color', 'id', 'name'])
-      expect(typeof item.id).toBe('string')
+      expect(Object.keys(item).sort()).toEqual(['categories', 'name'])
       expect(typeof item.name).toBe('string')
-      expect(item.color).toMatch(/^#[0-9A-Fa-f]{6}$/)
+      expect(Array.isArray(item.categories)).toBe(true)
+      expect((item.categories as unknown[]).length).toBeGreaterThan(0)
+      for (const c of item.categories as unknown[]) expect(typeof c).toBe('string')
     }
   })
 
-  it('gives every category a distinct id', async () => {
+  it('gives every group and every category a distinct name', async () => {
     const res = await request(app).get('/api/v1/categories')
-    const ids = res.body.items.map((c: { id: string }) => c.id)
+    const items: { name: string; categories: string[] }[] = res.body.items
+    const groupNames = items.map((g) => g.name)
+    const categoryNames = items.flatMap((g) => g.categories)
 
-    expect(new Set(ids).size).toBe(ids.length)
+    expect(new Set(groupNames).size).toBe(groupNames.length)
+    expect(new Set(categoryNames).size).toBe(categoryNames.length)
   })
 })
