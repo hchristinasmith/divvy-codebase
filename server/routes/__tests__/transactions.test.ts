@@ -162,23 +162,31 @@ describe('PATCH /api/v1/transactions/:id', () => {
       .patch('/api/v1/transactions/999999')
       .send({ category: 'Bakeries' })
 
+    // The body, not just the status: an unrouted PATCH is also a 404.
     expect(res.status).toBe(404)
+    expect(res.body.error).toBe('Transaction not found')
   })
 
-  it('returns 400 for an id that is not a positive integer', async () => {
-    const res = await request(server)
-      .patch('/api/v1/transactions/abc')
-      .send({ category: 'Bakeries' })
+  it.each(['abc', '0', '-1', '1.5', '1e3', '0x10', '%207', '007'])(
+    'returns 400 for the id "%s", which is not a plain positive integer',
+    async (id) => {
+      const before = await connection('transactions').select().orderBy('id')
 
-    expect(res.status).toBe(400)
-    expect(res.body.error).toBe('id must be a positive integer')
-  })
+      const res = await request(server)
+        .patch(`/api/v1/transactions/${id}`)
+        .send({ category: 'Bakeries' })
+
+      expect(res.status).toBe(400)
+      expect(res.body.error).toBe('id must be a positive integer')
+      expect(await connection('transactions').select().orderBy('id')).toEqual(before)
+    },
+  )
 
   it('no longer answers PUT, the old half of the contract', async () => {
     const { id } = await rowFor('trans_fixture_002')
     const res = await request(server)
       .put(`/api/v1/transactions/${id}`)
-      .send({ category_group_name: 'Food' })
+      .send({ category_group_name: 'Other' })
 
     expect(res.status).toBe(404)
     expect((await rowFor('trans_fixture_002')).category_group_name).toBe('Food')

@@ -79,6 +79,9 @@ describe('transactions seed', () => {
       merchant_id: source.merchant!._id,
       merchant_name: source.merchant!.name,
       merchant_website: source.merchant!.website,
+      // Seeded rows are Akahu data: the effective category is Akahu's.
+      category: source.category!.name,
+      category_source: 'akahu',
     })
     // Pin the key set too: toMatchObject cannot see a column that appeared
     // or vanished.

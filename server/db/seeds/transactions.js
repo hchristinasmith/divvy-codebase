@@ -13,8 +13,8 @@ import { dollarsToCents } from '../../../shared/money.ts'
 // file still works as `DIVVY_SEED_TRANSACTIONS=spending.js`. That file is
 // gitignored and must stay that way.
 //
-// Akahu amounts are float dollars; this seed is one of the two places they
-// become integer cents (the other is the Akahu sync, prd-01 Ruling 3).
+// Akahu amounts are float dollars; they become integer cents here, as the
+// Akahu sync will do at its boundary (prd-01 Ruling 3).
 
 const __dirname = Path.dirname(URL.fileURLToPath(import.meta.url))
 const REPO_ROOT = Path.resolve(__dirname, '..', '..', '..')

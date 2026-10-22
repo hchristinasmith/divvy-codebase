@@ -115,7 +115,9 @@ describe(MIGRATION, () => {
 
   it('rounds float noise onto the intended cent and keeps nulls null', async () => {
     await db('transactions').insert([
-      { akahu_id: 'noise', amount: 0.1 + 0.2, balance: -64.37, conversion_amount: 12.34 },
+      // x * 100 lands just below the cent for 0.29, 4.35 and -4.35, so a
+      // truncating CAST instead of ROUND would store 28, 434 and -434.
+      { akahu_id: 'noise', amount: 0.29, balance: -4.35, conversion_amount: 4.35 },
       { akahu_id: 'nulls', amount: -5, balance: null, conversion_amount: null },
     ])
 
@@ -125,7 +127,7 @@ describe(MIGRATION, () => {
       .select('akahu_id', 'amount_cents', 'balance_cents', 'conversion_amount_cents')
       .orderBy('akahu_id')
     expect(rows).toEqual([
-      { akahu_id: 'noise', amount_cents: 30, balance_cents: -6437, conversion_amount_cents: 1234 },
+      { akahu_id: 'noise', amount_cents: 29, balance_cents: -435, conversion_amount_cents: 435 },
       { akahu_id: 'nulls', amount_cents: -500, balance_cents: null, conversion_amount_cents: null },
     ])
   })

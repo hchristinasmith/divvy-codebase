@@ -21,8 +21,9 @@ router.get('/', async (req, res) => {
 // The one category-edit route (M1 #9). Sets the user's category; never
 // Akahu's (prd-01 Ruling 4).
 router.patch('/:id', async (req, res) => {
+  // Digits only: Number() would also accept '1e3', '0x10' and ' 7'.
   const id = Number(req.params.id)
-  if (!Number.isSafeInteger(id) || id <= 0) {
+  if (!/^[1-9]\d*$/.test(req.params.id) || !Number.isSafeInteger(id)) {
     return res.status(400).json({ error: 'id must be a positive integer' })
   }
 
