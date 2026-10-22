@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router'
@@ -28,7 +28,17 @@ vi.mock('../Settings.tsx', () => ({
   default: () => <p data-testid="page">Settings page</p>,
 }))
 
-afterEach(cleanup)
+beforeEach(() => {
+  // The sync pill's status request never settles; this test is about routes.
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(() => new Promise<Response>(() => {})),
+  )
+})
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 
 function renderAt(path: string) {
   const client = new QueryClient({
@@ -45,15 +55,51 @@ function renderAt(path: string) {
 
 describe('App routes the old pages', () => {
   it.each([
-    ['/', 'Dashboard page'],
+    ['/dashboard', 'Dashboard page'],
     ['/transactions', 'Transactions page'],
     ['/wishlist', 'Wishlist page'],
     ['/targets', 'Targets page'],
     ['/manage-subscriptions', 'Subscriptions page'],
     ['/challenges', 'Challenges page'],
     ['/settings', 'Settings page'],
-  ])('%s renders %s', (path, text) => {
+  ])('%s renders %s inside the shell', (path, text) => {
     renderAt(path)
-    expect(screen.getByTestId('page').textContent).toBe(text)
+    const page = screen.getByTestId('page')
+    expect(page.textContent).toBe(text)
+    expect(screen.getByRole('main').contains(page)).toBe(true)
+    expect(screen.getByRole('navigation', { name: 'Primary' })).not.toBeNull()
+  })
+})
+
+describe('App routes the handoff screens', () => {
+  it('/ is the Overview now, not the old Dashboard', () => {
+    renderAt('/')
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(
+      'Overview',
+    )
+    expect(screen.queryByTestId('page')).toBeNull()
+  })
+
+  it('every screen in the route table is mounted', () => {
+    for (const path of [
+      '/budgets',
+      '/bills',
+      '/goals',
+      '/habits',
+      '/advisor',
+      '/sync',
+      '/privacy',
+    ]) {
+      renderAt(path)
+      expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
+      cleanup()
+    }
+  })
+
+  it('drops the dark-mode toggle from the layout', () => {
+    renderAt('/')
+    expect(
+      screen.queryByRole('button', { name: 'Toggle Dark Mode' }),
+    ).toBeNull()
   })
 })
