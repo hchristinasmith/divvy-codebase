@@ -1,16 +1,10 @@
 import { useState } from 'react'
-import { Transaction } from 'models/transactions'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import type { Transaction } from '../../../models/transactions'
+import { TableCell, TableRow } from '@/components/ui/table'
 import { Pencil } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { updateTransactionCategory } from '../../apis/apiClient.ts'
 
 interface Props {
   transaction: Transaction
@@ -26,8 +20,8 @@ export default function TxnItems({ transaction }: Props) {
   const queryClient = useQueryClient()
 
   const editTxnMutation = useMutation({
-    mutationFn: ({ description, category_group_name }: Transaction) =>
-      editTxn({ description, category_group_name }, id),
+    mutationFn: (category: string) =>
+      updateTransactionCategory(transaction.id, category),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['txns'] })
     },
@@ -42,7 +36,7 @@ export default function TxnItems({ transaction }: Props) {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    editTxnMutation.mutate({ id: transaction.id, ...formData })
+    editTxnMutation.mutate(formData.category)
   }
 
   return (

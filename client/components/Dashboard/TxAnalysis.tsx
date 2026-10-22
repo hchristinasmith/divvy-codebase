@@ -1,7 +1,7 @@
-import type { Transaction } from '../../../models/transactions'
+import type { AkahuTransaction } from '../../../models/akahu'
 
-export function transactionsByCategory(transactions: Transaction[]) {
-  return transactions.reduce<Record<string, Transaction[]>>((groups, tx) => {
+export function transactionsByCategory(transactions: AkahuTransaction[]) {
+  return transactions.reduce<Record<string, AkahuTransaction[]>>((groups, tx) => {
     const category = tx.category?.name || 'Unknown'
     if (!groups[category]) {
       groups[category] = []
@@ -11,7 +11,7 @@ export function transactionsByCategory(transactions: Transaction[]) {
   }, {})
 }
 
-export function transactionAnalysis(transactions: Transaction[]) {
+export function transactionAnalysis(transactions: AkahuTransaction[]) {
   const totalAmount = transactions.reduce((sum, tx) => sum + tx.amount, 0)
   const avgAmount = transactions.length ? totalAmount / transactions.length : 0
   return {

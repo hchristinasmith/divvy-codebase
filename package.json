@@ -14,15 +14,18 @@
     "build:client": "vite build",
     "build:server": "esbuild --packages=external --platform=node --format=esm --outfile=dist/server.js --bundle server/index.ts",
     "lint": "eslint --ext .js,.jsx,.ts,.tsx .",
+    "typecheck": "tsc --noEmit",
     "knex": "knex --knexfile ./server/db/knexfile.js",
     "migrate:create": "knex --knexfile ./server/db/knexfile.js migrate:make",
     "migrate:latest": "knex --knexfile ./server/db/knexfile.js migrate:latest",
     "migrate:rollback": "knex --knexfile ./server/db/knexfile.js migrate:rollback"
   },
   "eslintConfig": {
+    "root": true,
     "extends": "@devacademy/eslint-config/react",
     "ignorePatterns": [
-      "bundle.js"
+      "bundle.js",
+      "dist/"
     ]
   },
   "dependencies": {
