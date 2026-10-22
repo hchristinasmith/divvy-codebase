@@ -1,6 +1,86 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 
+/* Fonts ship from the app, never from Google Fonts (prd-02 Ruling 7): the
+   Privacy screen says the data stays on one machine, and a page that calls a
+   third party on every load makes that untrue. Latin and latin-ext only. */
+@import '@fontsource-variable/outfit/index.css';
+@import '@fontsource-variable/dm-sans/opsz.css';
+@import '@fontsource/dm-mono/400.css';
+@import '@fontsource/dm-mono/500.css';
+
+/* Divvy design tokens, from docs/design/handoff.md "Design tokens". Values
+   are copied exactly; components use these utilities and never a hex.
+   Handoff names that the shadcn block below already owns for the old pages
+   are renamed: border -> line, muted -> ink-muted, faint -> ink-faint.
+   No shadow tokens: the design has no shadows, and new components never
+   use a shadow utility (tokens.test.ts scans for it). */
+@theme {
+  --color-canvas: #FAF6F3;
+  --color-surface: #FFFFFF;
+  --color-line: #F0E4E6;
+  --color-divider: #F6ECEE;
+  --color-blush: #FBE4EA;
+  --color-blush-hover: #F7D2DC;
+  --color-pink: #EC6A94;
+  --color-pink-hover: #D9507D;
+  --color-deep: #C2386A;
+  --color-rose: #A12A56;
+  --color-ink: #2B2224;
+  --color-ink-muted: #7A6A6F;
+  --color-ink-faint: #B3A3A8;
+  --color-ok: #3E9A6E;
+  --color-warn: #D9893A;
+  --color-danger: #D23F5B;
+
+  /* Display: Outfit 500/600. Body: DM Sans 400/500/600 (optical size axis,
+     as the prototype loads it). Numbers: DM Mono 400/500. */
+  --font-display: 'Outfit Variable', system-ui, sans-serif;
+  --font-sans: 'DM Sans Variable', system-ui, sans-serif;
+  --font-mono: 'DM Mono', ui-monospace, monospace;
+
+  /* Type scale, prefixed by role so Tailwind's text-sm/text-base stay as
+     the old pages expect. */
+  --text-display-72: 72px;
+  --text-display-40: 40px;
+  --text-display-36: 36px;
+  --text-display-34: 34px;
+  --text-display-28: 28px;
+  --text-display-26: 26px;
+  --text-display-22: 22px;
+  --text-body-15: 15px;
+  --text-body-14: 14px;
+  --text-body-13: 13px;
+  --text-body-12: 12px;
+  --text-body-11: 11px;
+
+  --tracking-hero: -0.03em;
+  --tracking-title: -0.02em;
+  --tracking-wordmark: 0.04em;
+  --tracking-eyebrow: 0.1em;
+  --tracking-tagline: 0.14em;
+
+  /* Radii: cards 24, tiles 14-18, buttons 12-14, pills 999, tag tiles 8-11.
+     Role names, because shadcn owns radius-sm/md/lg/xl. */
+  --radius-card: 24px;
+  --radius-tile: 14px;
+  --radius-tile-lg: 18px;
+  --radius-button: 12px;
+  --radius-pill: 999px;
+  --radius-tag: 8px;
+  --radius-tag-lg: 11px;
+
+  /* Spacing: the handoff's 4/6/8/10/12/14/16/20/24/28/36/40 are steps
+     1/1.5/2/2.5/3/3.5/4/5/6/7/9/10 of this unit. */
+  --spacing: 0.25rem;
+
+  /* The phone layout starts under 720px (handoff "Global layout"): `shell:`
+     is the desktop layout, `max-shell:` the phone. rem, like Tailwind's own
+     breakpoints, so they sort together; 45rem is 720px. */
+  --breakpoint-shell: 45rem;
+  --container-page: 1040px;
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
