@@ -1,3 +1,6 @@
+// A row of the `transactions` table as the server returns it. Every money
+// field is integer cents (M1 #8); format with `formatCents` from
+// `shared/money.ts`, never by dividing here.
 export interface Transaction {
   id: string
   account_id: string
@@ -8,8 +11,8 @@ export interface Transaction {
   date: string
 
   description: string
-  amount: number
-  balance: number
+  amount_cents: number
+  balance_cents: number | null
   type: string
   hash: string
 
@@ -25,7 +28,7 @@ export interface Transaction {
   reference: string
   other_account: string
   logo: string
-  conversion_amount: number
+  conversion_amount_cents: number | null
   conversion_currency: number
   conversion_rate: number
   card_suffix: string

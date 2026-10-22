@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import * as Path from 'node:path'
 import config from '../../knexfile.js'
 import { dollarsToCents } from '../../../../shared/money.ts'
+import { TRANSACTION_COLUMNS } from '../../__tests__/transactionColumns.ts'
 import fixture from '../../fixtures/transactions.json'
 
 // The user-facing flow is `npm run knex migrate:latest && npm run knex
@@ -26,39 +27,6 @@ afterEach(async () => {
   await db.destroy()
   await rm(scratch, { recursive: true, force: true })
 })
-
-const TRANSACTION_COLUMNS = [
-  'id',
-  'akahu_id',
-  'account_id',
-  'user_id',
-  'connection_id',
-  'created_at',
-  'updated_at',
-  'date',
-  'description',
-  'type',
-  'hash',
-  'category_id',
-  'category_name',
-  'category_group_id',
-  'category_group_name',
-  'particulars',
-  'code',
-  'reference',
-  'other_account',
-  'logo',
-  'conversion_currency',
-  'conversion_rate',
-  'card_suffix',
-  'merchant_id',
-  'merchant_name',
-  'merchant_website',
-  'merchant_logo',
-  'amount_cents',
-  'balance_cents',
-  'conversion_amount_cents',
-]
 
 function akahuTxn(id: string, amount: number) {
   return {

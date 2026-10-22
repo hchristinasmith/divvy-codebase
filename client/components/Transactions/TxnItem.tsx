@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { Transaction } from '../../../models/transactions'
 import { TableCell, TableRow } from '@/components/ui/table'
 import { Pencil } from 'lucide-react'
+import { formatCents } from '../../../shared/money.ts'
 import { Button } from '@/components/ui/button'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { updateTransactionCategory } from '../../apis/apiClient.ts'
@@ -58,7 +59,7 @@ export default function TxnItems({ transaction }: Props) {
         )}
       </TableCell>
       <TableCell className="text-right font-semibold">
-        {transaction.amount.toFixed(2)}
+        {formatCents(transaction.amount_cents)}
       </TableCell>
       <TableCell>
         {editing ? (

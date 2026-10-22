@@ -3,6 +3,8 @@ import request from 'supertest'
 import server from '../../server.ts'
 import connection from '../../db/connection.ts'
 import fixture from '../../db/fixtures/transactions.json'
+import { TRANSACTION_COLUMNS } from '../../db/__tests__/transactionColumns.ts'
+import { dollarsToCents } from '../../../shared/money.ts'
 
 // Route tests run against the app's own connection, which is the in-memory
 // SQLite `test` config under vitest (NODE_ENV=test). Each test starts from a
@@ -43,5 +45,20 @@ describe('GET /api/v1/transactions', () => {
     expect(res.body.txns.map((t: { akahu_id: string }) => t.akahu_id).sort()).toEqual(
       expected,
     )
+  })
+
+  it('returns money as integer cents and no dollar fields', async () => {
+    const res = await request(server)
+      .get('/api/v1/transactions')
+      .query({ description: 'Sample Superette' })
+
+    const source = fixture.items.find((t) => t._id === 'trans_fixture_002')!
+    const row = res.body.txns.find(
+      (t: { akahu_id: string }) => t.akahu_id === source._id,
+    )
+    expect(row.amount_cents).toBe(dollarsToCents(source.amount))
+    expect(row.balance_cents).toBe(dollarsToCents(source.balance))
+    expect(Number.isInteger(row.amount_cents)).toBe(true)
+    expect(Object.keys(row).sort()).toEqual([...TRANSACTION_COLUMNS].sort())
   })
 })
