@@ -37,7 +37,9 @@ export default {
     client: 'sqlite3',
     useNullAsDefault: true,
     connection: {
-      filename: '/app/storage/prod.sqlite3',
+      // On Fly the volume is mounted at /data (fly.toml, D1). DATABASE_PATH
+      // overrides it, e.g. to run the production build against a local file.
+      filename: process.env.DATABASE_PATH || '/data/divvy.sqlite3',
     },
     pool: {
       afterCreate: (conn, cb) => conn.run('PRAGMA foreign_keys = ON', cb),

@@ -1,0 +1,37 @@
+# Divvy on Fly.io (D1): one always-on machine in Sydney, SQLite on a mounted
+# volume, no public IP. Nothing here is deployed yet; the first deploy, the
+# Tailscale sidecar and Litestream backups (D2) are M2.
+#
+# `app` is a placeholder until the Fly app is created in M2.
+app = "divvy"
+primary_region = "syd"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3005"
+  DATABASE_PATH = "/data/divvy.sqlite3"
+
+# SQLite has one writer, so the app runs as a single machine pinned to this
+# volume. Create it in the same region before the first deploy:
+#   fly volumes create divvy_data --region syd --size 1
+[mounts]
+  source = "divvy_data"
+  destination = "/data"
+
+# Deliberately no [http_service] and no [[services]] (D1, D4): the app must
+# never face the public internet. Without a service, Fly's proxy routes
+# nothing to the machine and no public IP is needed; if `fly ips list` ever
+# shows one, release it with `fly ips release`.
+#
+# The app is reached only over Tailscale. Tailscale needs no inbound service:
+# the node dials out to the tailnet (UDP, falling back to DERP over HTTPS),
+# and the tailnet then reaches the server on port 3005 inside the machine.
+# Adding the Tailscale sidecar is M2; until then the machine is reachable only
+# over Fly's private network (`fly proxy 3005`).
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
