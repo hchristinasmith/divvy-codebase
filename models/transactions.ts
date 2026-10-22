@@ -1,3 +1,7 @@
+// Who set a transaction's effective category (prd-01 Ruling 4). Sync may
+// change `category` only while this is 'akahu'; nothing overwrites 'user'.
+export type CategorySource = 'akahu' | 'user' | 'rule' | 'claude'
+
 // A row of the `transactions` table as the server returns it. Every money
 // field is integer cents (M1 #8); format with `formatCents` from
 // `shared/money.ts`, never by dividing here.
@@ -16,7 +20,7 @@ export interface Transaction {
   type: string
   hash: string
 
-  // Embedded category
+  // Akahu's category, as received. Only sync writes these.
   category_id: string
   category_name: string
   category_group_id: string
@@ -38,4 +42,20 @@ export interface Transaction {
   merchant_name: string
   merchant_website: string
   merchant_logo: string
+
+  // Effective category: an NZFCC category name from data/cats.js, or null
+  // when Akahu sent none and nobody has set one.
+  category: string | null
+  category_source: CategorySource
+}
+
+// Body of PATCH /api/v1/transactions/:id, the one category-edit route.
+// Sets the effective category with category_source 'user'; Akahu's
+// category_* fields are never written by it.
+export interface UpdateTransactionCategory {
+  category: string
+}
+
+export interface UpdateTransactionCategoryResponse {
+  transaction: Transaction
 }

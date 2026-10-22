@@ -38,6 +38,8 @@ function txn(overrides: Partial<Transaction>): Transaction {
     merchant_name: '',
     merchant_website: '',
     merchant_logo: '',
+    category: null,
+    category_source: 'akahu',
     ...overrides,
   }
 }
