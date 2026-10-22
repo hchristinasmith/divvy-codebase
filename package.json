@@ -28,6 +28,44 @@
       "bundle.js",
       "dist/",
       "docs/"
+    ],
+    "overrides": [
+      {
+        "files": [
+          "mcp/**/*.ts",
+          "mcp/**/*.tsx",
+          "mcp/**/*.js",
+          "mcp/**/*.mjs",
+          "mcp/**/*.cjs"
+        ],
+        "rules": {
+          "no-restricted-imports": [
+            "error",
+            {
+              "patterns": [
+                {
+                  "group": [
+                    "**/server",
+                    "**/server/**",
+                    "@/**",
+                    "!@modelcontextprotocol/**"
+                  ],
+                  "message": "mcp/ must not import server/ (prd-03 Ruling 6); it reads only the scrubbed replica."
+                }
+              ]
+            }
+          ],
+          "no-console": [
+            "error",
+            {
+              "allow": [
+                "error",
+                "warn"
+              ]
+            }
+          ]
+        }
+      }
     ]
   },
   "dependencies": {
