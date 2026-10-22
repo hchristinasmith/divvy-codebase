@@ -8,7 +8,13 @@
 //   (prd-02 Ruling 2; shared/safe-to-spend.ts)
 
 import { describe, expect, it } from 'vitest'
-import type { BudgetLine, SafeToSpendResult } from '../contracts.ts'
+import {
+  SETTING_KEYS,
+  SETTINGS_DEFAULTS,
+  type BudgetLine,
+  type SafeToSpendResult,
+  type SettingsResponse,
+} from '../contracts.ts'
 import {
   budgetSpentCents,
   daysBetween,
@@ -310,6 +316,56 @@ const CASES: Case[] = [
       safeCents: -90000,
       shortByCents: 90000,
       perDayCents: -18000,
+      budgets: [SOFTWARE],
+    },
+  },
+  {
+    // All scope nets every in-scope tax pot, a personal one included
+    //   (Ruling 2: "in-scope"; #29 may say otherwise).
+    // liquid 500000; bills 152000; budgets 14000
+    // tax    = owed 280000 − pots (s-tax 30000 + p-tax 50000 = 80000)
+    //        = hold 200000
+    // safe   = 500000 − 152000 − 14000 − 200000 = 134000
+    // per day = 134000 ÷ 5 = 26800
+    name: 'all scope with a personal tax pot: every in-scope pot nets',
+    input: base({
+      scope: 'all',
+      accounts: [...ACCOUNTS, { id: 'p-tax', scope: 'personal', role: 'tax_pot', balanceCents: 50000 }],
+    }),
+    expected: {
+      scope: 'all',
+      ...PAYDAY_OCT,
+      liquidCents: 500000,
+      unpaidBillsCents: 152000,
+      remainingBudgetCents: 14000,
+      taxOwedCents: 280000,
+      taxPotCents: 80000,
+      taxHoldCents: 200000,
+      safeCents: 134000,
+      shortByCents: 0,
+      perDayCents: 26800,
+      budgets: [GROCERIES, SOFTWARE],
+    },
+  },
+  {
+    // A 100% tax rate is allowed: owed = 10000 × 1000000 / 10000 = 1000000.
+    // liquid 200000; bills 40000; budgets 0; hold = 1000000 − 30000 = 970000
+    // safe = 200000 − 40000 − 0 − 970000 = −810000; short 810000
+    // per day = −810000 ÷ 5 = −162000
+    name: 'strawb, tax rate 10000 bp (100%) is the upper bound, accepted',
+    input: base({ scope: 'strawb', taxRateBasisPoints: 10000 }),
+    expected: {
+      scope: 'strawb',
+      ...PAYDAY_OCT,
+      liquidCents: 200000,
+      unpaidBillsCents: 40000,
+      remainingBudgetCents: 0,
+      taxOwedCents: 1000000,
+      taxPotCents: 30000,
+      taxHoldCents: 970000,
+      safeCents: -810000,
+      shortByCents: 810000,
+      perDayCents: -162000,
       budgets: [SOFTWARE],
     },
   },
@@ -760,8 +816,56 @@ describe('refusals', () => {
       },
       /unknown account "ghost"/,
     ],
+    ['a negative tax rate', { taxRateBasisPoints: -1 }, /taxRateBasisPoints must be a whole number from 0 to 10000/],
+    [
+      'a bad transaction date when no budget is in scope',
+      {
+        budgets: [],
+        transactions: [
+          { accountId: 'p-cur', date: '2026-10-1', amountCents: -100, category: 'Groceries', status: 'settled' },
+        ],
+      },
+      /transaction date must be a YYYY-MM-DD calendar date/,
+    ],
+    [
+      'the same account twice',
+      { accounts: [...ACCOUNTS, { id: 'p-cur', scope: 'strawb', role: 'current', balanceCents: 1 }] },
+      /account "p-cur" appears twice/,
+    ],
     ['an unknown scope', { scope: 'business' as unknown as 'all' }, /scope must be all, personal or strawb/],
   ])('refuses %s', (_name, overrides, message) => {
     expect(() => safeToSpend(base(overrides))).toThrow(message)
+  })
+})
+
+describe('contracts: settings', () => {
+  // Later waves seed and read settings from these constants; a wrong default
+  // silently moves the tax hold, so the values are pinned as literals.
+  it('defaults are exactly the ruled values', () => {
+    expect(SETTINGS_DEFAULTS).toStrictEqual({
+      tax_rate_bp: 2500,
+      profit_cents: 0,
+      payday_day: 28,
+      currency: '$',
+    })
+    // The tax rate is stored as an integer, not a float (issue #36).
+    expect(Number.isInteger(SETTINGS_DEFAULTS.tax_rate_bp)).toBe(true)
+  })
+
+  it('every SettingsResponse field reads one stored key, and every key is read', () => {
+    const fields: Record<keyof SettingsResponse, true> = {
+      taxRateBasisPoints: true,
+      profitCents: true,
+      paydayDay: true,
+      currency: true,
+    }
+    expect(Object.keys(SETTING_KEYS).sort()).toEqual(Object.keys(fields).sort())
+    expect(SETTING_KEYS).toStrictEqual({
+      taxRateBasisPoints: 'tax_rate_bp',
+      profitCents: 'profit_cents',
+      paydayDay: 'payday_day',
+      currency: 'currency',
+    })
+    expect(Object.values(SETTING_KEYS).sort()).toEqual(Object.keys(SETTINGS_DEFAULTS).sort())
   })
 })
