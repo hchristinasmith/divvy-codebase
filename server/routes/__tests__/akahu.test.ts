@@ -63,6 +63,12 @@ describe('GET /api/v1/accounts/:accountId/transactions', () => {
     ['the bare prefix', 'acc_'],
     ['another Akahu id type', 'user_abc123'],
     ['a space', 'acc_abc%20def'],
+    ['a valid id after a traversal', '..%2Facc_abc'],
+    ['a valid id after another segment', 'x%2Facc_abc'],
+    ['a trailing newline', 'acc_abc%0A'],
+    ['an injected header line', 'acc_abc%0D%0AX-Injected:1'],
+    ['an underscore after the prefix', 'acc_a_b'],
+    ['an upper-case prefix', 'ACC_abc'],
   ])('refuses %s with 400 and never calls Akahu', async (_label, segment) => {
     const res = await request(app).get(
       `/api/v1/accounts/${segment}/transactions`,
@@ -78,6 +84,7 @@ describe('GET /api/v1/accounts/:accountId/transactions', () => {
     )
 
     expect(res.status).toBe(200)
+    expect(Object.keys(res.body).sort()).toEqual(['items', 'success'])
     expect(res.body).toEqual(upstream.body)
     expect(upstream.get).toHaveBeenCalledTimes(1)
     expect(upstream.get).toHaveBeenCalledWith(

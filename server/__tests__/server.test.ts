@@ -125,7 +125,11 @@ describe('client routes get index.html', () => {
         .set('Accept', BROWSER_ACCEPT)
         .timeout(2000)
 
+      // Express's own 404, not sendFile's error handed on: that one is also
+      // a 404 but carries the ENOENT message and the server's filesystem path.
       expect(res.status).toBe(404)
+      expect(res.text).toContain('Cannot GET /targets')
+      expect(res.text).not.toContain('ENOENT')
     } finally {
       writeFileSync(indexFile, build.indexHtml)
     }
