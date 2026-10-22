@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import * as Path from 'node:path'
 import * as URL from 'node:url'
+import { dollarsToCents } from '../../../shared/money.ts'
 
 // Seeds `transactions` from Akahu-shaped data (an envelope with `items`).
 //
@@ -11,6 +12,9 @@ import * as URL from 'node:url'
 // relative path is resolved from the repository root, so the old private
 // file still works as `DIVVY_SEED_TRANSACTIONS=spending.js`. That file is
 // gitignored and must stay that way.
+//
+// Akahu amounts are float dollars; this seed is one of the two places they
+// become integer cents (the other is the Akahu sync, prd-01 Ruling 3).
 
 const __dirname = Path.dirname(URL.fileURLToPath(import.meta.url))
 const REPO_ROOT = Path.resolve(__dirname, '..', '..', '..')
@@ -36,6 +40,10 @@ async function loadEnvelope() {
   return envelope.items
 }
 
+function centsOrNull(dollars) {
+  return dollars === undefined || dollars === null ? null : dollarsToCents(dollars)
+}
+
 function toRow(txn) {
   const meta = txn.meta ?? {}
   const group = txn.category?.groups?.personal_finance
@@ -48,8 +56,8 @@ function toRow(txn) {
     updated_at: txn.updated_at,
     date: txn.date,
     description: txn.description,
-    amount: txn.amount,
-    balance: txn.balance,
+    amount_cents: dollarsToCents(txn.amount),
+    balance_cents: centsOrNull(txn.balance),
     type: txn.type,
     hash: txn.hash,
     category_id: txn.category?._id || null,
@@ -61,7 +69,7 @@ function toRow(txn) {
     reference: meta.reference || null,
     other_account: meta.other_account || null,
     logo: meta.logo || null,
-    conversion_amount: meta.conversion_amount || null,
+    conversion_amount_cents: centsOrNull(meta.conversion_amount),
     conversion_currency: meta.conversion_currency || null,
     conversion_rate: meta.conversion_rate || null,
     card_suffix: meta.card_suffix || null,

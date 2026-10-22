@@ -4,6 +4,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import * as Path from 'node:path'
 import config from '../../knexfile.js'
+import { dollarsToCents } from '../../../../shared/money.ts'
 import fixture from '../../fixtures/transactions.json'
 
 // The user-facing flow is `npm run knex migrate:latest && npm run knex
@@ -36,8 +37,6 @@ const TRANSACTION_COLUMNS = [
   'updated_at',
   'date',
   'description',
-  'amount',
-  'balance',
   'type',
   'hash',
   'category_id',
@@ -49,7 +48,6 @@ const TRANSACTION_COLUMNS = [
   'reference',
   'other_account',
   'logo',
-  'conversion_amount',
   'conversion_currency',
   'conversion_rate',
   'card_suffix',
@@ -57,6 +55,9 @@ const TRANSACTION_COLUMNS = [
   'merchant_name',
   'merchant_website',
   'merchant_logo',
+  'amount_cents',
+  'balance_cents',
+  'conversion_amount_cents',
 ]
 
 function akahuTxn(id: string, amount: number) {
@@ -99,8 +100,8 @@ describe('transactions seed', () => {
       user_id: source._user,
       connection_id: source._connection,
       description: source.description,
-      amount: source.amount,
-      balance: source.balance,
+      amount_cents: dollarsToCents(source.amount),
+      balance_cents: dollarsToCents(source.balance),
       type: source.type,
       hash: source.hash,
       category_id: source.category!._id,

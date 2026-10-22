@@ -11,7 +11,7 @@ export async function seed(knex) {
     {
       user_id: 1,
       category: 'Housing',
-      target_amount: 1200.0,
+      target_amount_cents: 120000,
       period: 'monthly',
       created_at: new Date(),
       updated_at: new Date(),
@@ -19,7 +19,7 @@ export async function seed(knex) {
     {
       user_id: 1,
       category: 'Food',
-      target_amount: 500.0,
+      target_amount_cents: 50000,
       period: 'monthly',
       created_at: new Date(),
       updated_at: new Date(),
@@ -27,7 +27,7 @@ export async function seed(knex) {
     {
       user_id: 2,
       category: 'Entertainment',
-      target_amount: 150.0,
+      target_amount_cents: 15000,
       period: 'monthly',
       created_at: new Date(),
       updated_at: new Date(),
