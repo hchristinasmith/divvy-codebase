@@ -1,0 +1,1416 @@
+{
+  "success": true,
+  "items": [
+    {
+      "_id": "trans_fixture_001",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-01T09:00:00.000Z",
+      "updated_at": "2026-09-01T09:00:00.000Z",
+      "date": "2026-09-01T09:00:00.000Z",
+      "description": "SAMPLE EMPLOYER LTD SALARY",
+      "amount": 4250,
+      "balance": 6084.52,
+      "type": "DIRECT CREDIT",
+      "hash": "fixture_hash_001",
+      "meta": {}
+    },
+    {
+      "_id": "trans_fixture_002",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-01T09:01:00.000Z",
+      "updated_at": "2026-09-01T09:01:00.000Z",
+      "date": "2026-09-01T09:01:00.000Z",
+      "description": "Sample Superette Te Aro",
+      "amount": -64.37,
+      "balance": 6020.15,
+      "type": "EFTPOS",
+      "hash": "fixture_hash_002",
+      "meta": {},
+      "category": {
+        "_id": "nzfcc_ckouvvy84001608ml5p6z4d8j",
+        "name": "Supermarkets and grocery stores",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw000xhk4mf7mg2j1z",
+            "name": "Food"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_sample-superette",
+        "name": "Sample Superette",
+        "website": "https://example.com/sample-superette"
+      }
+    },
+    {
+      "_id": "trans_fixture_003",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-02T09:02:00.000Z",
+      "updated_at": "2026-09-02T09:02:00.000Z",
+      "date": "2026-09-02T09:02:00.000Z",
+      "description": "Fixture Flat White Co Cuba St",
+      "amount": -5.5,
+      "balance": 6014.65,
+      "type": "CREDIT CARD",
+      "hash": "fixture_hash_003",
+      "meta": {
+        "card_suffix": "0000"
+      },
+      "category": {
+        "_id": "nzfcc_ckouvvyw1004408mlhy158i7j",
+        "name": "Cafes and restaurants",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw0011hk4m6hlk9fq0",
+            "name": "Lifestyle"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_fixture-flat-white-co",
+        "name": "Fixture Flat White Co",
+        "website": "https://example.com/fixture-flat-white-co"
+      }
+    },
+    {
+      "_id": "trans_fixture_004",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-02T09:03:00.000Z",
+      "updated_at": "2026-09-02T09:03:00.000Z",
+      "date": "2026-09-02T09:03:00.000Z",
+      "description": "SAMPLE LANDLORD RENT",
+      "amount": -620,
+      "balance": 5394.65,
+      "type": "STANDING ORDER",
+      "hash": "fixture_hash_004",
+      "meta": {
+        "particulars": "SAMPLE",
+        "code": "RENT",
+        "reference": "FIXTURE"
+      },
+      "category": {
+        "_id": "nzfcc_cl2pae1ns000009jt55t2cdir",
+        "name": "Rent for permanent accommodation",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw000thk4mefilhht7",
+            "name": "Housing"
+          }
+        }
+      }
+    },
+    {
+      "_id": "trans_fixture_005",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-03T09:04:00.000Z",
+      "updated_at": "2026-09-03T09:04:00.000Z",
+      "date": "2026-09-03T09:04:00.000Z",
+      "description": "Example Fuel Petone",
+      "amount": -82.14,
+      "balance": 5312.51,
+      "type": "EFTPOS",
+      "hash": "fixture_hash_005",
+      "meta": {},
+      "category": {
+        "_id": "nzfcc_ckouvvytq003o08mlbcy57jft",
+        "name": "Fuel stations",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw000whk4m577xhmf3",
+            "name": "Transport"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_example-fuel",
+        "name": "Example Fuel",
+        "website": "https://example.com/example-fuel"
+      }
+    },
+    {
+      "_id": "trans_fixture_006",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-04T09:05:00.000Z",
+      "updated_at": "2026-09-04T09:05:00.000Z",
+      "date": "2026-09-04T09:05:00.000Z",
+      "description": "Sample Bakehouse Ponsonby",
+      "amount": -12.8,
+      "balance": 5299.71,
+      "type": "EFTPOS",
+      "hash": "fixture_hash_006",
+      "meta": {},
+      "category": {
+        "_id": "nzfcc_ckouvvy98001a08ml3l180boh",
+        "name": "Bakeries",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw000xhk4mf7mg2j1z",
+            "name": "Food"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_sample-bakehouse",
+        "name": "Sample Bakehouse",
+        "website": "https://example.com/sample-bakehouse"
+      }
+    },
+    {
+      "_id": "trans_fixture_007",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-04T09:06:00.000Z",
+      "updated_at": "2026-09-04T09:06:00.000Z",
+      "date": "2026-09-04T09:06:00.000Z",
+      "description": "Fixture Streaming Ltd",
+      "amount": -18.99,
+      "balance": 5280.72,
+      "type": "DIRECT DEBIT",
+      "hash": "fixture_hash_007",
+      "meta": {},
+      "category": {
+        "_id": "nzfcc_ckouvvzhn006t08mlg81xhlbx",
+        "name": "Media and entertainment streaming services",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw0011hk4m6hlk9fq0",
+            "name": "Lifestyle"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_fixture-streaming",
+        "name": "Fixture Streaming",
+        "website": "https://example.com/fixture-streaming"
+      }
+    },
+    {
+      "_id": "trans_fixture_008",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-05T09:07:00.000Z",
+      "updated_at": "2026-09-05T09:07:00.000Z",
+      "date": "2026-09-05T09:07:00.000Z",
+      "description": "Sample Superette Te Aro",
+      "amount": -41.06,
+      "balance": 5239.66,
+      "type": "EFTPOS",
+      "hash": "fixture_hash_008",
+      "meta": {},
+      "category": {
+        "_id": "nzfcc_ckouvvy84001608ml5p6z4d8j",
+        "name": "Supermarkets and grocery stores",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw000xhk4mf7mg2j1z",
+            "name": "Food"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_sample-superette",
+        "name": "Sample Superette",
+        "website": "https://example.com/sample-superette"
+      }
+    },
+    {
+      "_id": "trans_fixture_009",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-06T09:08:00.000Z",
+      "updated_at": "2026-09-06T09:08:00.000Z",
+      "date": "2026-09-06T09:08:00.000Z",
+      "description": "Example Power Co",
+      "amount": -143.22,
+      "balance": 5096.44,
+      "type": "DIRECT DEBIT",
+      "hash": "fixture_hash_009",
+      "meta": {},
+      "category": {
+        "_id": "nzfcc_clahc65qk000008jt7nug6ag9",
+        "name": "Electricity services",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw000vhk4m46ce9nrt",
+            "name": "Utilities"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_example-power-co",
+        "name": "Example Power Co",
+        "website": "https://example.com/example-power-co"
+      }
+    },
+    {
+      "_id": "trans_fixture_010",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-06T09:09:00.000Z",
+      "updated_at": "2026-09-06T09:09:00.000Z",
+      "date": "2026-09-06T09:09:00.000Z",
+      "description": "TRANSFER TO SAVINGS",
+      "amount": -500,
+      "balance": 4596.44,
+      "type": "TRANSFER",
+      "hash": "fixture_hash_010",
+      "meta": {
+        "other_account": "00-0000-0000000-00",
+        "reference": "FIXTURE"
+      }
+    },
+    {
+      "_id": "trans_fixture_011",
+      "_account": "acc_fixture_savings",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-06T09:10:00.000Z",
+      "updated_at": "2026-09-06T09:10:00.000Z",
+      "date": "2026-09-06T09:10:00.000Z",
+      "description": "TRANSFER FROM EVERYDAY",
+      "amount": 500,
+      "balance": 12500,
+      "type": "TRANSFER",
+      "hash": "fixture_hash_011",
+      "meta": {
+        "other_account": "00-0000-0000000-00",
+        "reference": "FIXTURE"
+      }
+    },
+    {
+      "_id": "trans_fixture_012",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-07T09:11:00.000Z",
+      "updated_at": "2026-09-07T09:11:00.000Z",
+      "date": "2026-09-07T09:11:00.000Z",
+      "description": "Fixture Pharmacy Kelburn",
+      "amount": -23.4,
+      "balance": 4573.04,
+      "type": "EFTPOS",
+      "hash": "fixture_hash_012",
+      "meta": {},
+      "category": {
+        "_id": "nzfcc_ckouvvyn3002s08mle90qdtmo",
+        "name": "Pharmacies",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw000yhk4mddaobwu7",
+            "name": "Health"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_fixture-pharmacy",
+        "name": "Fixture Pharmacy",
+        "website": "https://example.com/fixture-pharmacy"
+      }
+    },
+    {
+      "_id": "trans_fixture_013",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-08T09:12:00.000Z",
+      "updated_at": "2026-09-08T09:12:00.000Z",
+      "date": "2026-09-08T09:12:00.000Z",
+      "description": "Sample Gym Membership",
+      "amount": -21,
+      "balance": 4552.04,
+      "type": "DIRECT DEBIT",
+      "hash": "fixture_hash_013",
+      "meta": {},
+      "category": {
+        "_id": "nzfcc_ckouvvywj004608mlho382gvn",
+        "name": "Gyms, fitness, aquatic facilities, yoga, pilates",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw000yhk4mddaobwu7",
+            "name": "Health"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_sample-gym",
+        "name": "Sample Gym",
+        "website": "https://example.com/sample-gym"
+      }
+    },
+    {
+      "_id": "trans_fixture_014",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-08T09:13:00.000Z",
+      "updated_at": "2026-09-08T09:13:00.000Z",
+      "date": "2026-09-08T09:13:00.000Z",
+      "description": "Example Bus Card Top Up",
+      "amount": -20,
+      "balance": 4532.04,
+      "type": "CREDIT CARD",
+      "hash": "fixture_hash_014",
+      "meta": {
+        "card_suffix": "0000"
+      },
+      "category": {
+        "_id": "nzfcc_clahcegjo000008l250of62eq",
+        "name": "Bus and shuttle transport services",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw000whk4m577xhmf3",
+            "name": "Transport"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_example-bus-card",
+        "name": "Example Bus Card",
+        "website": "https://example.com/example-bus-card"
+      }
+    },
+    {
+      "_id": "trans_fixture_015",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-09T09:14:00.000Z",
+      "updated_at": "2026-09-09T09:14:00.000Z",
+      "date": "2026-09-09T09:14:00.000Z",
+      "description": "Fixture Flat White Co Cuba St",
+      "amount": -11,
+      "balance": 4521.04,
+      "type": "CREDIT CARD",
+      "hash": "fixture_hash_015",
+      "meta": {
+        "card_suffix": "0000"
+      },
+      "category": {
+        "_id": "nzfcc_ckouvvyw1004408mlhy158i7j",
+        "name": "Cafes and restaurants",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw0011hk4m6hlk9fq0",
+            "name": "Lifestyle"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_fixture-flat-white-co",
+        "name": "Fixture Flat White Co",
+        "website": "https://example.com/fixture-flat-white-co"
+      }
+    },
+    {
+      "_id": "trans_fixture_016",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-09T09:15:00.000Z",
+      "updated_at": "2026-09-09T09:15:00.000Z",
+      "date": "2026-09-09T09:15:00.000Z",
+      "description": "Sample Superette Te Aro",
+      "amount": -87.95,
+      "balance": 4433.09,
+      "type": "EFTPOS",
+      "hash": "fixture_hash_016",
+      "meta": {},
+      "category": {
+        "_id": "nzfcc_ckouvvy84001608ml5p6z4d8j",
+        "name": "Supermarkets and grocery stores",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw000xhk4mf7mg2j1z",
+            "name": "Food"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_sample-superette",
+        "name": "Sample Superette",
+        "website": "https://example.com/sample-superette"
+      }
+    },
+    {
+      "_id": "trans_fixture_017",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-10T09:16:00.000Z",
+      "updated_at": "2026-09-10T09:16:00.000Z",
+      "date": "2026-09-10T09:16:00.000Z",
+      "description": "Example Fibre Broadband",
+      "amount": -79.99,
+      "balance": 4353.1,
+      "type": "DIRECT DEBIT",
+      "hash": "fixture_hash_017",
+      "meta": {},
+      "category": {
+        "_id": "nzfcc_cl2pejp4g000109mae32z2zhb",
+        "name": "Internet services",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw000vhk4m46ce9nrt",
+            "name": "Utilities"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_example-fibre",
+        "name": "Example Fibre",
+        "website": "https://example.com/example-fibre"
+      }
+    },
+    {
+      "_id": "trans_fixture_018",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-11T09:17:00.000Z",
+      "updated_at": "2026-09-11T09:17:00.000Z",
+      "date": "2026-09-11T09:17:00.000Z",
+      "description": "Sample Books Wellington",
+      "amount": -34.99,
+      "balance": 4318.11,
+      "type": "EFTPOS",
+      "hash": "fixture_hash_018",
+      "meta": {},
+      "category": {
+        "_id": "nzfcc_ckouvvyjq002g08mlc0h7f3ke",
+        "name": "Book stores",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw000zhk4m0cru14rw",
+            "name": "Education"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_sample-books",
+        "name": "Sample Books",
+        "website": "https://example.com/sample-books"
+      }
+    },
+    {
+      "_id": "trans_fixture_019",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-11T09:18:00.000Z",
+      "updated_at": "2026-09-11T09:18:00.000Z",
+      "date": "2026-09-11T09:18:00.000Z",
+      "description": "Fixture Burger Bar",
+      "amount": -19.5,
+      "balance": 4298.61,
+      "type": "CREDIT CARD",
+      "hash": "fixture_hash_019",
+      "meta": {
+        "card_suffix": "0000"
+      },
+      "category": {
+        "_id": "nzfcc_ckouvvywi004508mlacrd41wf",
+        "name": "Fast food stores",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw0011hk4m6hlk9fq0",
+            "name": "Lifestyle"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_fixture-burger-bar",
+        "name": "Fixture Burger Bar",
+        "website": "https://example.com/fixture-burger-bar"
+      }
+    },
+    {
+      "_id": "trans_fixture_020",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-12T09:19:00.000Z",
+      "updated_at": "2026-09-12T09:19:00.000Z",
+      "date": "2026-09-12T09:19:00.000Z",
+      "description": "Sample Superette Te Aro",
+      "amount": -52.18,
+      "balance": 4246.43,
+      "type": "EFTPOS",
+      "hash": "fixture_hash_020",
+      "meta": {},
+      "category": {
+        "_id": "nzfcc_ckouvvy84001608ml5p6z4d8j",
+        "name": "Supermarkets and grocery stores",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw000xhk4mf7mg2j1z",
+            "name": "Food"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_sample-superette",
+        "name": "Sample Superette",
+        "website": "https://example.com/sample-superette"
+      }
+    },
+    {
+      "_id": "trans_fixture_021",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-13T09:20:00.000Z",
+      "updated_at": "2026-09-13T09:20:00.000Z",
+      "date": "2026-09-13T09:20:00.000Z",
+      "description": "Example Hardware Lower Hutt",
+      "amount": -46.7,
+      "balance": 4199.73,
+      "type": "EFTPOS",
+      "hash": "fixture_hash_021",
+      "meta": {},
+      "category": {
+        "_id": "nzfcc_ckouvvxz8000n08ml5gcoffpm",
+        "name": "Hardware equipment and supplies",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw000uhk4m20nvc6m1",
+            "name": "Household"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_example-hardware",
+        "name": "Example Hardware",
+        "website": "https://example.com/example-hardware"
+      }
+    },
+    {
+      "_id": "trans_fixture_022",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-13T09:21:00.000Z",
+      "updated_at": "2026-09-13T09:21:00.000Z",
+      "date": "2026-09-13T09:21:00.000Z",
+      "description": "Example Mobile Plan",
+      "amount": -35,
+      "balance": 4164.73,
+      "type": "DIRECT DEBIT",
+      "hash": "fixture_hash_022",
+      "meta": {},
+      "category": {
+        "_id": "nzfcc_ckouvvz0y004t08ml8zey1jiv",
+        "name": "Telecommunication services",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw000vhk4m46ce9nrt",
+            "name": "Utilities"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_example-mobile",
+        "name": "Example Mobile",
+        "website": "https://example.com/example-mobile"
+      }
+    },
+    {
+      "_id": "trans_fixture_023",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-14T09:22:00.000Z",
+      "updated_at": "2026-09-14T09:22:00.000Z",
+      "date": "2026-09-14T09:22:00.000Z",
+      "description": "Fixture Taproom Courtenay Pl",
+      "amount": -28,
+      "balance": 4136.73,
+      "type": "CREDIT CARD",
+      "hash": "fixture_hash_023",
+      "meta": {
+        "card_suffix": "0000"
+      },
+      "category": {
+        "_id": "nzfcc_ckouvvyvh004108mlfau3hrm2",
+        "name": "Bars, pubs, nightclubs",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw0011hk4m6hlk9fq0",
+            "name": "Lifestyle"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_fixture-taproom",
+        "name": "Fixture Taproom",
+        "website": "https://example.com/fixture-taproom"
+      }
+    },
+    {
+      "_id": "trans_fixture_024",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-15T09:23:00.000Z",
+      "updated_at": "2026-09-15T09:23:00.000Z",
+      "date": "2026-09-15T09:23:00.000Z",
+      "description": "SAMPLE EMPLOYER LTD SALARY",
+      "amount": 4250,
+      "balance": 8386.73,
+      "type": "DIRECT CREDIT",
+      "hash": "fixture_hash_024",
+      "meta": {}
+    },
+    {
+      "_id": "trans_fixture_025",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-15T09:24:00.000Z",
+      "updated_at": "2026-09-15T09:24:00.000Z",
+      "date": "2026-09-15T09:24:00.000Z",
+      "description": "Sample Superette Te Aro",
+      "amount": -73.41,
+      "balance": 8313.32,
+      "type": "EFTPOS",
+      "hash": "fixture_hash_025",
+      "meta": {},
+      "category": {
+        "_id": "nzfcc_ckouvvy84001608ml5p6z4d8j",
+        "name": "Supermarkets and grocery stores",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw000xhk4mf7mg2j1z",
+            "name": "Food"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_sample-superette",
+        "name": "Sample Superette",
+        "website": "https://example.com/sample-superette"
+      }
+    },
+    {
+      "_id": "trans_fixture_026",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-16T09:25:00.000Z",
+      "updated_at": "2026-09-16T09:25:00.000Z",
+      "date": "2026-09-16T09:25:00.000Z",
+      "description": "SAMPLE LANDLORD RENT",
+      "amount": -620,
+      "balance": 7693.32,
+      "type": "STANDING ORDER",
+      "hash": "fixture_hash_026",
+      "meta": {
+        "particulars": "SAMPLE",
+        "code": "RENT",
+        "reference": "FIXTURE"
+      },
+      "category": {
+        "_id": "nzfcc_cl2pae1ns000009jt55t2cdir",
+        "name": "Rent for permanent accommodation",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw000thk4mefilhht7",
+            "name": "Housing"
+          }
+        }
+      }
+    },
+    {
+      "_id": "trans_fixture_027",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-16T09:26:00.000Z",
+      "updated_at": "2026-09-16T09:26:00.000Z",
+      "date": "2026-09-16T09:26:00.000Z",
+      "description": "Fixture Flat White Co Cuba St",
+      "amount": -5.5,
+      "balance": 7687.82,
+      "type": "CREDIT CARD",
+      "hash": "fixture_hash_027",
+      "meta": {
+        "card_suffix": "0000"
+      },
+      "category": {
+        "_id": "nzfcc_ckouvvyw1004408mlhy158i7j",
+        "name": "Cafes and restaurants",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw0011hk4m6hlk9fq0",
+            "name": "Lifestyle"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_fixture-flat-white-co",
+        "name": "Fixture Flat White Co",
+        "website": "https://example.com/fixture-flat-white-co"
+      }
+    },
+    {
+      "_id": "trans_fixture_028",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-17T09:27:00.000Z",
+      "updated_at": "2026-09-17T09:27:00.000Z",
+      "date": "2026-09-17T09:27:00.000Z",
+      "description": "Example Fuel Petone",
+      "amount": -76.33,
+      "balance": 7611.49,
+      "type": "EFTPOS",
+      "hash": "fixture_hash_028",
+      "meta": {},
+      "category": {
+        "_id": "nzfcc_ckouvvytq003o08mlbcy57jft",
+        "name": "Fuel stations",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw000whk4m577xhmf3",
+            "name": "Transport"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_example-fuel",
+        "name": "Example Fuel",
+        "website": "https://example.com/example-fuel"
+      }
+    },
+    {
+      "_id": "trans_fixture_029",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-18T09:28:00.000Z",
+      "updated_at": "2026-09-18T09:28:00.000Z",
+      "date": "2026-09-18T09:28:00.000Z",
+      "description": "Sample Bakehouse Ponsonby",
+      "amount": -9.6,
+      "balance": 7601.89,
+      "type": "EFTPOS",
+      "hash": "fixture_hash_029",
+      "meta": {},
+      "category": {
+        "_id": "nzfcc_ckouvvy98001a08ml3l180boh",
+        "name": "Bakeries",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw000xhk4mf7mg2j1z",
+            "name": "Food"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_sample-bakehouse",
+        "name": "Sample Bakehouse",
+        "website": "https://example.com/sample-bakehouse"
+      }
+    },
+    {
+      "_id": "trans_fixture_030",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-19T09:29:00.000Z",
+      "updated_at": "2026-09-19T09:29:00.000Z",
+      "date": "2026-09-19T09:29:00.000Z",
+      "description": "Sample Superette Te Aro",
+      "amount": -38.27,
+      "balance": 7563.62,
+      "type": "EFTPOS",
+      "hash": "fixture_hash_030",
+      "meta": {},
+      "category": {
+        "_id": "nzfcc_ckouvvy84001608ml5p6z4d8j",
+        "name": "Supermarkets and grocery stores",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw000xhk4mf7mg2j1z",
+            "name": "Food"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_sample-superette",
+        "name": "Sample Superette",
+        "website": "https://example.com/sample-superette"
+      }
+    },
+    {
+      "_id": "trans_fixture_031",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-20T09:30:00.000Z",
+      "updated_at": "2026-09-20T09:30:00.000Z",
+      "date": "2026-09-20T09:30:00.000Z",
+      "description": "Fixture Burger Bar",
+      "amount": -22,
+      "balance": 7541.62,
+      "type": "CREDIT CARD",
+      "hash": "fixture_hash_031",
+      "meta": {
+        "card_suffix": "0000"
+      },
+      "category": {
+        "_id": "nzfcc_ckouvvywi004508mlacrd41wf",
+        "name": "Fast food stores",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw0011hk4m6hlk9fq0",
+            "name": "Lifestyle"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_fixture-burger-bar",
+        "name": "Fixture Burger Bar",
+        "website": "https://example.com/fixture-burger-bar"
+      }
+    },
+    {
+      "_id": "trans_fixture_032",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-20T09:31:00.000Z",
+      "updated_at": "2026-09-20T09:31:00.000Z",
+      "date": "2026-09-20T09:31:00.000Z",
+      "description": "TRANSFER TO SAVINGS",
+      "amount": -500,
+      "balance": 7041.62,
+      "type": "TRANSFER",
+      "hash": "fixture_hash_032",
+      "meta": {
+        "other_account": "00-0000-0000000-00",
+        "reference": "FIXTURE"
+      }
+    },
+    {
+      "_id": "trans_fixture_033",
+      "_account": "acc_fixture_savings",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-20T09:32:00.000Z",
+      "updated_at": "2026-09-20T09:32:00.000Z",
+      "date": "2026-09-20T09:32:00.000Z",
+      "description": "TRANSFER FROM EVERYDAY",
+      "amount": 500,
+      "balance": 13000,
+      "type": "TRANSFER",
+      "hash": "fixture_hash_033",
+      "meta": {
+        "other_account": "00-0000-0000000-00",
+        "reference": "FIXTURE"
+      }
+    },
+    {
+      "_id": "trans_fixture_034",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-21T09:33:00.000Z",
+      "updated_at": "2026-09-21T09:33:00.000Z",
+      "date": "2026-09-21T09:33:00.000Z",
+      "description": "Fixture Pharmacy Kelburn",
+      "amount": -15.9,
+      "balance": 7025.72,
+      "type": "EFTPOS",
+      "hash": "fixture_hash_034",
+      "meta": {},
+      "category": {
+        "_id": "nzfcc_ckouvvyn3002s08mle90qdtmo",
+        "name": "Pharmacies",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw000yhk4mddaobwu7",
+            "name": "Health"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_fixture-pharmacy",
+        "name": "Fixture Pharmacy",
+        "website": "https://example.com/fixture-pharmacy"
+      }
+    },
+    {
+      "_id": "trans_fixture_035",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-22T09:34:00.000Z",
+      "updated_at": "2026-09-22T09:34:00.000Z",
+      "date": "2026-09-22T09:34:00.000Z",
+      "description": "Example Bus Card Top Up",
+      "amount": -20,
+      "balance": 7005.72,
+      "type": "CREDIT CARD",
+      "hash": "fixture_hash_035",
+      "meta": {
+        "card_suffix": "0000"
+      },
+      "category": {
+        "_id": "nzfcc_clahcegjo000008l250of62eq",
+        "name": "Bus and shuttle transport services",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw000whk4m577xhmf3",
+            "name": "Transport"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_example-bus-card",
+        "name": "Example Bus Card",
+        "website": "https://example.com/example-bus-card"
+      }
+    },
+    {
+      "_id": "trans_fixture_036",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-22T09:35:00.000Z",
+      "updated_at": "2026-09-22T09:35:00.000Z",
+      "date": "2026-09-22T09:35:00.000Z",
+      "description": "Sample Superette Te Aro",
+      "amount": -96.12,
+      "balance": 6909.6,
+      "type": "EFTPOS",
+      "hash": "fixture_hash_036",
+      "meta": {},
+      "category": {
+        "_id": "nzfcc_ckouvvy84001608ml5p6z4d8j",
+        "name": "Supermarkets and grocery stores",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw000xhk4mf7mg2j1z",
+            "name": "Food"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_sample-superette",
+        "name": "Sample Superette",
+        "website": "https://example.com/sample-superette"
+      }
+    },
+    {
+      "_id": "trans_fixture_037",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-23T09:36:00.000Z",
+      "updated_at": "2026-09-23T09:36:00.000Z",
+      "date": "2026-09-23T09:36:00.000Z",
+      "description": "Fixture Flat White Co Cuba St",
+      "amount": -11,
+      "balance": 6898.6,
+      "type": "CREDIT CARD",
+      "hash": "fixture_hash_037",
+      "meta": {
+        "card_suffix": "0000"
+      },
+      "category": {
+        "_id": "nzfcc_ckouvvyw1004408mlhy158i7j",
+        "name": "Cafes and restaurants",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw0011hk4m6hlk9fq0",
+            "name": "Lifestyle"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_fixture-flat-white-co",
+        "name": "Fixture Flat White Co",
+        "website": "https://example.com/fixture-flat-white-co"
+      }
+    },
+    {
+      "_id": "trans_fixture_038",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-24T09:37:00.000Z",
+      "updated_at": "2026-09-24T09:37:00.000Z",
+      "date": "2026-09-24T09:37:00.000Z",
+      "description": "Fixture Taproom Courtenay Pl",
+      "amount": -42.5,
+      "balance": 6856.1,
+      "type": "CREDIT CARD",
+      "hash": "fixture_hash_038",
+      "meta": {
+        "card_suffix": "0000"
+      },
+      "category": {
+        "_id": "nzfcc_ckouvvyvh004108mlfau3hrm2",
+        "name": "Bars, pubs, nightclubs",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw0011hk4m6hlk9fq0",
+            "name": "Lifestyle"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_fixture-taproom",
+        "name": "Fixture Taproom",
+        "website": "https://example.com/fixture-taproom"
+      }
+    },
+    {
+      "_id": "trans_fixture_039",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-25T09:38:00.000Z",
+      "updated_at": "2026-09-25T09:38:00.000Z",
+      "date": "2026-09-25T09:38:00.000Z",
+      "description": "Sample Superette Te Aro",
+      "amount": -44.89,
+      "balance": 6811.21,
+      "type": "EFTPOS",
+      "hash": "fixture_hash_039",
+      "meta": {},
+      "category": {
+        "_id": "nzfcc_ckouvvy84001608ml5p6z4d8j",
+        "name": "Supermarkets and grocery stores",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw000xhk4mf7mg2j1z",
+            "name": "Food"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_sample-superette",
+        "name": "Sample Superette",
+        "website": "https://example.com/sample-superette"
+      }
+    },
+    {
+      "_id": "trans_fixture_040",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-26T09:39:00.000Z",
+      "updated_at": "2026-09-26T09:39:00.000Z",
+      "date": "2026-09-26T09:39:00.000Z",
+      "description": "Sample Books Wellington",
+      "amount": -19.99,
+      "balance": 6791.22,
+      "type": "EFTPOS",
+      "hash": "fixture_hash_040",
+      "meta": {},
+      "category": {
+        "_id": "nzfcc_ckouvvyjq002g08mlc0h7f3ke",
+        "name": "Book stores",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw000zhk4m0cru14rw",
+            "name": "Education"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_sample-books",
+        "name": "Sample Books",
+        "website": "https://example.com/sample-books"
+      }
+    },
+    {
+      "_id": "trans_fixture_041",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-27T09:40:00.000Z",
+      "updated_at": "2026-09-27T09:40:00.000Z",
+      "date": "2026-09-27T09:40:00.000Z",
+      "description": "Example Fuel Petone",
+      "amount": -69.05,
+      "balance": 6722.17,
+      "type": "EFTPOS",
+      "hash": "fixture_hash_041",
+      "meta": {},
+      "category": {
+        "_id": "nzfcc_ckouvvytq003o08mlbcy57jft",
+        "name": "Fuel stations",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw000whk4m577xhmf3",
+            "name": "Transport"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_example-fuel",
+        "name": "Example Fuel",
+        "website": "https://example.com/example-fuel"
+      }
+    },
+    {
+      "_id": "trans_fixture_042",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-27T09:41:00.000Z",
+      "updated_at": "2026-09-27T09:41:00.000Z",
+      "date": "2026-09-27T09:41:00.000Z",
+      "description": "SAMPLE REFUND FROM RETAILER",
+      "amount": 34.99,
+      "balance": 6757.16,
+      "type": "CREDIT",
+      "hash": "fixture_hash_042",
+      "meta": {},
+      "category": {
+        "_id": "nzfcc_ckouvvyjq002g08mlc0h7f3ke",
+        "name": "Book stores",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw000zhk4m0cru14rw",
+            "name": "Education"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_sample-books",
+        "name": "Sample Books",
+        "website": "https://example.com/sample-books"
+      }
+    },
+    {
+      "_id": "trans_fixture_043",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-28T09:42:00.000Z",
+      "updated_at": "2026-09-28T09:42:00.000Z",
+      "date": "2026-09-28T09:42:00.000Z",
+      "description": "Sample Superette Te Aro",
+      "amount": -58.6,
+      "balance": 6698.56,
+      "type": "EFTPOS",
+      "hash": "fixture_hash_043",
+      "meta": {},
+      "category": {
+        "_id": "nzfcc_ckouvvy84001608ml5p6z4d8j",
+        "name": "Supermarkets and grocery stores",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw000xhk4mf7mg2j1z",
+            "name": "Food"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_sample-superette",
+        "name": "Sample Superette",
+        "website": "https://example.com/sample-superette"
+      }
+    },
+    {
+      "_id": "trans_fixture_044",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-28T09:43:00.000Z",
+      "updated_at": "2026-09-28T09:43:00.000Z",
+      "date": "2026-09-28T09:43:00.000Z",
+      "description": "Fixture Flat White Co Cuba St",
+      "amount": -5.5,
+      "balance": 6693.06,
+      "type": "CREDIT CARD",
+      "hash": "fixture_hash_044",
+      "meta": {
+        "card_suffix": "0000"
+      },
+      "category": {
+        "_id": "nzfcc_ckouvvyw1004408mlhy158i7j",
+        "name": "Cafes and restaurants",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw0011hk4m6hlk9fq0",
+            "name": "Lifestyle"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_fixture-flat-white-co",
+        "name": "Fixture Flat White Co",
+        "website": "https://example.com/fixture-flat-white-co"
+      }
+    },
+    {
+      "_id": "trans_fixture_045",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-29T09:44:00.000Z",
+      "updated_at": "2026-09-29T09:44:00.000Z",
+      "date": "2026-09-29T09:44:00.000Z",
+      "description": "SAMPLE EMPLOYER LTD SALARY",
+      "amount": 4250,
+      "balance": 10943.06,
+      "type": "DIRECT CREDIT",
+      "hash": "fixture_hash_045",
+      "meta": {}
+    },
+    {
+      "_id": "trans_fixture_046",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-29T09:45:00.000Z",
+      "updated_at": "2026-09-29T09:45:00.000Z",
+      "date": "2026-09-29T09:45:00.000Z",
+      "description": "Sample Bakehouse Ponsonby",
+      "amount": -14.2,
+      "balance": 10928.86,
+      "type": "EFTPOS",
+      "hash": "fixture_hash_046",
+      "meta": {},
+      "category": {
+        "_id": "nzfcc_ckouvvy98001a08ml3l180boh",
+        "name": "Bakeries",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw000xhk4mf7mg2j1z",
+            "name": "Food"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_sample-bakehouse",
+        "name": "Sample Bakehouse",
+        "website": "https://example.com/sample-bakehouse"
+      }
+    },
+    {
+      "_id": "trans_fixture_047",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-30T09:46:00.000Z",
+      "updated_at": "2026-09-30T09:46:00.000Z",
+      "date": "2026-09-30T09:46:00.000Z",
+      "description": "SAMPLE LANDLORD RENT",
+      "amount": -620,
+      "balance": 10308.86,
+      "type": "STANDING ORDER",
+      "hash": "fixture_hash_047",
+      "meta": {
+        "particulars": "SAMPLE",
+        "code": "RENT",
+        "reference": "FIXTURE"
+      },
+      "category": {
+        "_id": "nzfcc_cl2pae1ns000009jt55t2cdir",
+        "name": "Rent for permanent accommodation",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw000thk4mefilhht7",
+            "name": "Housing"
+          }
+        }
+      }
+    },
+    {
+      "_id": "trans_fixture_048",
+      "_account": "acc_fixture_savings",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-09-30T09:47:00.000Z",
+      "updated_at": "2026-09-30T09:47:00.000Z",
+      "date": "2026-09-30T09:47:00.000Z",
+      "description": "SAMPLE BANK INTEREST",
+      "amount": 3.17,
+      "balance": 13003.17,
+      "type": "INTEREST",
+      "hash": "fixture_hash_048",
+      "meta": {}
+    },
+    {
+      "_id": "trans_fixture_049",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-10-01T09:48:00.000Z",
+      "updated_at": "2026-10-01T09:48:00.000Z",
+      "date": "2026-10-01T09:48:00.000Z",
+      "description": "Sample Superette Te Aro",
+      "amount": -67.03,
+      "balance": 10241.83,
+      "type": "EFTPOS",
+      "hash": "fixture_hash_049",
+      "meta": {},
+      "category": {
+        "_id": "nzfcc_ckouvvy84001608ml5p6z4d8j",
+        "name": "Supermarkets and grocery stores",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw000xhk4mf7mg2j1z",
+            "name": "Food"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_sample-superette",
+        "name": "Sample Superette",
+        "website": "https://example.com/sample-superette"
+      }
+    },
+    {
+      "_id": "trans_fixture_050",
+      "_account": "acc_fixture_everyday",
+      "_user": "user_fixture",
+      "_connection": "conn_fixture_bank",
+      "created_at": "2026-10-01T09:49:00.000Z",
+      "updated_at": "2026-10-01T09:49:00.000Z",
+      "date": "2026-10-01T09:49:00.000Z",
+      "description": "Fixture Streaming Ltd",
+      "amount": -18.99,
+      "balance": 10222.84,
+      "type": "DIRECT DEBIT",
+      "hash": "fixture_hash_050",
+      "meta": {},
+      "category": {
+        "_id": "nzfcc_ckouvvzhn006t08mlg81xhlbx",
+        "name": "Media and entertainment streaming services",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_clasr0ysw0011hk4m6hlk9fq0",
+            "name": "Lifestyle"
+          }
+        }
+      },
+      "merchant": {
+        "_id": "merchant_fixture_fixture-streaming",
+        "name": "Fixture Streaming",
+        "website": "https://example.com/fixture-streaming"
+      }
+    }
+  ]
+}

@@ -1,6 +1,44 @@
-import { spending } from '../../../spending.js'
+import { readFile } from 'node:fs/promises'
+import * as Path from 'node:path'
+import * as URL from 'node:url'
 
-const transactionsSeeds = spending.items.map((txn) => {
+// Seeds `transactions` from Akahu-shaped data (an envelope with `items`).
+//
+// Default source is the committed synthetic fixture, so a fresh clone seeds
+// with no private data present (M1 #7). To seed from a private Akahu dump
+// instead, set DIVVY_SEED_TRANSACTIONS to a `.json` file or a `.js` module
+// that exports the envelope as `spending` or as its default export. A
+// relative path is resolved from the repository root, so the old private
+// file still works as `DIVVY_SEED_TRANSACTIONS=spending.js`. That file is
+// gitignored and must stay that way.
+
+const __dirname = Path.dirname(URL.fileURLToPath(import.meta.url))
+const REPO_ROOT = Path.resolve(__dirname, '..', '..', '..')
+const FIXTURE_PATH = Path.join(__dirname, '..', 'fixtures', 'transactions.json')
+
+async function loadEnvelope() {
+  const override = process.env.DIVVY_SEED_TRANSACTIONS
+  const path = override ? Path.resolve(REPO_ROOT, override) : FIXTURE_PATH
+
+  let envelope
+  if (path.endsWith('.json')) {
+    envelope = JSON.parse(await readFile(path, 'utf8'))
+  } else {
+    const mod = await import(URL.pathToFileURL(path).href)
+    envelope = mod.spending ?? mod.default
+  }
+
+  if (!envelope || !Array.isArray(envelope.items)) {
+    throw new Error(
+      `Seed source ${path} has no "items" array (expected an Akahu transactions envelope)`,
+    )
+  }
+  return envelope.items
+}
+
+function toRow(txn) {
+  const meta = txn.meta ?? {}
+  const group = txn.category?.groups?.personal_finance
   return {
     akahu_id: txn._id,
     account_id: txn._account,
@@ -16,33 +54,31 @@ const transactionsSeeds = spending.items.map((txn) => {
     hash: txn.hash,
     category_id: txn.category?._id || null,
     category_name: txn.category?.name || null,
-    category_group_id: txn.category?.groups.personal_finance._id || null,
-    category_group_name: txn.category?.groups.personal_finance.name || null,
-    particulars: txn.meta.particulars || null,
-    code: txn.meta.code || null,
-    reference: txn.meta.reference || null,
-    other_account: txn.meta.other_account || null,
-    logo: txn.meta.logo || null,
-    conversion_amount: txn.meta.conversion_amount || null,
-    conversion_currency: txn.meta.conversion_currency || null,
-    conversion_rate: txn.meta.conversion_rate || null,
-    card_suffix: txn.meta.card_suffix || null,
+    category_group_id: group?._id || null,
+    category_group_name: group?.name || null,
+    particulars: meta.particulars || null,
+    code: meta.code || null,
+    reference: meta.reference || null,
+    other_account: meta.other_account || null,
+    logo: meta.logo || null,
+    conversion_amount: meta.conversion_amount || null,
+    conversion_currency: meta.conversion_currency || null,
+    conversion_rate: meta.conversion_rate || null,
+    card_suffix: meta.card_suffix || null,
     merchant_id: txn.merchant?._id || null,
     merchant_name: txn.merchant?.name || null,
     merchant_website: txn.merchant?.website || null,
     merchant_logo: txn.merchant?.logo || null,
   }
-})
-
-console.log(transactionsSeeds)
+}
 
 /**
  * @param { import("knex").Knex } knex
  * @returns { Promise<void> }
  */
-
 export async function seed(knex) {
-  // Deletes ALL existing entries
+  const rows = (await loadEnvelope()).map(toRow)
   await knex('transactions').del()
-  await knex('transactions').insert(transactionsSeeds)
+  // SQLite caps bound parameters per statement; insert in batches.
+  await knex.batchInsert('transactions', rows, 25)
 }
