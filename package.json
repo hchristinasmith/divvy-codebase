@@ -1,13 +1,8 @@
 {
-  "name": "boilerplate-fullstack-routing",
+  "name": "divvy",
   "type": "module",
-  "version": "2.0.0",
+  "version": "0.1.0",
   "main": "server/index.js",
-  "license": "MIT",
-  "keywords": [
-    "fullstack",
-    "routing"
-  ],
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
