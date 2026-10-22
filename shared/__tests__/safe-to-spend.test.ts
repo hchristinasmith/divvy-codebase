@@ -287,6 +287,33 @@ const CASES: Case[] = [
     },
   },
   {
+    // The same personal tax pot seen from Strawb: it is not Strawb's.
+    // liquid = s-cur 200000; bills = supplier 40000; budgets = software 0
+    // tax    = owed 280000 − pot 30000 (s-tax only; p-tax 50000 is personal)
+    //        = hold 250000
+    // safe   = 200000 − 40000 − 0 − 250000 = −90000; short 90000
+    // per day = −90000 ÷ 5 = −18000
+    name: 'strawb scope with a personal tax pot: only the Strawb pot nets',
+    input: base({
+      scope: 'strawb',
+      accounts: [...ACCOUNTS, { id: 'p-tax', scope: 'personal', role: 'tax_pot', balanceCents: 50000 }],
+    }),
+    expected: {
+      scope: 'strawb',
+      ...PAYDAY_OCT,
+      liquidCents: 200000,
+      unpaidBillsCents: 40000,
+      remainingBudgetCents: 0,
+      taxOwedCents: 280000,
+      taxPotCents: 30000,
+      taxHoldCents: 250000,
+      safeCents: -90000,
+      shortByCents: 90000,
+      perDayCents: -18000,
+      budgets: [SOFTWARE],
+    },
+  },
+  {
     // An overdrawn current account is negative liquid, not zero.
     // liquid = −5000; bills 0; budgets 0; tax 0
     // safe = −5000; short 5000; per day = −5000 ÷ 5 = −1000
@@ -576,7 +603,7 @@ describe('safeToSpend: the fixed table', () => {
   })
 
   it('All is Personal plus Strawb when only Strawb holds tax', () => {
-    // 174000 + (−90000) = 84000, the three rows above.
+    // 174000 + (−90000) = 84000: the All, Personal and Strawb rows above.
     const all = safeToSpend(base({ scope: 'all' })).safeCents
     const personal = safeToSpend(base({ scope: 'personal' })).safeCents
     const strawb = safeToSpend(base({ scope: 'strawb' })).safeCents
@@ -714,6 +741,24 @@ describe('refusals', () => {
       'a negative budget limit',
       { budgets: [{ id: 'g', scope: 'personal', category: 'Groceries', limitCents: -1 }] },
       /limitCents of budget "g" must not be negative/,
+    ],
+    [
+      'a fractional balance on an account outside the scope',
+      {
+        scope: 'personal',
+        accounts: [...ACCOUNTS, { id: 's-odd', scope: 'strawb', role: 'current', balanceCents: 10.5 }],
+      },
+      /balanceCents of account "s-odd" must be an integer number of cents/,
+    ],
+    [
+      'a transaction on an unknown account when no budget is in scope',
+      {
+        budgets: [],
+        transactions: [
+          { accountId: 'ghost', date: '2026-10-01', amountCents: -100, category: 'Groceries', status: 'settled' },
+        ],
+      },
+      /unknown account "ghost"/,
     ],
     ['an unknown scope', { scope: 'business' as unknown as 'all' }, /scope must be all, personal or strawb/],
   ])('refuses %s', (_name, overrides, message) => {

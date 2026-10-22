@@ -308,9 +308,26 @@ export function safeToSpend(input: SafeToSpendInput): SafeToSpendResult {
   const next = nextPayday(today, paydayDay)
   const daysToPayday = daysBetween(today, next)
 
-  const accounts = input.accounts.filter((a) => inScope(scope, a.scope))
-  for (const a of accounts)
+  // Every row is checked before the scope filter, so the same rows never
+  // succeed in one scope and throw in another.
+  const known = new Set(input.accounts.map((a) => a.id))
+  for (const a of input.accounts)
     assertCents(a.balanceCents, `balanceCents of account "${a.id}"`)
+  for (const b of input.bills) {
+    assertNonNegativeCents(b.amountCents, `amountCents of bill "${b.id}"`)
+    parseDate(b.dueDate, `dueDate of bill "${b.id}"`)
+  }
+  for (const b of input.budgets)
+    assertNonNegativeCents(b.limitCents, `limitCents of budget "${b.id}"`)
+  for (const tx of input.transactions) {
+    assertCents(tx.amountCents, 'transaction amountCents')
+    parseDate(tx.date, 'transaction date')
+    if (!known.has(tx.accountId)) {
+      throw new RangeError(`transaction on unknown account "${tx.accountId}"`)
+    }
+  }
+
+  const accounts = input.accounts.filter((a) => inScope(scope, a.scope))
 
   const liquidCents = sumCents(
     accounts.filter((a) => a.role === 'current').map((a) => a.balanceCents),
@@ -319,18 +336,13 @@ export function safeToSpend(input: SafeToSpendInput): SafeToSpendResult {
   const unpaidBillsCents = sumCents(
     input.bills
       .filter((b) => inScope(scope, b.scope))
-      .filter((b) => {
-        assertNonNegativeCents(b.amountCents, `amountCents of bill "${b.id}"`)
-        parseDate(b.dueDate, `dueDate of bill "${b.id}"`)
-        return !b.paid && b.dueDate <= next
-      })
+      .filter((b) => !b.paid && b.dueDate <= next)
       .map((b) => b.amountCents),
   )
 
   const budgets: BudgetLine[] = input.budgets
     .filter((b) => inScope(scope, b.scope))
     .map((b) => {
-      assertNonNegativeCents(b.limitCents, `limitCents of budget "${b.id}"`)
       const spentCents = budgetSpentCents({
         accounts: input.accounts,
         transactions: input.transactions,
