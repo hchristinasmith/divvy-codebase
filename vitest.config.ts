@@ -18,7 +18,7 @@ export default mergeConfig(
     test: {
       environment: 'node',
       environmentMatchGlobs: [['client/**', 'jsdom']],
-      include: ['{client,server,shared,models}/**/__tests__/**/*.test.{ts,tsx}'],
+      include: ['{client,server,shared,models,mcp}/**/__tests__/**/*.test.{ts,tsx}'],
     },
   }),
 )

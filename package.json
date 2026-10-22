@@ -10,9 +10,10 @@
     "dev": "run-p dev:client dev:server",
     "dev:client": "vite",
     "dev:server": "tsx watch server/index.ts",
-    "build": "run-s build:client build:server",
+    "build": "run-s build:client build:server build:mcp",
     "build:client": "vite build",
     "build:server": "esbuild --packages=external --platform=node --format=esm --outfile=dist/server.js --bundle server/index.ts",
+    "build:mcp": "esbuild --packages=external --platform=node --format=esm --bundle --loader:.sql=text --outfile=dist/mcp/index.js mcp/index.ts",
     "lint": "eslint --ext .js,.jsx,.ts,.tsx .",
     "typecheck": "tsc --noEmit",
     "knex": "knex --knexfile ./server/db/knexfile.js",
@@ -27,9 +28,48 @@
       "bundle.js",
       "dist/",
       "docs/"
+    ],
+    "overrides": [
+      {
+        "files": [
+          "mcp/**/*.ts",
+          "mcp/**/*.tsx",
+          "mcp/**/*.js",
+          "mcp/**/*.mjs",
+          "mcp/**/*.cjs"
+        ],
+        "rules": {
+          "no-restricted-imports": [
+            "error",
+            {
+              "patterns": [
+                {
+                  "group": [
+                    "**/server",
+                    "**/server/**",
+                    "@/**",
+                    "!@modelcontextprotocol/**"
+                  ],
+                  "message": "mcp/ must not import server/ (prd-03 Ruling 6); it reads only the scrubbed replica."
+                }
+              ]
+            }
+          ],
+          "no-console": [
+            "error",
+            {
+              "allow": [
+                "error",
+                "warn"
+              ]
+            }
+          ]
+        }
+      }
     ]
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@radix-ui/react-avatar": "^1.1.10",
     "@radix-ui/react-select": "^2.2.5",
     "@radix-ui/react-slot": "^1.2.3",
@@ -43,7 +83,8 @@
     "lucide-react": "^0.511.0",
     "sqlite3": "^5.1.6",
     "superagent": "^10.2.1",
-    "tailwind-merge": "^3.3.0"
+    "tailwind-merge": "^3.3.0",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@devacademy/eslint-config": "^1.10.1",

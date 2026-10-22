@@ -17,5 +17,5 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["client", "server", "shared", "src", "models", "data"]
+  "include": ["client", "server", "shared", "src", "models", "data", "mcp"]
 }
