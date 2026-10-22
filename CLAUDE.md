@@ -6,7 +6,7 @@ Divvy is Hannah's private personal-and-business money app: one user, one server 
 
 **Key commands:**
 
-- `npm run dev` — Vite client + tsx server together (ports 5173+ and 3000)
+- `npm run dev` — Vite client + tsx server together (ports 5173+ and 3005)
 - `npm test` — vitest; `npx vitest run <file>` for one file
 - `npm run knex -- migrate:latest` — migrations (knexfile at `server/db/knexfile.js`)
 - `npm run build` — client then server bundle to `dist/`
@@ -18,6 +18,7 @@ Divvy is Hannah's private personal-and-business money app: one user, one server 
 - [docs/decisions.md](docs/decisions.md) — D1–D5 architecture decisions. Read before touching deploy, auth, storage, AI, or notifications.
 - [docs/audit-2026-10-23.md](docs/audit-2026-10-23.md) — what exists, what is dead, 14 health issues (M1). Read before M1 work.
 - [docs/prds/](docs/prds/) — prd-01…05, blessed 2026-10-23. Every issue cites its PRD and ruling; code comments cite `prd-NN Ruling N`. Never renumber a PRD or ruling.
+- [docs/testing.md](docs/testing.md) — where tests live, environments, the `freshApp()` route-test pattern, assertion rules. Read before writing tests.
 - [docs/design/handoff.md](docs/design/handoff.md) — the 8-screen design, tokens and fonts. Read before UI work. Where it contradicts a PRD ruling (e.g. "Claude Code owns budget creation", "no third-party AI API"), the PRD wins.
 
 ---
@@ -69,8 +70,6 @@ npx tsc --noEmit
 npm run lint
 npx vitest run
 ```
-
-Until M1 #5 lands, `tsc` and `lint` may be red on main for reasons outside your diff. In that case: do not add new errors (compare the count before and after), say so in the PR body near the top, and never use `--no-verify`.
 
 ---
 
