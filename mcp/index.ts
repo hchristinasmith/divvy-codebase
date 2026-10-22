@@ -25,12 +25,10 @@ async function main(): Promise<void> {
 
   const ctx = await createContext()
   const server = createToolServer(ctx)
+  // When stdin closes (the SSH session goes away) nothing else holds the
+  // event loop open, so the process exits; the guard test's clean-env run
+  // pins that.
   await server.connect(new StdioServerTransport())
-  // The SDK's stdio transport does not notice stdin closing; close the
-  // server when the SSH session goes away.
-  process.stdin.once('close', () => {
-    void server.close()
-  })
 }
 
 main().catch(() => {

@@ -51,6 +51,12 @@ export type StaticSql = string & { readonly [staticSqlBrand]: true }
  * `${}` substitution; pass values through `ReadQuery.params` instead.
  */
 export function staticSql(strings: TemplateStringsArray, ...values: never[]): StaticSql {
+  // A template literal's strings array and its `raw` are frozen; this
+  // refuses an ordinary array passed by hand. It does not stop a deliberate
+  // frozen forgery, which only review (or a lint rule) can.
+  const fromTemplate =
+    Array.isArray(strings) && Object.isFrozen(strings) && Array.isArray(strings.raw) && Object.isFrozen(strings.raw)
+  if (!fromTemplate) throw new TypeError('staticSql is a template tag; call it as staticSql`...`')
   if (strings.length !== 1 || values.length !== 0) {
     throw new TypeError('staticSql takes no substitutions; bind values through params')
   }
@@ -192,10 +198,17 @@ export interface ToolFailure {
   readonly message: string
 }
 
+/**
+ * The codes a handler may refuse with. The dispatcher answers each with a
+ * fixed message, so nothing a handler writes reaches the client except its
+ * result; any other code is answered as `internal_error`.
+ */
+export type HandlerErrorCode = Extract<ToolErrorCode, 'not_implemented' | 'internal_error'>
+
 /** What a handler returns. A handler may also throw; that is an `error`. */
 export type HandlerOutcome =
   | { readonly ok: true; readonly result: ToolResult; readonly rowCount: number | null }
-  | { readonly ok: false; readonly error: ToolFailure }
+  | { readonly ok: false; readonly error: { readonly code: HandlerErrorCode } }
 
 // ---- Tool definitions (prd-03 Ruling 1) ----
 

@@ -45,6 +45,6 @@ export const listTransactions = defineTool({
   inputSchema,
   annotations: READ_ONLY_ANNOTATIONS,
   async handler() {
-    return notImplemented(NAME)
+    return notImplemented()
   },
 })

@@ -4,10 +4,13 @@
 //   (b) any file under mcp/ imports server/** (or client/, src/), directly,
 //       by a relative path, or through a shared/ or models/ module;
 //   (c) non-test source under mcp/ loads a network module, an HTTP client,
-//       an SDK network transport, or calls .listen(;
+//       an SDK network transport or client, a way to run other code
+//       (child processes, workers, the inspector, eval), or calls .listen(;
 //   (d) the entry does not exit non-zero, naming but not printing them, when
-//       the environment holds a secret-shaped variable;
-//   (e) the lint rule that forbids mcp/ importing server/ goes missing.
+//       the environment holds a secret-shaped or code-loading variable, or
+//       does not exit 0 once stdin closes in a clean one;
+//   (e) the lint rule that forbids mcp/ importing server/ goes missing;
+//   (f) the replica and audit paths drift from prd-03 Ruling 2 and Ruling 4.
 //
 // Run it; never edit it to make a change pass. A change here is a finding
 // (prd-03, "The one risk worth watching").
@@ -21,7 +24,14 @@ import ts from 'typescript'
 import { afterAll, describe, expect, it } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
-import { AUDIT_PATH_ENV, REPLICA_PATH_ENV } from '../contracts.ts'
+import {
+  AUDIT_PATH_ENV,
+  DEFAULT_AUDIT_PATH,
+  DEFAULT_REPLICA_PATH,
+  REPLICA_PATH_ENV,
+  WAVE2_MODULES,
+} from '../contracts.ts'
+import { resolvePaths } from '../context.ts'
 import { ForbiddenEnvError, assertCleanEnv, findForbiddenEnvNames } from '../guard-env.ts'
 import { TOOL_NAMES } from '../tools/registry.ts'
 
@@ -86,11 +96,16 @@ function underForbiddenRoot(absolute: string): string | undefined {
   return FORBIDDEN_ROOTS.find((root) => rel === root || rel.startsWith(root + sep))
 }
 
-/** Where a relative specifier lands on disk, trying the usual extensions. */
+/**
+ * Where a relative specifier lands on disk, trying the usual extensions and
+ * the TypeScript habit of writing `./x.js` for `./x.ts`.
+ */
 function resolveRelative(fromFile: string, spec: string): string {
   const base = resolve(dirname(fromFile), spec)
+  const jsToTs = /\.(m|c)?jsx?$/.test(base) ? ['.ts', '.tsx', '.mts', '.cts'].map((ext) => base.replace(/\.(m|c)?jsx?$/, ext)) : []
   const candidates = [
     base,
+    ...jsToTs,
     ...['.ts', '.tsx', '.js', '.mjs', '.cjs'].map((ext) => base + ext),
     join(base, 'index.ts'),
     join(base, 'index.js'),
@@ -123,11 +138,32 @@ function reachableFrom(start: string): Set<string> {
   return seen
 }
 
-const NETWORK_MODULES = ['net', 'http', 'https', 'http2', 'dgram', 'tls', 'dns']
-const NETWORK_PACKAGES = ['express', 'cors', 'superagent', 'axios', 'undici', 'ws', 'node-fetch', 'dotenv']
-const SDK_NETWORK_SUBPATH = /sse|streamablehttp|express|websocket|auth|middleware|http/i
-const NETWORK_GLOBALS = new Set(['fetch', 'WebSocket', 'EventSource', 'XMLHttpRequest'])
+// Network modules, and the modules that would run other code that could
+// reach one: a child process, a worker, the inspector, `vm`, and `module`'s
+// `createRequire`.
+const NETWORK_MODULES = [
+  'net',
+  'http',
+  'https',
+  'http2',
+  'dgram',
+  'tls',
+  'dns',
+  'child_process',
+  'worker_threads',
+  'cluster',
+  'inspector',
+  'vm',
+  'module',
+]
+const NETWORK_PACKAGES = ['express', 'cors', 'superagent', 'axios', 'undici', 'ws', 'node-fetch', 'dotenv', 'hono']
+const NETWORK_SCOPES = ['@hono/']
+const SDK_NETWORK_SUBPATH = /sse|streamablehttp|express|websocket|auth|middleware|http|client/i
+// Globals that reach the network or evaluate a string as code.
+const NETWORK_GLOBALS = new Set(['fetch', 'WebSocket', 'EventSource', 'XMLHttpRequest', 'eval', 'Function'])
 const GLOBAL_OBJECTS = new Set(['globalThis', 'global', 'self', 'window'])
+// `process` members that load a module or native code without an import.
+const PROCESS_LOADERS = new Set(['getBuiltinModule', 'binding', '_linkedBinding', 'dlopen'])
 
 /** (c) Every network capability non-test `source` reaches for. */
 function networkUses(source: string): string[] {
@@ -137,6 +173,7 @@ function networkUses(source: string): string[] {
     const pkg = spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0]
     if (NETWORK_MODULES.includes(bare.split('/')[0])) problems.push(`import ${spec}`)
     else if (NETWORK_PACKAGES.includes(pkg)) problems.push(`import ${spec}`)
+    else if (NETWORK_SCOPES.some((scope) => spec.startsWith(scope))) problems.push(`import ${spec}`)
     else if (pkg === '@modelcontextprotocol/sdk' && SDK_NETWORK_SUBPATH.test(spec.slice(pkg.length))) {
       problems.push(`import ${spec}`)
     }
@@ -144,6 +181,14 @@ function networkUses(source: string): string[] {
   const sf = ts.createSourceFile('scan.ts', source, ts.ScriptTarget.Latest, true)
   const visit = (node: ts.Node): void => {
     if (ts.isPropertyAccessExpression(node) && node.name.text === 'listen') problems.push('.listen(')
+    if (
+      ts.isPropertyAccessExpression(node) &&
+      PROCESS_LOADERS.has(node.name.text) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === 'process'
+    ) {
+      problems.push(`process.${node.name.text}`)
+    }
     if (ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression)) {
       if (node.argumentExpression.text === 'listen') problems.push("['listen']")
       if (NETWORK_GLOBALS.has(node.argumentExpression.text)) problems.push(node.argumentExpression.text)
@@ -168,10 +213,6 @@ function networkUses(source: string): string[] {
         callee.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(callee) && callee.text === 'require')
       const literal = node.arguments.length === 1 && ts.isStringLiteralLike(node.arguments[0])
       if (dynamic && !literal) problems.push('non-literal import()/require()')
-      if (ts.isIdentifier(callee) && callee.text === 'eval') problems.push('eval(')
-    }
-    if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'Function') {
-      problems.push('new Function(')
     }
     ts.forEachChild(node, visit)
   }
@@ -236,6 +277,11 @@ describe('(b) nothing under mcp/ imports server/**', () => {
     expect(reached.size).toBeGreaterThanOrEqual(mcpSourceFiles.length)
   })
 
+  it('resolves a .js specifier to the .ts file beside it, so the closure follows it', () => {
+    expect(resolveRelative(join(MCP_DIR, 'index.ts'), './context.js')).toBe(join(MCP_DIR, 'context.ts'))
+    expect(resolveRelative(join(MCP_DIR, 'index.ts'), './tools/registry.js')).toBe(join(MCP_DIR, 'tools', 'registry.ts'))
+  })
+
   it('the scanner catches every import form and passes shared/', () => {
     const at = join(MCP_DIR, 'tools', 'probe.ts')
     const caught = [
@@ -271,7 +317,7 @@ describe('(c) non-test mcp/ source opens no socket and loads no network code', (
 
   it('the scanner catches each network form, with or without node:', () => {
     const caught: string[] = []
-    for (const mod of ['net', 'http', 'https', 'http2', 'dgram', 'tls']) {
+    for (const mod of NETWORK_MODULES) {
       caught.push(`import x from '${mod}'`, `import x from 'node:${mod}'`, `const x = require('node:${mod}')`)
     }
     caught.push(
@@ -287,7 +333,15 @@ describe('(c) non-test mcp/ source opens no socket and loads no network code', (
       "import 'dotenv/config'",
       'const m = await import(name)',
       "eval('1')",
+      "(0, eval)('1')",
       "new Function('return 1')",
+      "Function('return 1')()",
+      "process.getBuiltinModule('node:net')",
+      "process.binding('tcp_wrap')",
+      "import { createRequire } from 'node:module'",
+      "import { Hono } from 'hono'",
+      "import { serve } from '@hono/node-server'",
+      "import { Client } from '@modelcontextprotocol/sdk/client/index.js'",
     )
     for (const source of caught) expect(networkUses(source), source).not.toEqual([])
     const fine = [
@@ -315,6 +369,12 @@ describe('(d) the entry refuses a secret-bearing environment', () => {
       OPENAI_API_KEY: 'v',
       my_secret: 'v',
       GITHUB_TOKEN: '',
+      NODE_OPTIONS: '--inspect=0',
+      node_extra_ca_certs: '/tmp/ca.pem',
+      LD_PRELOAD: '/tmp/x.so',
+      DYLD_INSERT_LIBRARIES: '/tmp/x.dylib',
+      NODE_ENV: 'production',
+      NODE_PATH: '/app/node_modules',
       PATH: '/usr/bin',
       HOME: '/home/divvy-mcp',
       LANG: 'C',
@@ -332,6 +392,10 @@ describe('(d) the entry refuses a secret-bearing environment', () => {
         'OPENAI_API_KEY',
         'my_secret',
         'GITHUB_TOKEN',
+        'NODE_OPTIONS',
+        'node_extra_ca_certs',
+        'LD_PRELOAD',
+        'DYLD_INSERT_LIBRARIES',
       ].sort(),
     )
     expect(() => assertCleanEnv({ PATH: '/usr/bin', DIVVY_AUDIT_PATH: '/x' })).not.toThrow()
@@ -358,6 +422,8 @@ describe('(d) the entry refuses a secret-bearing environment', () => {
     ['FLY_APP_NAME', 'sentinel-fly-1a7c'],
     ['ANTHROPIC_API_KEY', 'sentinel-anthropic-3b9d'],
     ['DATABASE_PASSWORD', 'sentinel-password-6f5e'],
+    // A harmless flag, so Node itself starts and the guard is what refuses.
+    ['NODE_OPTIONS', '--no-deprecation'],
   ]
 
   it.each(SECRET_ENVS)(
@@ -379,7 +445,9 @@ describe('(d) the entry refuses a secret-bearing environment', () => {
   )
 
   it(
-    'the entry starts and exits 0 with a clean environment (the positive control)',
+    // stdin is empty and closes at once, so this also pins that the entry
+    // exits when the SSH session goes away rather than hanging.
+    'the entry starts and exits 0 with a clean environment once stdin closes (the positive control)',
     () => {
       const child = spawnSync(process.execPath, [TSX_CLI, ENTRY], {
         cwd: ROOT,
@@ -425,4 +493,35 @@ describe('(e) the lint rule forbids mcp/ importing server/', () => {
     },
     PROCESS_TIMEOUT_MS,
   )
+})
+
+// ---- (f) the paths wave 2 opens ----
+
+describe('(f) the replica and audit paths are the ones prd-03 names', () => {
+  it('pins the env names, the defaults and the wave-2 module locations', () => {
+    expect(REPLICA_PATH_ENV).toBe('DIVVY_REPLICA_PATH')
+    expect(AUDIT_PATH_ENV).toBe('DIVVY_AUDIT_PATH')
+    expect(DEFAULT_REPLICA_PATH).toBe('/app/replica/divvy-ro.sqlite3')
+    expect(DEFAULT_AUDIT_PATH).toBe('/app/audit/advisor-audit.sqlite3')
+    expect(WAVE2_MODULES).toEqual({
+      replica: { path: 'mcp/replica/index.ts', exportName: 'openReplica' },
+      audit: { path: 'mcp/audit/index.ts', exportName: 'createAuditSink' },
+    })
+  })
+
+  it('resolvePaths takes each path from the environment and falls back to the default when unset or empty', () => {
+    expect(resolvePaths({})).toEqual({ replicaPath: DEFAULT_REPLICA_PATH, auditPath: DEFAULT_AUDIT_PATH })
+    expect(resolvePaths({ [REPLICA_PATH_ENV]: '', [AUDIT_PATH_ENV]: '' })).toEqual({
+      replicaPath: DEFAULT_REPLICA_PATH,
+      auditPath: DEFAULT_AUDIT_PATH,
+    })
+    expect(resolvePaths({ [REPLICA_PATH_ENV]: '/r.sqlite3', [AUDIT_PATH_ENV]: '/a.sqlite3' })).toEqual({
+      replicaPath: '/r.sqlite3',
+      auditPath: '/a.sqlite3',
+    })
+    expect(resolvePaths({ [AUDIT_PATH_ENV]: '/a.sqlite3' })).toEqual({
+      replicaPath: DEFAULT_REPLICA_PATH,
+      auditPath: '/a.sqlite3',
+    })
+  })
 })

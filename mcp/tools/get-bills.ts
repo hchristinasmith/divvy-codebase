@@ -16,6 +16,6 @@ export const getBills = defineTool({
   inputSchema: z.strictObject({ scope: scopeSchema }),
   annotations: READ_ONLY_ANNOTATIONS,
   async handler() {
-    return notImplemented(NAME)
+    return notImplemented()
   },
 })

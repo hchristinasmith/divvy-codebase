@@ -15,6 +15,6 @@ export const getGoals = defineTool({
   inputSchema: noInputSchema,
   annotations: READ_ONLY_ANNOTATIONS,
   async handler() {
-    return notImplemented(NAME)
+    return notImplemented()
   },
 })

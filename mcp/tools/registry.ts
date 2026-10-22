@@ -17,9 +17,16 @@
 // any of our code runs, so those calls could never be audited.
 //
 // Known gap: the SDK rejects a `tools/call` whose envelope is malformed (no
-// `name`, or `arguments` that is not an object) before this dispatcher is
-// reached. Such a call executes nothing and returns no data, but leaves no
-// audit row.
+// `name`, `arguments` that is not an object, or a `task` field asking for a
+// task-augmented call, which this server does not declare) before this
+// dispatcher is reached. Such a call executes nothing and returns no data,
+// but leaves no audit row.
+//
+// What reaches the client on failure is only a code and a fixed message from
+// this file, never text a handler or an exception wrote. What reaches the
+// audit sink is bounded: an unknown name is stripped of control and format
+// characters and cut short, and the raw arguments of a rejected call are
+// kept only while their JSON is short.
 
 import { z } from 'zod'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
@@ -29,7 +36,9 @@ import { UNKNOWN_TOOL } from '../contracts.ts'
 import type {
   AuditOutcome,
   ToolContext,
+  HandlerErrorCode,
   ToolDefinition,
+  ToolErrorCode,
   ToolFailure,
   ToolResult,
 } from '../contracts.ts'
@@ -59,6 +68,12 @@ export const TOOL_NAMES: readonly string[] = Object.freeze(TOOLS.map((tool) => t
 /** How much of an unknown tool name is kept in its audit row. */
 export const MAX_UNKNOWN_NAME_LENGTH = 64
 
+/**
+ * The longest JSON a rejected call's raw arguments may have and still be
+ * recorded as given; longer ones are recorded as their length only.
+ */
+export const MAX_REJECTED_PARAMS_LENGTH = 1024
+
 /** The `tools/list` entries for a tool list: JSON Schema of each input. */
 export function describeTools(tools: readonly ToolDefinition[] = TOOLS): Tool[] {
   return tools.map((tool) => ({
@@ -70,15 +85,40 @@ export function describeTools(tools: readonly ToolDefinition[] = TOOLS): Tool[] 
   }))
 }
 
-function failure(error: ToolFailure & { issues?: readonly { path: string; message: string }[] }): CallToolResult {
+const FAILURE_MESSAGES: Readonly<Record<ToolErrorCode, string>> = {
+  not_implemented: 'this tool is not built yet',
+  invalid_arguments: 'the arguments do not match the tool input schema',
+  unknown_tool: 'no tool has that name',
+  internal_error: 'the tool failed',
+  audit_unavailable: 'the call could not be recorded, so no data is returned',
+}
+
+const HANDLER_ERROR_CODES: readonly string[] = ['not_implemented', 'internal_error'] satisfies HandlerErrorCode[]
+
+function failure(code: ToolErrorCode, issues?: readonly { path: string; message: string }[]): CallToolResult {
+  const error: ToolFailure & { issues?: typeof issues } = { code, message: FAILURE_MESSAGES[code] }
+  if (issues) error.issues = issues
   return { isError: true, content: [{ type: 'text', text: JSON.stringify({ error }) }] }
 }
 
-const AUDIT_UNAVAILABLE: ToolFailure = {
-  code: 'audit_unavailable',
-  message: 'the call could not be recorded, so no data is returned',
+// Control (Cc) and format (Cf) characters: newlines, escapes, zero-width and
+// bidi overrides, none of which belong in a tool name an audit row shows.
+const CONTROL_OR_FORMAT = /[\p{Cc}\p{Cf}]/gu
+
+function unknownNameParams(name: unknown): { requested_tool: string } {
+  return { requested_tool: String(name).replace(CONTROL_OR_FORMAT, '').slice(0, MAX_UNKNOWN_NAME_LENGTH) }
 }
-const INTERNAL_ERROR: ToolFailure = { code: 'internal_error', message: 'the tool failed' }
+
+function rejectedParams(raw: unknown): unknown {
+  let length: number | null
+  try {
+    length = JSON.stringify(raw).length
+  } catch {
+    length = null
+  }
+  if (length !== null && length <= MAX_REJECTED_PARAMS_LENGTH) return raw
+  return { oversized_params_length: length }
+}
 
 const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/
 
@@ -131,31 +171,34 @@ export async function dispatchToolCall(
   const found = tools.find((candidate) => candidate.name === name)
   if (!found) {
     outcome = 'rejected'
-    params = { requested_tool: String(name).slice(0, MAX_UNKNOWN_NAME_LENGTH) }
-    response = failure({ code: 'unknown_tool', message: 'no tool has that name' })
+    params = unknownNameParams(name)
+    response = failure('unknown_tool')
   } else {
     tool = found.name
     const parsed = found.inputSchema.safeParse(raw)
     if (!parsed.success) {
       outcome = 'rejected'
-      response = failure({
-        code: 'invalid_arguments',
-        message: 'the arguments do not match the tool input schema',
-        issues: parsed.error.issues.map((issue) => ({
+      params = rejectedParams(raw)
+      response = failure(
+        'invalid_arguments',
+        parsed.error.issues.map((issue) => ({
           path: issue.path.map(String).join('.'),
           message: issue.message,
         })),
-      })
+      )
     } else {
       params = parsed.data
       try {
-        const handled = await found.handler(parsed.data, { replica: ctx.replica, clock: ctx.clock })
+        // The handler gets its own copy, so nothing it does to its input
+        // changes what is recorded.
+        const handled = await found.handler(structuredClone(parsed.data), { replica: ctx.replica, clock: ctx.clock })
         if (!handled.ok) {
           outcome = 'error'
-          response = failure({ code: handled.error.code, message: handled.error.message })
+          const code = handled.error?.code
+          response = failure(HANDLER_ERROR_CODES.includes(code) ? code : 'internal_error')
         } else if (!keepsResultContract(handled.result) || !isRowCount(handled.rowCount)) {
           outcome = 'error'
-          response = failure(INTERNAL_ERROR)
+          response = failure('internal_error')
         } else {
           outcome = 'ok'
           rowCount = handled.rowCount
@@ -169,7 +212,7 @@ export async function dispatchToolCall(
         // The exception text may hold paths or SQL; it is neither returned
         // nor recorded.
         outcome = 'error'
-        response = failure(INTERNAL_ERROR)
+        response = failure('internal_error')
       }
     }
   }
@@ -186,7 +229,7 @@ export async function dispatchToolCall(
   } catch {
     // stdout is the MCP protocol stream; diagnostics go to stderr.
     console.error('[divvy-mcp] audit record failed; no data returned')
-    return failure(AUDIT_UNAVAILABLE)
+    return failure('audit_unavailable')
   }
   return response
 }

@@ -61,6 +61,6 @@ export function defineTool<S extends z.ZodObject>(definition: ToolDefinition<S>)
 }
 
 /** The typed answer of a tool whose handler a later lane has yet to write. */
-export function notImplemented(tool: string): HandlerOutcome {
-  return { ok: false, error: { code: 'not_implemented', message: `${tool} is not implemented yet` } }
+export function notImplemented(): HandlerOutcome {
+  return { ok: false, error: { code: 'not_implemented' } }
 }

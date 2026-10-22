@@ -19,7 +19,15 @@ import type {
   ToolDefinition,
 } from '../../contracts.ts'
 import { MAX_LIMIT, MAX_RANGE_DAYS, SCOPES, noInputSchema, scopeSchema } from '../common.ts'
-import { TOOLS, TOOL_NAMES, createToolServer, describeTools, dispatchToolCall } from '../registry.ts'
+import {
+  MAX_REJECTED_PARAMS_LENGTH,
+  MAX_UNKNOWN_NAME_LENGTH,
+  TOOLS,
+  TOOL_NAMES,
+  createToolServer,
+  describeTools,
+  dispatchToolCall,
+} from '../registry.ts'
 
 // ---- The fixed list, written out independently of the registry ----
 
@@ -306,7 +314,7 @@ const throwingTool = fakeTool('get_throws', async () => {
 })
 const refusingTool = fakeTool('get_refuses', async () => ({
   ok: false,
-  error: { code: 'not_implemented', message: 'get_refuses is not implemented yet' },
+  error: { code: 'not_implemented' },
 }))
 const fakeTools = [okTool, throwingTool, refusingTool]
 
@@ -314,10 +322,14 @@ function bodyOf(result: CallToolResult): string {
   return JSON.stringify(result)
 }
 
-function errorCodeOf(result: CallToolResult): string | undefined {
+function errorOf(result: CallToolResult): { code: string; message: string } | undefined {
   const first = result.content[0]
   if (!result.isError || first?.type !== 'text') return undefined
-  return (JSON.parse(first.text) as { error: { code: string } }).error.code
+  return (JSON.parse(first.text) as { error: { code: string; message: string } }).error
+}
+
+function errorCodeOf(result: CallToolResult): string | undefined {
+  return errorOf(result)?.code
 }
 
 const RECORD_KEYS = ['at', 'durationMs', 'outcome', 'params', 'rowCount', 'tool']
@@ -390,8 +402,69 @@ describe('dispatchToolCall records every outcome before it answers', () => {
   it('error: a handler that refuses (not_implemented) is recorded as error', async () => {
     const { ctx, records } = fakeContext()
     const result = await dispatchToolCall('get_refuses', { scope: 'personal' }, ctx, fakeTools)
-    expect(errorCodeOf(result)).toBe('not_implemented')
+    expect(errorOf(result)).toEqual({ code: 'not_implemented', message: 'this tool is not built yet' })
     expect(records.map((r) => r.outcome)).toEqual(['error'])
+  })
+
+  it('error: a refusal returns only a fixed message, and a code a handler may not use becomes internal_error', async () => {
+    const refusals = [
+      { error: { code: 'not_implemented', message: SENTINEL }, code: 'not_implemented' },
+      { error: { code: 'internal_error', message: SENTINEL }, code: 'internal_error' },
+      { error: { code: 'audit_unavailable', message: SENTINEL }, code: 'internal_error' },
+      { error: { code: 'unknown_tool', message: SENTINEL }, code: 'internal_error' },
+      { error: { code: SENTINEL, message: SENTINEL }, code: 'internal_error' },
+      { error: undefined, code: 'internal_error' },
+    ]
+    for (const { error, code } of refusals) {
+      const tool = fakeTool('get_refuses', async () => ({ ok: false, error } as never))
+      const { ctx, records } = fakeContext()
+      const result = await dispatchToolCall('get_refuses', { scope: 'personal' }, ctx, [tool])
+      expect(errorCodeOf(result), JSON.stringify(error)).toBe(code)
+      expect(bodyOf(result)).not.toContain(SENTINEL)
+      expect(records.map((r) => r.outcome)).toEqual(['error'])
+    }
+  })
+
+  it('a handler gets a copy of its validated input and a context without the audit sink', async () => {
+    let seenKeys: string[] = []
+    const mutating: ToolDefinition = {
+      ...fakeTool('get_mutates', async () => ({ ok: true, result: { data_as_of: AS_OF }, rowCount: 0 })),
+      handler: async (input: { scope: string }, handlerCtx) => {
+        seenKeys = Object.keys(handlerCtx).sort()
+        input.scope = 'mutated'
+        return { ok: true, result: { data_as_of: AS_OF }, rowCount: 0 }
+      },
+    }
+    const { ctx, records } = fakeContext()
+    await dispatchToolCall('get_mutates', { scope: 'personal' }, ctx, [mutating])
+    expect(seenKeys).toEqual(['clock', 'replica'])
+    expect(records[0]).toMatchObject({ outcome: 'ok', params: { scope: 'personal' } })
+  })
+
+  it('rejected: the response names the bad field but never echoes its value', async () => {
+    const { ctx } = fakeContext()
+    const result = await dispatchToolCall('get_ok', { scope: SENTINEL }, ctx, fakeTools)
+    expect(errorCodeOf(result)).toBe('invalid_arguments')
+    expect(bodyOf(result)).toContain('scope')
+    expect(bodyOf(result)).not.toContain(SENTINEL)
+  })
+
+  it('rejected: raw arguments are recorded only while their JSON is short', async () => {
+    // '{"scope":""}' is 12 characters; pad the value to land either side.
+    const atLimit = { scope: 'a'.repeat(MAX_REJECTED_PARAMS_LENGTH - 12) }
+    const overLimit = { scope: 'a'.repeat(MAX_REJECTED_PARAMS_LENGTH - 11) }
+    expect(JSON.stringify(atLimit)).toHaveLength(MAX_REJECTED_PARAMS_LENGTH)
+
+    const kept = fakeContext()
+    await dispatchToolCall('get_ok', atLimit, kept.ctx, fakeTools)
+    expect(kept.records[0]).toMatchObject({ outcome: 'rejected', params: atLimit })
+
+    const cut = fakeContext()
+    await dispatchToolCall('get_ok', overLimit, cut.ctx, fakeTools)
+    expect(cut.records[0]).toMatchObject({
+      outcome: 'rejected',
+      params: { oversized_params_length: MAX_REJECTED_PARAMS_LENGTH + 1 },
+    })
   })
 
   it('rejected: an unknown name is recorded under UNKNOWN_TOOL with the name truncated into params', async () => {
@@ -406,6 +479,18 @@ describe('dispatchToolCall records every outcome before it answers', () => {
         rowCount: null,
         params: { requested_tool: name.slice(0, 64) },
       })
+    }
+  })
+
+  it('rejected: an unknown name loses control and format characters before it is cut short', async () => {
+    const cases: [string, string][] = [
+      ['\u202Eget_bills\n\u0000\u001b[2J', 'get_bills[2J'],
+      ['\u200B'.repeat(MAX_UNKNOWN_NAME_LENGTH) + 'drop', 'drop'],
+    ]
+    for (const [name, kept] of cases) {
+      const { ctx, records } = fakeContext()
+      await dispatchToolCall(name, {}, ctx, fakeTools)
+      expect(records[0]).toMatchObject({ tool: UNKNOWN_TOOL, params: { requested_tool: kept } })
     }
   })
 
@@ -525,6 +610,16 @@ describe('staticSql', () => {
     expect(() => (staticSql as unknown as (s: TemplateStringsArray, ...v: unknown[]) => string)`SELECT ${scope}`).toThrow(
       /no substitutions/,
     )
+  })
+
+  it('refuses an ordinary array passed by hand instead of a template', () => {
+    const built = 'DELETE FROM transactions'
+    const forged = Object.assign([built], { raw: [built] }) as unknown as TemplateStringsArray
+    expect(() => staticSql(forged)).toThrow(/template tag/)
+    const halfFrozen = Object.freeze(Object.assign([built], { raw: [built] })) as unknown as TemplateStringsArray
+    expect(() => staticSql(halfFrozen)).toThrow(/template tag/)
+    const rawFrozen = Object.assign([built], { raw: Object.freeze([built]) }) as unknown as TemplateStringsArray
+    expect(() => staticSql(rawFrozen)).toThrow(/template tag/)
   })
 })
 
