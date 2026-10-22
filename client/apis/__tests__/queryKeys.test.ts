@@ -20,6 +20,15 @@ describe('queryKeys', () => {
     )
   })
 
+  it('gives scoped domains an `all` prefix and a `scoped` builder, the rest only `all`', () => {
+    for (const name of ['overview', 'budgets', 'bills'] as const) {
+      expect(Object.keys(queryKeys[name]).sort()).toEqual(['all', 'scoped'])
+    }
+    for (const name of ['goals', 'habits', 'settings', 'syncStatus'] as const) {
+      expect(Object.keys(queryKeys[name])).toEqual(['all'])
+    }
+  })
+
   it('starts each scoped key with its domain prefix', () => {
     for (const domain of [
       queryKeys.overview,

@@ -77,7 +77,7 @@ async function fetchLastSuccessAt(): Promise<number | null> {
 }
 
 export function useSyncPill(): SyncPill {
-  const { data, isError } = useQuery({
+  const { data, isError, dataUpdatedAt } = useQuery({
     queryKey: queryKeys.syncStatus.all,
     queryFn: fetchLastSuccessAt,
     // A failure shows the neutral pill at once rather than after retries.
@@ -93,5 +93,7 @@ export function useSyncPill(): SyncPill {
   }, [])
 
   if (isError || data === undefined) return NEUTRAL
-  return syncPillFor(data, now)
+  // A reply that landed after the last tick (or after the machine woke) is
+  // aged against the moment it arrived, never against an older tick.
+  return syncPillFor(data, Math.max(now, dataUpdatedAt))
 }

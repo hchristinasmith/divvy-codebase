@@ -69,6 +69,10 @@ describe('syncPillFor', () => {
       state: 'unknown',
       label: 'Not synced yet',
     })
+    expect(Object.keys(syncPillFor(null, NOW)).sort()).toEqual([
+      'label',
+      'state',
+    ])
   })
 
   it('is fresh up to the stale threshold and stale after it', () => {

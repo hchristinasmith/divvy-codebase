@@ -105,6 +105,34 @@ describe('the sync pill', () => {
     expect(pill().querySelector('.bg-warn')).not.toBeNull()
   })
 
+  it('ages a freshly fetched time against the clock now, not the last tick', async () => {
+    // The pill's own clock ticks once a minute. A fetch landing between
+    // ticks must still be judged against the time it arrived, or a stale
+    // sync reads fresh until the next tick.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      const start = Date.parse('2026-10-23T09:00:00.000Z')
+      vi.setSystemTime(start)
+      let reply: (r: Response) => void = () => {}
+      stubFetch(() => new Promise<Response>((resolve) => (reply = resolve)))
+      renderWithProviders(<SyncPill />)
+
+      vi.setSystemTime(start + 50_000)
+      // 30 min 30 s before the moment the reply arrives: stale.
+      const lastSuccessAt = new Date(start + 50_000 - 30 * 60_000 - 30_000)
+      reply(
+        new Response(
+          JSON.stringify({ lastSuccessAt: lastSuccessAt.toISOString() }),
+        ),
+      )
+      await waitFor(() =>
+        expect(pill().getAttribute('data-sync-state')).toBe('stale'),
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('is a status, not a way to reach Sync (#33 is open)', () => {
     stubFetch(pendingFetch)
     renderWithProviders(<SyncPill />)

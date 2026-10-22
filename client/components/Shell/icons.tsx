@@ -1,6 +1,6 @@
 import { Settings, Wand } from 'lucide-react'
 
-// The eight screens of docs/design/handoff.md, by key.
+// The screens of docs/design/handoff.md, by key.
 export type ScreenKey =
   | 'overview'
   | 'budgets'
