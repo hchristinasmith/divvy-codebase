@@ -25,7 +25,8 @@
     "extends": "@devacademy/eslint-config/react",
     "ignorePatterns": [
       "bundle.js",
-      "dist/"
+      "dist/",
+      "docs/"
     ]
   },
   "dependencies": {
