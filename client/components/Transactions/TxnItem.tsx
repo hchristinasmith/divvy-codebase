@@ -19,6 +19,9 @@ export default function TxnItems({ transaction }: Props) {
 
   const queryClient = useQueryClient()
 
+  // TODO(#9): updateTransactionCategory does not match the server route yet
+  // (client PATCHes { categoryId }; server has PUT { category_group_name }),
+  // and this passes a category name where the contract says id. Not rendered.
   const editTxnMutation = useMutation({
     mutationFn: (category: string) =>
       updateTransactionCategory(transaction.id, category),

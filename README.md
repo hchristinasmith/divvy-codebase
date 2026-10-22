@@ -51,6 +51,7 @@ Open the client URL.
 | `npm run build` | Client bundle (`vite build`), then server bundle (`dist/server.js`) |
 | `npm test` | vitest |
 | `npm run lint` | ESLint |
+| `npm run typecheck` | `tsc --noEmit` |
 
 ## Docs
 
