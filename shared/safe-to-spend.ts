@@ -94,7 +94,10 @@ export interface SafeToSpendInput {
   accounts: readonly SafeToSpendAccount[]
   bills: readonly SafeToSpendBill[]
   budgets: readonly SafeToSpendBudget[]
-  /** At least every transaction from the last payday to today. */
+  /**
+   * The transactions from the last payday to today. Rows outside that window
+   * are ignored, so pass only the window rather than the whole table.
+   */
   transactions: readonly SafeToSpendTransaction[]
 }
 
@@ -310,7 +313,11 @@ export function safeToSpend(input: SafeToSpendInput): SafeToSpendResult {
 
   // Every row is checked before the scope filter, so the same rows never
   // succeed in one scope and throw in another.
-  const known = new Set(input.accounts.map((a) => a.id))
+  const known = new Set<string>()
+  for (const a of input.accounts) {
+    if (known.has(a.id)) throw new RangeError(`account "${a.id}" appears twice`)
+    known.add(a.id)
+  }
   for (const a of input.accounts)
     assertCents(a.balanceCents, `balanceCents of account "${a.id}"`)
   for (const b of input.bills) {

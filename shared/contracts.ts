@@ -156,6 +156,7 @@ export interface BudgetLine {
 
 export interface AccountSummary {
   id: string
+  /** A display name only, never an account number. */
   name: string
   scope: RowScope
   role: AccountRole | null
@@ -185,6 +186,7 @@ export interface ActivityRow {
   /** Signed: negative is money out, positive is money in. */
   amountCents: Cents
   scope: RowScope
+  /** A display name only, never an account number. */
   accountName: string
   status: TransactionStatus
   /** Effective category; null when neither Akahu nor the user set one. */
