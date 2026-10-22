@@ -1,0 +1,20 @@
+# Keep the build context to what the image needs. node_modules in particular
+# must never be copied in: sqlite3 is a native module, and the host's build
+# (macOS) does not run in the Linux image.
+**/node_modules
+dist
+.git
+.vscode
+coverage
+**/*.log
+
+# Secrets and data never enter an image (CLAUDE.md, Security). A bare
+# `*.sqlite3` only matches at the context root; `**/` reaches server/db/dev.sqlite3,
+# and the trailing `*` takes its -wal, -shm and -journal files with it.
+**/.env
+**/.env.*
+**/*.sqlite3*
+**/spending.js
+
+# Local agent and editor state (holds run ids, never needed in an image).
+.claude

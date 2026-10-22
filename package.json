@@ -9,8 +9,9 @@
     "routing"
   ],
   "scripts": {
-    "test": "vitest",
-    "start": "node dist/server.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "start": "npm run migrate:latest && node dist/server.js",
     "dev": "run-p dev:client dev:server",
     "dev:client": "vite",
     "dev:server": "tsx watch server/index.ts",
@@ -19,9 +20,9 @@
     "build:server": "esbuild --packages=external --platform=node --format=esm --outfile=dist/server.js --bundle server/index.ts",
     "lint": "eslint --ext .js,.jsx,.ts,.tsx .",
     "knex": "knex --knexfile ./server/db/knexfile.js",
-    "migrate:create": "knex migrate:make",
-    "migrate:latest": "knex migrate:latest",
-    "migrate:rollback": "knex migrate:rollback"
+    "migrate:create": "knex --knexfile ./server/db/knexfile.js migrate:make",
+    "migrate:latest": "knex --knexfile ./server/db/knexfile.js migrate:latest",
+    "migrate:rollback": "knex --knexfile ./server/db/knexfile.js migrate:rollback"
   },
   "eslintConfig": {
     "extends": "@devacademy/eslint-config/react",
