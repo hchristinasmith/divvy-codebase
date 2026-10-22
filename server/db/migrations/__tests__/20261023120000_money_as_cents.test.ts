@@ -1,24 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import knex, { Knex } from 'knex'
 import config from '../../knexfile.js'
+import { migrateToJustBefore } from '../../__tests__/migrateToJustBefore.ts'
 import fixture from '../../fixtures/transactions.json'
 import { dollarsToCents, sumCents } from '../../../../shared/money.ts'
 
 const MIGRATION = '20261023120000_money_as_cents.js'
 
 let db: Knex
-
-// Runs every migration before this one, so tests can write rows in the
-// pre-cents (float dollar) schema and then step this migration up or down.
-async function migrateToJustBefore() {
-  const [, pending] = (await db.migrate.list()) as [
-    unknown,
-    { file: string }[],
-  ]
-  const index = pending.findIndex((m) => m.file === MIGRATION)
-  expect(index).toBeGreaterThan(0)
-  for (let i = 0; i < index; i++) await db.migrate.up()
-}
 
 async function columns(table: string): Promise<Record<string, string>> {
   const info = (await db.raw(`PRAGMA table_info(${table})`)) as {
@@ -54,7 +43,7 @@ function groupTotalsCents(rows: { group: string | null; cents: number }[]) {
 
 beforeEach(async () => {
   db = knex(config.test)
-  await migrateToJustBefore()
+  await migrateToJustBefore(db, MIGRATION)
 })
 
 afterEach(async () => {

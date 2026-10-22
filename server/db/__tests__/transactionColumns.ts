@@ -32,4 +32,6 @@ export const TRANSACTION_COLUMNS = [
   'amount_cents',
   'balance_cents',
   'conversion_amount_cents',
+  'category',
+  'category_source',
 ]
