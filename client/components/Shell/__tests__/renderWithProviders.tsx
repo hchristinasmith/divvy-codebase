@@ -15,13 +15,14 @@ export function renderWithProviders(
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  return render(
+  const result = render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[path]}>
         <ScopeProvider initialScope={initialScope}>{ui}</ScopeProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   )
+  return { ...result, client }
 }
 
 // A fetch that never settles: the sync pill stays in its loading state, so

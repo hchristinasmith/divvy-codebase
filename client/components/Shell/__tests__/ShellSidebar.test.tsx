@@ -82,6 +82,15 @@ describe('the desktop sidebar', () => {
     expect(screen.queryByTestId('nav-badge')).toBeNull()
   })
 
+  it('claims only what is true of this build in the Self-hosted card', () => {
+    renderWithProviders(<ShellSidebar />)
+    const card = screen.getByText('Self-hosted').parentElement
+    expect(card?.textContent).toBe('Self-hostedRunning on your server.')
+    // The handoff's "Nothing leaves it." is untrue once the advisor reads
+    // data through Claude (D3).
+    expect(screen.queryByText(/Nothing leaves it/)).toBeNull()
+  })
+
   it('is hidden under 720px', () => {
     renderWithProviders(<ShellSidebar />)
     const aside = screen.getByRole('complementary')

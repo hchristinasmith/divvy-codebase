@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, screen, waitFor } from '@testing-library/react'
+import { queryKeys } from '../../../apis/queryKeys.ts'
 import SyncPill from '../SyncPill.tsx'
 import { pendingFetch, renderWithProviders } from './renderWithProviders.tsx'
 
@@ -51,6 +52,9 @@ describe('the sync pill', () => {
     renderWithProviders(<SyncPill />)
     expect(pill().getAttribute('data-sync-state')).toBe('unknown')
     expect(pill().textContent).toBe('Not synced yet')
+    // A grey dot: a neutral pill must not look healthy.
+    expect(pill().querySelector('.bg-ink-faint')).not.toBeNull()
+    expect(pill().querySelector('.bg-ok, .bg-warn')).toBeNull()
   })
 
   it.each([
@@ -128,6 +132,41 @@ describe('the sync pill', () => {
       await waitFor(() =>
         expect(pill().getAttribute('data-sync-state')).toBe('stale'),
       )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('caches the status under the shared syncStatus key', async () => {
+    stubFetch(json({ lastSuccessAt: minutesAgo(4) }))
+    const { client } = renderWithProviders(<SyncPill />)
+    await waitFor(() => expect(pill().textContent).toBe('Synced 4 min ago'))
+    expect(client.getQueryData(queryKeys.syncStatus.all)).toBeTypeOf('number')
+  })
+
+  it('keeps the age moving and asks again every minute', async () => {
+    // Real setTimeout so waitFor still polls; the minute timers are fake.
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] })
+    try {
+      const start = Date.parse('2026-10-23T09:00:00.000Z')
+      vi.setSystemTime(start)
+      const first = json({
+        lastSuccessAt: new Date(start - 4 * 60_000).toISOString(),
+      })
+      // Only the first request answers, so the age can move only by the
+      // pill's own clock, not by a fresh reply.
+      const fetchMock = stubFetch(() =>
+        fetchMock.mock.calls.length === 1 ? first() : pendingFetch(),
+      )
+      renderWithProviders(<SyncPill />)
+      await waitFor(() => expect(pill().textContent).toBe('Synced 4 min ago'))
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+
+      act(() => {
+        vi.advanceTimersByTime(60_000)
+      })
+      await waitFor(() => expect(pill().textContent).toBe('Synced 5 min ago'))
+      expect(fetchMock).toHaveBeenCalledTimes(2)
     } finally {
       vi.useRealTimers()
     }

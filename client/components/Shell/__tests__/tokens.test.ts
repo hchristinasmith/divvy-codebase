@@ -61,6 +61,14 @@ describe('design tokens match docs/design/handoff.md', () => {
     }
   })
 
+  it('has the handoff letter-spacing', () => {
+    expect(tokens.get('--tracking-hero')).toBe('-0.03em')
+    expect(tokens.get('--tracking-title')).toBe('-0.02em')
+    expect(tokens.get('--tracking-wordmark')).toBe('0.04em')
+    expect(tokens.get('--tracking-eyebrow')).toBe('0.1em')
+    expect(tokens.get('--tracking-tagline')).toBe('0.14em')
+  })
+
   it('uses Outfit, DM Sans and DM Mono', () => {
     expect(tokens.get('--font-display')).toMatch(/^'Outfit Variable',/)
     expect(tokens.get('--font-sans')).toMatch(/^'DM Sans Variable',/)
