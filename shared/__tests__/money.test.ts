@@ -87,4 +87,10 @@ describe('sumCents', () => {
   it('refuses a float input', () => {
     expect(() => sumCents([100, 0.5])).toThrow(/sumCents input/)
   })
+
+  it('refuses a total beyond safe-integer range', () => {
+    expect(() =>
+      sumCents([Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER]),
+    ).toThrow(/sumCents result/)
+  })
 })

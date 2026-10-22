@@ -28,7 +28,11 @@ afterEach(async () => {
   await rm(scratch, { recursive: true, force: true })
 })
 
-function akahuTxn(id: string, amount: number) {
+function akahuTxn(
+  id: string,
+  amount: number,
+  extra: { balance?: number; meta?: Record<string, unknown> } = {},
+) {
   return {
     _id: id,
     _account: 'acc_override',
@@ -41,6 +45,7 @@ function akahuTxn(id: string, amount: number) {
     amount,
     type: 'EFTPOS',
     meta: {},
+    ...extra,
   }
 }
 
@@ -150,5 +155,65 @@ describe('transactions fixture', () => {
     for (const t of fixture.items) {
       expect(Math.abs(t.amount * 100 - Math.round(t.amount * 100))).toBeLessThan(1e-6)
     }
+  })
+})
+
+describe('transactions seed, edge cases', () => {
+  it('converts a zero balance to 0 cents, not null, and converts conversion amounts', async () => {
+    const path = Path.join(scratch, 'edge.json')
+    await writeFile(
+      path,
+      JSON.stringify({
+        items: [
+          akahuTxn('zero', -4.35, { balance: 0, meta: { conversion_amount: 12.34 } }),
+          akahuTxn('none', 1),
+        ],
+      }),
+    )
+    process.env.DIVVY_SEED_TRANSACTIONS = path
+
+    await db.seed.run()
+
+    expect(
+      await db('transactions')
+        .select('akahu_id', 'amount_cents', 'balance_cents', 'conversion_amount_cents')
+        .orderBy('akahu_id'),
+    ).toEqual([
+      { akahu_id: 'none', amount_cents: 100, balance_cents: null, conversion_amount_cents: null },
+      { akahu_id: 'zero', amount_cents: -435, balance_cents: 0, conversion_amount_cents: 1234 },
+    ])
+  })
+
+  it('reads a private JS module with a default export', async () => {
+    const path = Path.join(scratch, 'default.js')
+    await writeFile(
+      path,
+      `export default ${JSON.stringify({ items: [akahuTxn('d1', -3)] })}\n`,
+    )
+    process.env.DIVVY_SEED_TRANSACTIONS = path
+
+    await db.seed.run()
+
+    expect(await db('transactions').pluck('akahu_id')).toEqual(['d1'])
+  })
+
+  it('replaces rather than duplicates when run twice', async () => {
+    await db.seed.run()
+    await db.seed.run()
+
+    const [{ n }] = await db('transactions').count({ n: '*' })
+    expect(n).toBe(fixture.items.length)
+  })
+
+  it('seeds budget targets in integer cents', async () => {
+    await db.seed.run()
+
+    expect(
+      await db('targets').select('category', 'target_amount_cents').orderBy('category'),
+    ).toEqual([
+      { category: 'Entertainment', target_amount_cents: 15000 },
+      { category: 'Food', target_amount_cents: 50000 },
+      { category: 'Housing', target_amount_cents: 120000 },
+    ])
   })
 })

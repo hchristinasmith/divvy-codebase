@@ -10,6 +10,27 @@
 // stored as a float, and the issue's exit is "no float money columns".
 // `conversion_rate` is a rate, not money, and stays a float.
 
+// knex rebuilds a SQLite table to drop or alter a column, and the rebuilt
+// table starts a fresh AUTOINCREMENT counter. Keep the old high-water mark so
+// an id that was used and deleted is never handed out again.
+//
+// Hazard for later migrations: the rebuild runs inside knex's migration
+// transaction, where PRAGMA foreign_keys = OFF is ignored, so rebuilding a
+// table that other tables reference with ON DELETE CASCADE deletes their
+// rows. Neither table rebuilt here has children; transactions will once
+// prd-01 wave 1 adds category_corrections.
+async function readSequence(knex, table) {
+  const row = await knex('sqlite_sequence').where({ name: table }).first('seq')
+  return row ? row.seq : null
+}
+
+async function restoreSequence(knex, table, seq) {
+  if (seq === null) return
+  await knex('sqlite_sequence')
+    .where({ name: table })
+    .update({ seq: knex.raw('max(seq, ?)', [seq]) })
+}
+
 const TRANSACTION_MONEY = [
   ['amount', 'amount_cents'],
   ['balance', 'balance_cents'],
@@ -21,6 +42,9 @@ const TRANSACTION_MONEY = [
  * @returns { Promise<void> }
  */
 export async function up(knex) {
+  const transactionsSeq = await readSequence(knex, 'transactions')
+  const targetsSeq = await readSequence(knex, 'targets')
+
   await knex.schema.alterTable('transactions', (table) => {
     for (const [, cents] of TRANSACTION_MONEY) table.integer(cents)
   })
@@ -48,6 +72,9 @@ export async function up(knex) {
   await knex.schema.alterTable('targets', (table) => {
     table.integer('target_amount_cents').notNullable().alter()
   })
+
+  await restoreSequence(knex, 'transactions', transactionsSeq)
+  await restoreSequence(knex, 'targets', targetsSeq)
 }
 
 /**
@@ -58,6 +85,9 @@ export async function up(knex) {
  * @returns { Promise<void> }
  */
 export async function down(knex) {
+  const transactionsSeq = await readSequence(knex, 'transactions')
+  const targetsSeq = await readSequence(knex, 'targets')
+
   await knex.schema.alterTable('transactions', (table) => {
     table.float('amount')
     table.float('balance')
@@ -87,4 +117,7 @@ export async function down(knex) {
   await knex.schema.alterTable('targets', (table) => {
     table.decimal('target_amount', 14, 2).notNullable().alter()
   })
+
+  await restoreSequence(knex, 'transactions', transactionsSeq)
+  await restoreSequence(knex, 'targets', targetsSeq)
 }

@@ -167,7 +167,7 @@ describe('PATCH /api/v1/transactions/:id', () => {
     expect(res.body.error).toBe('Transaction not found')
   })
 
-  it.each(['abc', '0', '-1', '1.5', '1e3', '0x10', '%207', '007'])(
+  it.each(['abc', '0', '-1', '1.5', '1e3', '0x10', '%207', '007', '9007199254740993'])(
     'returns 400 for the id "%s", which is not a plain positive integer',
     async (id) => {
       const before = await connection('transactions').select().orderBy('id')

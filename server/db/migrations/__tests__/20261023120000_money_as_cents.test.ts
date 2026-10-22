@@ -134,11 +134,12 @@ describe(MIGRATION, () => {
 
   it('converts budget targets and keeps their constraints', async () => {
     await db('users').insert({ id: 1, email: 'fixture@example.com', password: 'x' })
-    await db('targets').insert({ user_id: 1, category: 'Food', target_amount: 500.1, period: 'monthly' })
+    // 4.35 * 100 is 434.99999999999994: a truncating backfill gets it wrong.
+    await db('targets').insert({ user_id: 1, category: 'Food', target_amount: 4.35, period: 'monthly' })
 
     await db.migrate.up()
 
-    expect(await db('targets').pluck('target_amount_cents')).toEqual([50010])
+    expect(await db('targets').pluck('target_amount_cents')).toEqual([435])
     // unique (user_id, category, period) survived the table rebuild
     await expect(
       db('targets').insert({ user_id: 1, category: 'Food', target_amount_cents: 1, period: 'monthly' }),
@@ -151,6 +152,24 @@ describe(MIGRATION, () => {
     await expect(
       db('targets').insert({ user_id: 99, category: 'Rent', target_amount_cents: 1, period: 'monthly' }),
     ).rejects.toThrow(/FOREIGN KEY/)
+  })
+
+  it('never reuses a deleted id after the table rebuild', async () => {
+    await db('transactions').insert([{ akahu_id: 'a' }, { akahu_id: 'b' }, { akahu_id: 'c' }])
+    await db('transactions').where({ akahu_id: 'c' }).del()
+    await db('users').insert({ id: 1, email: 'fixture@example.com', password: 'x' })
+    await db('targets').insert([
+      { user_id: 1, category: 'A', target_amount: 1, period: 'monthly' },
+      { user_id: 1, category: 'B', target_amount: 1, period: 'monthly' },
+    ])
+    await db('targets').where({ category: 'B' }).del()
+
+    await db.migrate.up()
+
+    const [txnId] = await db('transactions').insert({ akahu_id: 'd', amount_cents: 1 })
+    const [targetId] = await db('targets').insert({ user_id: 1, category: 'C', target_amount_cents: 1, period: 'monthly' })
+    expect(txnId).toBe(4)
+    expect(targetId).toBe(3)
   })
 
   it('keeps akahu_id unique on transactions', async () => {
