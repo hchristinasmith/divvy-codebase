@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { ChartPie } from 'lucide-react'
-import type { Transaction } from 'models/transactions.ts'
+import type { AkahuTransaction } from '../../../models/akahu.ts'
 
 interface SpendingBreakdownProps {
-  transactions: Transaction[]
+  transactions: AkahuTransaction[]
 }
 
 type CategorySummary = {

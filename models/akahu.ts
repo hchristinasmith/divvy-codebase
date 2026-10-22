@@ -52,3 +52,23 @@ export interface Accounts {
   }
   
   
+// A transaction as Akahu's /transactions endpoints return it, which the
+// server proxies to the client unchanged. Distinct from `Transaction` in
+// ./transactions.ts, which is the flattened row shape of the local table.
+export interface AkahuTransaction {
+  _id: string
+  _account: string
+  date: string
+  description: string
+  amount: number
+  type: string
+  category?: AkahuCategory
+}
+
+export interface AkahuCategory {
+  _id: string
+  name: string
+  groups?: {
+    personal_finance?: { _id: string; name: string }
+  }
+}

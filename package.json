@@ -1,13 +1,8 @@
 {
-  "name": "boilerplate-fullstack-routing",
+  "name": "divvy",
   "type": "module",
-  "version": "2.0.0",
+  "version": "0.1.0",
   "main": "server/index.js",
-  "license": "MIT",
-  "keywords": [
-    "fullstack",
-    "routing"
-  ],
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
@@ -19,24 +14,26 @@
     "build:client": "vite build",
     "build:server": "esbuild --packages=external --platform=node --format=esm --outfile=dist/server.js --bundle server/index.ts",
     "lint": "eslint --ext .js,.jsx,.ts,.tsx .",
+    "typecheck": "tsc --noEmit",
     "knex": "knex --knexfile ./server/db/knexfile.js",
     "migrate:create": "knex --knexfile ./server/db/knexfile.js migrate:make",
     "migrate:latest": "knex --knexfile ./server/db/knexfile.js migrate:latest",
     "migrate:rollback": "knex --knexfile ./server/db/knexfile.js migrate:rollback"
   },
   "eslintConfig": {
+    "root": true,
     "extends": "@devacademy/eslint-config/react",
     "ignorePatterns": [
-      "bundle.js"
+      "bundle.js",
+      "dist/",
+      "docs/"
     ]
   },
   "dependencies": {
-    "@auth0/auth0-react": "^2.3.0",
     "@radix-ui/react-avatar": "^1.1.10",
     "@radix-ui/react-select": "^2.2.5",
     "@radix-ui/react-slot": "^1.2.3",
     "@tailwindcss/vite": "^4.1.8",
-    "chart.js": "^4.4.9",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cors": "^2.8.5",
@@ -45,11 +42,6 @@
     "express": "^4.17.2",
     "knex": "^2.5.1",
     "lucide-react": "^0.511.0",
-    "pg": "^8.16.1",
-    "react-chartjs-2": "^5.3.0",
-    "react-router-dom": "^7.6.1",
-    "react-select": "^5.10.1",
-    "recharts": "^2.15.3",
     "sqlite3": "^5.1.6",
     "superagent": "^10.2.1",
     "tailwind-merge": "^3.3.0"
@@ -65,12 +57,9 @@
     "@types/node": "^22.15.29",
     "@types/react": "^18.0.28",
     "@types/react-dom": "^18.0.11",
-    "@types/react-router-dom": "^5.3.3",
-    "@types/react-select": "^5.0.0",
     "@types/superagent": "^8.1.1",
     "@types/supertest": "^6.0.2",
     "@vitejs/plugin-react": "^4.2.1",
-    "autoprefixer": "^10.4.21",
     "esbuild": "^0.18.19",
     "eslint": "^8.56.0",
     "eslint-plugin-import": "^2.29.1",
@@ -82,11 +71,9 @@
     "eslint-plugin-react-hooks": "^4.6.2",
     "jsdom": "^22.1.0",
     "npm-run-all": "^4.1.5",
-    "postcss": "^8.5.4",
     "react": "^18.0.2",
     "react-dom": "^18.2.0",
     "react-router": "^7.6.1",
-    "sass": "^1.50.1",
     "supertest": "^6.3.4",
     "tailwindcss": "^4.1.8",
     "tsx": "^3.12.7",

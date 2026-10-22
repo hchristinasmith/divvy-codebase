@@ -1,4 +1,4 @@
-import { Transaction } from 'models/transactions'
+import type { Transaction } from '../../models/transactions'
 import connection from './connection'
 
 export async function getTxns(db = connection): Promise<Transaction[]> {

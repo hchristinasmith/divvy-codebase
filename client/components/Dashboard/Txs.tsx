@@ -1,7 +1,7 @@
-import type { Transaction } from '../../../models/transactions'
+import type { AkahuTransaction } from '../../../models/akahu'
 
 interface TransactionsProps {
-  transactions: Transaction[]
+  transactions: AkahuTransaction[]
 }
 
 export default function Transactions({ transactions }: TransactionsProps) {

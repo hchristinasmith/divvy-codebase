@@ -1,110 +1,59 @@
-# Divvy - Personal Finance Management App
+# Divvy
 
-## Features
+Divvy is a private personal-and-business money app for one person. It runs on a single server reachable only over a Tailscale network, so it has no login page (D4 in [docs/decisions.md](docs/decisions.md)). Bank data comes from Akahu.
 
-### Dashboard
-- **Account Overview**: View and select multiple bank accounts
-- **Spending Breakdown**: Visualize your spending patterns by category
-- **Time Filtering**: Filter financial data by different time periods (7 days, 30 days, etc.)
-- **Monthly Overview**: Compare actual spending against budget targets
-- **Dark Mode Support**: Toggle between light and dark themes for comfortable viewing
+It is an early prototype. [docs/audit-2026-10-23.md](docs/audit-2026-10-23.md) records what works, what is stubbed and what is planned.
 
-### Transaction Management
-- **Transaction Listing**: View all your financial transactions in one place
-- **Search Functionality**: Find specific transactions by keywords
-- **Category Filtering**: Filter transactions by category
-- **Transaction Details**: View comprehensive information about each transaction
-- **Category Management**: Assign and edit transaction categories
+## What works today
 
-### Financial Targets
-- **Budget Tracking**: Set and monitor spending targets by category
-- **Progress Visualization**: See visual progress bars showing budget usage
-- **Status Indicators**: Get clear status indicators (On Track, Watch, Close, Over Target)
-- **Budget Summaries**: View total budgeted, spent, and remaining amounts
-- **Target Creation**: Create new financial targets for different categories
+- The Dashboard lists your Akahu accounts and shows a spending breakdown from live Akahu transactions. The Express server proxies Akahu, using one token from `.env`.
+- `GET /api/v1/transactions?description=` searches the local SQLite `transactions` table, and `PUT /api/v1/transactions/:id` updates a row's category.
+- The Transactions, Targets, Subscriptions, Wishlist, Challenges and Settings pages are shells or show mock data.
 
-### Subscription Management
-- **Subscription Tracking**: Monitor all your recurring subscriptions in one place
-- **Cost Analysis**: See monthly and yearly subscription costs
-- **Billing Alerts**: Get notifications for upcoming subscription renewals
-- **Subscription Details**: View comprehensive information about each subscription
-- **Search & Filter**: Find subscriptions by name or category
+## Stack
 
-### Authentication
-- **User Profiles**: Secure user accounts with profile management
-- **Authentication**: Secure login and account management
-
-### Additional Features
-- **Modern UI**: Clean, intuitive interface built with Tailwind CSS
-- **Real-time Updates**: Sync with your financial data using Akahu API
-
-## Architecture
-The application follows a modern full-stack architecture:
-
-┌────────────────────────────┐
-│         Frontend           │
-│      (React / Vite)        │
-│                            │
-│  - View accounts           │
-│  - View transactions       │
-│  - Categorize transactions │
-│  - Manage subscriptions    │
-│  - Set financial targets   │
-└────────────┬───────────────┘
-             │
-             ▼
- ┌──────────────────────────┐
- │        Express API       │
- │  /api/accounts/sync      │◄── Refresh button
- │  /api/transactions/sync  │◄── Refresh button
- │  /api/transactions        │──► Fetch transactions
- │  /api/accounts            │──► Fetch accounts
- └───────┬───────────┬──────┘
-         │           │
-         ▼           ▼
- ┌──────────────────────────┐
- │   Akahu API (3rd party)  │
- │  GET /accounts           │
- │  GET /transactions       │
- └──────────────────────────┘
-         ▲
-         │
-         ▼
- ┌──────────────────────────┐
- │        Knex.js           │
- │     (DB query builder)   │
- └───────┬───────────┬──────┘
-         │           │
-         ▼           ▼
- ┌──────────────────────────┐
- │       PostgreSQL DB      │
- │   ┌────────────────────┐ │
- │   │    transactions    │ │
- │   │  - akahu_id (unique)││
- │   │  - category (editable) │
- │   └────────────────────┘ │
- │   ┌────────────────────┐ │
- │   │     accounts       │ │
- │   │  - akahu_id (unique)││
- │   └────────────────────┘ │
- └──────────────────────────┘
+- **Client** (`client/`): React 18, Vite 5, Tailwind CSS 4, react-router 7, TanStack Query 5, and shadcn/Radix primitives in `src/components/ui/`
+- **Server** (`server/`): Express 4 on Node, run with `tsx` in development
+- **Database:** SQLite through Knex 2. Migrations and seeds live in `server/db/`; the knexfile is `server/db/knexfile.js`
+- **Shared types:** `models/`
+- **Language:** TypeScript 5. Tests use vitest
 
 ## Setup
 
-### Installation
+You need Node 20 or later.
 
-```
-git clone https://github.com/hchristinasmith/divvy-.git
-cd divvy-
-npm install
+```sh
+git clone https://github.com/hchristinasmith/divvy-codebase.git
+cd divvy-codebase
+npm ci
+cp .env.example .env        # then fill in AKAHU_USER_TOKEN and AKAHU_APP_ID
+npm run knex -- migrate:latest
 npm run dev
 ```
 
-You can find the server running on [http://localhost:3000](http://localhost:3000) and the client running on [http://localhost:5173](http://localhost:5173).
+`npm run dev` starts two processes:
 
-## Technologies Used
-- **Frontend**: React, TypeScript, Vite, Tailwind CSS, Shadcn UI
-- **Backend**: Express, Node.js
-- **Database**: PostgreSQL with Knex.js
-- **Authentication**: Auth0 
-- **Third-party APIs**: Akahu API for financial data
+- the Express API on <http://localhost:3005>, or on `PORT` if you set it
+- the Vite client on <http://localhost:5173>, which proxies `/api` to port 3005
+
+Open the client URL.
+
+### Seeding
+
+`npm run knex -- seed:run` currently fails on a fresh clone, because the transactions seed imports a private `spending.js` that is gitignored. The Dashboard does not need seeded data, since it reads Akahu live. Seeding from a committed fixture is tracked as an M1 issue.
+
+## Scripts
+
+| Script | Does |
+|---|---|
+| `npm run dev` | Client and server together, with watch |
+| `npm run knex -- <cmd>` | Knex CLI against `server/db/knexfile.js`, e.g. `migrate:latest`, `seed:run` |
+| `npm run build` | Client bundle (`vite build`), then server bundle (`dist/server.js`) |
+| `npm test` | vitest |
+| `npm run lint` | ESLint |
+| `npm run typecheck` | `tsc --noEmit` |
+
+## Docs
+
+- [docs/decisions.md](docs/decisions.md): architecture decisions (deploy, auth, storage, AI, notifications)
+- [docs/audit-2026-10-23.md](docs/audit-2026-10-23.md): the codebase audit behind the M1 milestone
