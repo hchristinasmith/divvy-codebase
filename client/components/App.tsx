@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route } from 'react-router'
 import Sidebar from './Sidebar.tsx'
 import Dashboard from './Dashboard/Dashboard.tsx'
 import Settings from './Settings.tsx'
