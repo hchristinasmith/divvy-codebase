@@ -6,7 +6,9 @@
 // because the placeholder sink refuses every record. The wave-2 wiring lane
 // replaces the placeholder with `openReplica` (`mcp/replica/index.ts`) and
 // `createAuditSink` (`mcp/audit/index.ts`) at the paths `resolvePaths`
-// returns; that is the only edit this file expects.
+// returns; that is the only edit this file expects. `tools/list` must keep
+// working before the replica file exists (the guard test spawns the entry
+// with fresh scratch paths), so the replica is opened per call, not here.
 //
 // No I/O at import time.
 

@@ -13,13 +13,15 @@
 // (prd-03, "The one risk worth watching").
 
 import { spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
-import { describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { AUDIT_PATH_ENV, REPLICA_PATH_ENV } from '../contracts.ts'
 import { ForbiddenEnvError, assertCleanEnv, findForbiddenEnvNames } from '../guard-env.ts'
 import { TOOL_NAMES } from '../tools/registry.ts'
 
@@ -29,6 +31,17 @@ const ENTRY = 'mcp/index.ts'
 const TSX_CLI = join(ROOT, 'node_modules', 'tsx', 'dist', 'cli.mjs')
 const ESLINT_CLI = join(ROOT, 'node_modules', 'eslint', 'bin', 'eslint.js')
 const PROCESS_TIMEOUT_MS = 30_000
+
+// Every spawned entry gets its replica and audit paths in a scratch dir, never
+// the PRD defaults under /app, so wiring the real sink in wave 2 neither breaks
+// these tests nor writes to a real audit file.
+const SCRATCH = mkdtempSync(join(tmpdir(), 'divvy-mcp-guard-'))
+afterAll(() => rmSync(SCRATCH, { recursive: true, force: true }))
+const CLEAN_ENV: Record<string, string> = {
+  PATH: process.env.PATH ?? '',
+  [REPLICA_PATH_ENV]: join(SCRATCH, 'replica.sqlite3'),
+  [AUDIT_PATH_ENV]: join(SCRATCH, 'audit.sqlite3'),
+}
 
 // Written out here, independently of the registry and its own test.
 const FIXED_TOOLS = [
@@ -114,6 +127,7 @@ const NETWORK_MODULES = ['net', 'http', 'https', 'http2', 'dgram', 'tls', 'dns']
 const NETWORK_PACKAGES = ['express', 'cors', 'superagent', 'axios', 'undici', 'ws', 'node-fetch', 'dotenv']
 const SDK_NETWORK_SUBPATH = /sse|streamablehttp|express|websocket|auth|middleware|http/i
 const NETWORK_GLOBALS = new Set(['fetch', 'WebSocket', 'EventSource', 'XMLHttpRequest'])
+const GLOBAL_OBJECTS = new Set(['globalThis', 'global', 'self', 'window'])
 
 /** (c) Every network capability non-test `source` reaches for. */
 function networkUses(source: string): string[] {
@@ -132,6 +146,15 @@ function networkUses(source: string): string[] {
     if (ts.isPropertyAccessExpression(node) && node.name.text === 'listen') problems.push('.listen(')
     if (ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression)) {
       if (node.argumentExpression.text === 'listen') problems.push("['listen']")
+      if (NETWORK_GLOBALS.has(node.argumentExpression.text)) problems.push(node.argumentExpression.text)
+    }
+    if (
+      ts.isPropertyAccessExpression(node) &&
+      NETWORK_GLOBALS.has(node.name.text) &&
+      ts.isIdentifier(node.expression) &&
+      GLOBAL_OBJECTS.has(node.expression.text)
+    ) {
+      problems.push(`${node.expression.text}.${node.name.text}`)
     }
     if (ts.isIdentifier(node) && NETWORK_GLOBALS.has(node.text)) {
       const parent = node.parent
@@ -174,7 +197,7 @@ describe('(a) the tool list is the fixed seven', () => {
         command: process.execPath,
         args: [TSX_CLI, ENTRY],
         cwd: ROOT,
-        env: { PATH: process.env.PATH ?? '' },
+        env: CLEAN_ENV,
         stderr: 'pipe',
       })
       const client = new Client({ name: 'guard-test', version: '0.0.0' })
@@ -256,6 +279,8 @@ describe('(c) non-test mcp/ source opens no socket and loads no network code', (
       "server['listen'](3000)",
       "await fetch('https://example.com')",
       "new WebSocket('wss://example.com')",
+      "await globalThis.fetch('https://example.com')",
+      "await globalThis['fetch']('https://example.com')",
       "import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'",
       "import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js'",
       "import express from 'express'",
@@ -287,6 +312,7 @@ describe('(d) the entry refuses a secret-bearing environment', () => {
       FLY_APP_NAME: 'v',
       ANTHROPIC_BASE_URL: 'v',
       DB_PASSWORD: 'v',
+      OPENAI_API_KEY: 'v',
       my_secret: 'v',
       GITHUB_TOKEN: '',
       PATH: '/usr/bin',
@@ -303,6 +329,7 @@ describe('(d) the entry refuses a secret-bearing environment', () => {
         'FLY_APP_NAME',
         'ANTHROPIC_BASE_URL',
         'DB_PASSWORD',
+        'OPENAI_API_KEY',
         'my_secret',
         'GITHUB_TOKEN',
       ].sort(),
@@ -338,7 +365,7 @@ describe('(d) the entry refuses a secret-bearing environment', () => {
     (name, value) => {
       const child = spawnSync(process.execPath, [TSX_CLI, ENTRY], {
         cwd: ROOT,
-        env: { PATH: process.env.PATH ?? '', [name]: value },
+        env: { ...CLEAN_ENV, [name]: value },
         input: '',
         encoding: 'utf8',
         timeout: PROCESS_TIMEOUT_MS,
@@ -356,7 +383,7 @@ describe('(d) the entry refuses a secret-bearing environment', () => {
     () => {
       const child = spawnSync(process.execPath, [TSX_CLI, ENTRY], {
         cwd: ROOT,
-        env: { PATH: process.env.PATH ?? '' },
+        env: CLEAN_ENV,
         input: '',
         encoding: 'utf8',
         timeout: PROCESS_TIMEOUT_MS,

@@ -18,7 +18,6 @@ import type {
   ToolContext,
   ToolDefinition,
 } from '../../contracts.ts'
-import { createContext } from '../../context.ts'
 import { MAX_LIMIT, MAX_RANGE_DAYS, SCOPES, noInputSchema, scopeSchema } from '../common.ts'
 import { TOOLS, TOOL_NAMES, createToolServer, describeTools, dispatchToolCall } from '../registry.ts'
 
@@ -502,9 +501,12 @@ describe('a failed audit record returns an error and no data', () => {
   })
 })
 
-describe('the real tools behind the w1 placeholder context', () => {
+// Driven with a fake failing sink, not `createContext`: the wiring lane
+// replaces the w1 placeholder context, and this file must not change when it
+// does.
+describe('the real tools behind a sink that refuses every record', () => {
   it('fail closed: a call returns audit_unavailable and no data, but tools/list works', async () => {
-    const ctx = await createContext({})
+    const { ctx } = fakeContext({ record: () => Promise.reject(new Error('audit sink not wired')) })
     const client = await connectedClient(ctx)
     expect((await client.listTools()).tools).toHaveLength(EXPECTED_TOOLS.length)
     const result = (await client.callTool({ name: 'get_goals', arguments: {} })) as CallToolResult
