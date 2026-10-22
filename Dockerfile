@@ -34,6 +34,10 @@ COPY --from=build /app/server/db/knexfile.js ./server/db/knexfile.js
 COPY --from=build /app/server/db/migrations ./server/db/migrations
 
 # The SQLite file lives on a volume mounted here (fly.toml [mounts]).
+# The process runs as root: Fly mounts volumes root-owned, so a non-root user
+# could not write /data. Root here is root in a Firecracker VM, not the host.
+# M2 (Tailscale sidecar, Litestream) adds an entrypoint that chowns /data and
+# drops the Node process to the `node` user.
 RUN mkdir -p /data
 VOLUME /data
 

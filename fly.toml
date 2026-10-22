@@ -29,8 +29,14 @@ primary_region = "syd"
 # The app is reached only over Tailscale. Tailscale needs no inbound service:
 # the node dials out to the tailnet (UDP, falling back to DERP over HTTPS),
 # and the tailnet then reaches the server on port 3005 inside the machine.
-# Adding the Tailscale sidecar is M2; until then the machine is reachable only
-# over Fly's private network (`fly proxy 3005`).
+# Adding the Tailscale sidecar is M2. Until then the machine is reachable over
+# Fly's private network (`fly proxy 3005`), which every app in the same Fly org
+# shares; M2 decides whether to bind to localhost behind the sidecar.
+#
+# Deploying (M2): create the app with `fly apps create`, never `fly launch`,
+# which can write an [http_service] from the Dockerfile's EXPOSE. Deploy with
+# `fly deploy --ha=false --no-public-ips` so there is one machine and no
+# address, then check `fly ips list` is empty.
 
 [[vm]]
   size = "shared-cpu-1x"

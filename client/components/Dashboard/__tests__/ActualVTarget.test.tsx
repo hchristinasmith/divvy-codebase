@@ -64,4 +64,16 @@ describe('ActualVTarget', () => {
     expect(rowFor('Rent').textContent).toContain('$0.00 (0%)')
     expect(trendOf(rowFor('Rent'))).toBe('down')
   })
+
+  it('treats spending exactly on target as not over', () => {
+    render(
+      <ActualVTarget
+        transactions={[{ category: 'Food', amount: 100 }]}
+        targets={{ Food: 100 }}
+      />,
+    )
+
+    expect(rowFor('Food').textContent).toContain('$100.00 (100%)')
+    expect(trendOf(rowFor('Food'))).toBe('down')
+  })
 })

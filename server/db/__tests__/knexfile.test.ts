@@ -36,3 +36,28 @@ describe('production database path', () => {
     expect(mount).toBe(Path.dirname(filename as string))
   })
 })
+
+describe('deploy config', () => {
+  const dockerfile = readFileSync(Path.join(root, 'Dockerfile'), 'utf8')
+  const flyToml = readFileSync(Path.join(root, 'fly.toml'), 'utf8')
+
+  it('sets the same DATABASE_PATH in the image and on Fly as the knexfile default', async () => {
+    vi.stubEnv('DATABASE_PATH', '')
+    const filename = await productionFilename()
+
+    expect(dockerfile).toMatch(
+      new RegExp(`^\\s*DATABASE_PATH=${filename}\\s*$`, 'm'),
+    )
+    expect(flyToml).toMatch(
+      new RegExp(`^\\s*DATABASE_PATH\\s*=\\s*"${filename}"\\s*$`, 'm'),
+    )
+  })
+
+  it('exposes the port the server listens on', () => {
+    const port = dockerfile.match(/^\s*PORT=(\d+)/m)?.[1]
+
+    expect(port).toBeDefined()
+    expect(dockerfile).toMatch(new RegExp(`^EXPOSE ${port}$`, 'm'))
+    expect(flyToml).toMatch(new RegExp(`^\\s*PORT\\s*=\\s*"${port}"`, 'm'))
+  })
+})
