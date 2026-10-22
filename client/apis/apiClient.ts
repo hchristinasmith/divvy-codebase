@@ -1,5 +1,10 @@
 import request from 'superagent'
 import { Accounts } from '../../models/akahu'
+import type { CategoriesResponse } from '../../models/categories.ts'
+import type {
+  UpdateTransactionCategory,
+  UpdateTransactionCategoryResponse,
+} from '../../models/transactions.ts'
 
 const rootURL = new URL(`/api/v1`, document.baseURI)
 
@@ -26,17 +31,20 @@ export async function grabTransactions(
   }
 }
 
-export async function grabCategories() {
+export async function grabCategories(): Promise<CategoriesResponse> {
   const response = await request.get(`${rootURL}/categories`)
-  return response.body
+  return response.body as CategoriesResponse
 }
 
+// Sets the user's category on a transaction. `category` is a category name
+// from GET /categories (the same names as data/cats.js).
 export async function updateTransactionCategory(
-  transactionId: string,
-  categoryId: string,
-) {
+  transactionId: string | number,
+  category: string,
+): Promise<UpdateTransactionCategoryResponse> {
+  const body: UpdateTransactionCategory = { category }
   const response = await request
     .patch(`${rootURL}/transactions/${transactionId}`)
-    .send({ categoryId })
-  return response.body
+    .send(body)
+  return response.body as UpdateTransactionCategoryResponse
 }

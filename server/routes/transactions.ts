@@ -1,10 +1,11 @@
 import express from 'express'
-const router = express.Router()
 import * as db from '../db/transactions.ts'
-//connect this to database
-//get, delete etc
-// get and search for transactions
+import { isKnownCategory } from '../db/categories.ts'
+import type { UpdateTransactionCategoryResponse } from '../../models/transactions.ts'
 
+const router = express.Router()
+
+// GET /api/v1/transactions?description=
 router.get('/', async (req, res) => {
   const { description } = req.query
   try {
@@ -16,25 +17,32 @@ router.get('/', async (req, res) => {
   }
 })
 
-// update category, description transaction with .put
-//needs editing
-
-router.put('/:id', async (req, res) => {
-  const id = req.params.id
-  const { category_group_name } = req.body
-  if (!category_group_name) {
-    return res.status(400).json({ error: 'category_group_name is required' })
+// PATCH /api/v1/transactions/:id  body: UpdateTransactionCategory
+// The one category-edit route (M1 #9). Sets the user's category; never
+// Akahu's (prd-01 Ruling 4).
+router.patch('/:id', async (req, res) => {
+  // Digits only: Number() would also accept '1e3', '0x10' and ' 7'.
+  const id = Number(req.params.id)
+  if (!/^[1-9]\d*$/.test(req.params.id) || !Number.isSafeInteger(id)) {
+    return res.status(400).json({ error: 'id must be a positive integer' })
   }
-  try {
-    const updatedCount = await db.updateTxnCat(id, category_group_name)
 
-    if (updatedCount === 0) {
+  const category: unknown = req.body?.category
+  if (typeof category !== 'string' || !isKnownCategory(category)) {
+    return res
+      .status(400)
+      .json({ error: 'category must be one of GET /api/v1/categories' })
+  }
+
+  try {
+    const transaction = await db.setUserCategory(id, category)
+    if (!transaction) {
       return res.status(404).json({ error: 'Transaction not found' })
     }
-
-    res.json({ message: 'Transaction updated', updatedCount })
+    const body: UpdateTransactionCategoryResponse = { transaction }
+    res.json(body)
   } catch (error) {
-    console.error('Error updating transaction category group name:', error)
+    console.error('Error setting transaction category:', error)
     return res.status(500).json({ error: 'Internal server error' })
   }
 })

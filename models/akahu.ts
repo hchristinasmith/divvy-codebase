@@ -52,17 +52,28 @@ export interface Accounts {
   }
   
   
-// A transaction as Akahu's /transactions endpoints return it, which the
-// server proxies to the client unchanged. Distinct from `Transaction` in
-// ./transactions.ts, which is the flattened row shape of the local table.
+/**
+ * A transaction as Akahu's API returns it (`/transactions`). Money here is
+ * float dollars, exactly as received; it becomes integer cents only at the
+ * server boundary (the seed now, `server/sync/` later: prd-01 Ruling 3).
+ * The Dashboard still renders this shape from the live proxy.
+ */
 export interface AkahuTransaction {
   _id: string
   _account: string
+  _user?: string
+  _connection: string
+  created_at: string
+  updated_at: string
   date: string
   description: string
   amount: number
+  balance?: number
   type: string
+  hash?: string
   category?: AkahuCategory
+  merchant?: AkahuMerchant
+  meta?: AkahuTransactionMeta
 }
 
 export interface AkahuCategory {
@@ -71,4 +82,20 @@ export interface AkahuCategory {
   groups?: {
     personal_finance?: { _id: string; name: string }
   }
+}
+
+export interface AkahuMerchant {
+  _id: string
+  name: string
+  website?: string
+  logo?: string
+}
+
+export interface AkahuTransactionMeta {
+  particulars?: string
+  code?: string
+  reference?: string
+  other_account?: string
+  logo?: string
+  card_suffix?: string
 }
