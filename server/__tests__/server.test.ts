@@ -1,4 +1,5 @@
-import { rmSync } from 'node:fs'
+import { rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import request from 'supertest'
 import type { Express } from 'express'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -113,6 +114,21 @@ describe('client routes get index.html', () => {
 
     expect(res.status).toBe(200)
     expect(res.text).toBe(build.asset)
+  })
+
+  it('falls through to a 404 when there is no client build', async () => {
+    const indexFile = join(build.root, 'public', 'index.html')
+    rmSync(indexFile)
+    try {
+      const res = await request(app)
+        .get('/targets')
+        .set('Accept', BROWSER_ACCEPT)
+        .timeout(2000)
+
+      expect(res.status).toBe(404)
+    } finally {
+      writeFileSync(indexFile, build.indexHtml)
+    }
   })
 
   it('does not answer a request that does not accept HTML', async () => {
