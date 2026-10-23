@@ -1,4 +1,5 @@
 import { readdirSync } from 'node:fs'
+import { Agent, get as httpGet } from 'node:http'
 import { connect } from 'node:net'
 import * as Path from 'node:path'
 import * as URL from 'node:url'
@@ -119,5 +120,51 @@ describe('serveOnLoopback', () => {
     await served.close()
 
     await expect(served.close()).resolves.toBeUndefined()
+  })
+
+  // Node >= 19 already drops idle keep-alive sockets on close(), so only a
+  // request still in flight shows whether closeAllConnections() is called.
+  it('close() ends a request in flight, so the client sees its socket close', async () => {
+    // The route takes the request and never answers it.
+    let onReceived: () => void = () => {}
+    const received = new Promise<void>((resolve) => {
+      onReceived = resolve
+    })
+    const app = express()
+    app.get('/never-answered', () => {
+      onReceived()
+    })
+    served = await serveOnLoopback(app)
+    const agent = new Agent({ keepAlive: true })
+    const req = httpGet({
+      host: '127.0.0.1',
+      port: served.address.port,
+      path: '/never-answered',
+      agent,
+    })
+    // Settles with the error the client sees once the server drops the socket.
+    const clientError = new Promise<NodeJS.ErrnoException>((resolve) => {
+      req.on('error', (err: NodeJS.ErrnoException) => resolve(err))
+    })
+    let deadline: ReturnType<typeof setTimeout> | undefined
+    try {
+      await received
+      const closing = served.close()
+      const timedOut = new Promise<'still open'>((resolve) => {
+        deadline = setTimeout(() => resolve('still open'), 1000)
+      })
+      const outcome = await Promise.race([
+        closing.then(() => 'closed' as const),
+        timedOut,
+      ])
+      expect(outcome, 'close() waited on the request in flight').toBe('closed')
+      expect((await clientError).code).toBe('ECONNRESET')
+    } finally {
+      // Destroying the client lets a close() that is still waiting finish,
+      // so a failing run leaves no open server or timer behind.
+      clearTimeout(deadline)
+      req.destroy()
+      agent.destroy()
+    }
   })
 })
