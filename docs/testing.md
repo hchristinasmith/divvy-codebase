@@ -29,26 +29,36 @@ This is set once in `vitest.config.ts` (`environmentMatchGlobs`); a test file do
 
 ## Server route tests
 
-Use supertest against the real Express app, backed by a fresh in-memory SQLite database:
+Use supertest against the real Express app, backed by a fresh in-memory SQLite database and served on 127.0.0.1:
 
 ```ts
-import request from 'supertest'
-import type { Express } from 'express'
-import { afterAll, beforeEach, it, expect } from 'vitest'
-import { closeDb, freshApp } from '../../test-utils/app.ts'
+import { afterAll, afterEach, beforeEach, it, expect } from 'vitest'
+import {
+  closeDb,
+  freshApp,
+  serveOnLoopback,
+  type LoopbackApi,
+} from '../../test-utils/app.ts'
 
-let app: Express
+let served: LoopbackApi | undefined
+let api: LoopbackApi['api']
 beforeEach(async () => {
-  app = await freshApp()
+  served = await serveOnLoopback(await freshApp())
+  api = served.api
+})
+afterEach(async () => {
+  await served?.close() // beforeEach can fail before the server listens
+  served = undefined
 })
 afterAll(closeDb)
 
 it('…', async () => {
-  const res = await request(app).get('/api/v1/…')
+  const res = await api.get('/api/v1/…')
   expect(res.status).toBe(200)
 })
 ```
 
+- `serveOnLoopback()` (`server/test-utils/app.ts`) gives each test one server already listening on 127.0.0.1, with supertest bound to it; `close()` in `afterEach` shuts it down. Never pass the bare app to supertest (`request(app)`): it then opens a server on all interfaces for every request, and another process can bind 127.0.0.1 on that same port, so the request reaches a foreign server (#97, #105).
 - `freshApp()` (`server/test-utils/app.ts`) rolls every migration back, re-applies them all, and returns the app, so each test starts from an empty, fully migrated schema. Insert the rows a test needs inside that test.
 - The database is the `test` config in `server/db/knexfile.js` (`:memory:`), chosen because vitest sets `NODE_ENV=test`. `freshApp()` throws if the connection is anything other than `:memory:` — never run tests against a developer's real `.sqlite3` file.
 - Each test file gets its own module graph and so its own database. Call `closeDb` in `afterAll`.

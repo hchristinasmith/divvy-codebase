@@ -1,20 +1,31 @@
-import request from 'supertest'
-import type { Express } from 'express'
-import { afterAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { closeDb, freshApp } from '../../test-utils/app.ts'
+import {
+  closeDb,
+  freshApp,
+  serveOnLoopback,
+  type LoopbackApi,
+} from '../../test-utils/app.ts'
 
-let app: Express
+let served: LoopbackApi | undefined
+let api: LoopbackApi['api']
 
 beforeEach(async () => {
-  app = await freshApp()
+  served = await serveOnLoopback(await freshApp())
+  api = served.api
+})
+
+// beforeEach can fail before this test's server is listening.
+afterEach(async () => {
+  await served?.close()
+  served = undefined
 })
 
 afterAll(closeDb)
 
 describe('GET /api/v1/categories', () => {
   it('lists category groups as { items: [{ name, categories }] }', async () => {
-    const res = await request(app).get('/api/v1/categories')
+    const res = await api.get('/api/v1/categories')
 
     expect(res.status).toBe(200)
     expect(res.headers['content-type']).toMatch(/^application\/json/)
@@ -32,7 +43,7 @@ describe('GET /api/v1/categories', () => {
   })
 
   it('gives every group and every category a distinct name', async () => {
-    const res = await request(app).get('/api/v1/categories')
+    const res = await api.get('/api/v1/categories')
     const items: { name: string; categories: string[] }[] = res.body.items
     const groupNames = items.map((g) => g.name)
     const categoryNames = items.flatMap((g) => g.categories)

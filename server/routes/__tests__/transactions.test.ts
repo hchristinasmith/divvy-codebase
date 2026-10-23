@@ -1,8 +1,7 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createServer, type Server } from 'node:http'
-import request from 'supertest'
 import server from '../../server.ts'
 import connection from '../../db/connection.ts'
+import { serveOnLoopback, type LoopbackApi } from '../../test-utils/app.ts'
 import fixture from '../../db/fixtures/transactions.json'
 import { TRANSACTION_COLUMNS } from '../../db/__tests__/transactionColumns.ts'
 import { dollarsToCents } from '../../../shared/money.ts'
@@ -10,32 +9,24 @@ import { categories } from '../../../data/cats.js'
 
 // Route tests run against the app's own connection, which is the in-memory
 // SQLite `test` config under vitest (NODE_ENV=test). Each test starts from a
-// freshly migrated and seeded database.
-//
-// Each test gets its own HTTP server, listening on 127.0.0.1. Given the bare
-// Express app, supertest opens and closes a server on every request, bound to
-// all interfaces; under parallel load that let requests reach the wrong
-// socket (socket hang up). A server that is already listening is used as is.
-let httpServer: Server
-let api: ReturnType<typeof request>
+// freshly migrated and seeded database, and its own HTTP server on 127.0.0.1
+// (`serveOnLoopback` says why).
+let served: LoopbackApi | undefined
+let api: LoopbackApi['api']
 
 beforeEach(async () => {
   delete process.env.DIVVY_SEED_TRANSACTIONS
   await connection.migrate.rollback(undefined, true)
   await connection.migrate.latest()
   await connection.seed.run()
-  httpServer = createServer(server)
-  await new Promise<void>((resolve) => httpServer.listen(0, '127.0.0.1', resolve))
-  api = request(httpServer)
+  served = await serveOnLoopback(server)
+  api = served.api
 })
 
+// beforeEach can fail before this test's server is listening.
 afterEach(async () => {
-  // beforeEach can fail before this test's server is listening.
-  if (!httpServer?.listening) return
-  httpServer.closeAllConnections()
-  await new Promise<void>((resolve, reject) =>
-    httpServer.close((err) => (err ? reject(err) : resolve())),
-  )
+  await served?.close()
+  served = undefined
 })
 
 afterAll(async () => {

@@ -1,8 +1,12 @@
-import request from 'supertest'
 import type { Express } from 'express'
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { closeDb, freshApp } from '../../test-utils/app.ts'
+import {
+  closeDb,
+  freshApp,
+  serveOnLoopback,
+  type LoopbackApi,
+} from '../../test-utils/app.ts'
 import routes from '../index.ts'
 
 // The `/api/v1` mount table (prd-02 Sequencing, wave 1). Every path the app
@@ -10,6 +14,8 @@ import routes from '../index.ts'
 // exactly as they did.
 
 let app: Express
+let served: LoopbackApi | undefined
+let api: LoopbackApi['api']
 
 // The accounts router proxies Akahu over the network. `server.ts` loads
 // `dotenv/config`, so a developer's `.env` could make these tests call the
@@ -25,9 +31,14 @@ beforeEach(async () => {
     delete process.env[name]
   }
   app = await freshApp()
+  served = await serveOnLoopback(app)
+  api = served.api
 })
 
-afterEach(() => {
+// beforeEach can fail before this test's server is listening.
+afterEach(async () => {
+  await served?.close()
+  served = undefined
   for (const name of AKAHU_ENV) {
     const value = savedEnv[name]
     if (value === undefined) delete process.env[name]
@@ -41,7 +52,7 @@ describe('existing routes answer as before', () => {
   it.each(['/api/v1/accounts', '/api/v1/accounts/transactions', '/api/v1/accounts/acc_1/transactions'])(
     'GET %s reaches the accounts router',
     async (path) => {
-      const res = await request(app).get(path)
+      const res = await api.get(path)
 
       // The router's own refusal, not Express's 404: the mount reached it.
       expect(res.status).toBe(500)
@@ -50,7 +61,7 @@ describe('existing routes answer as before', () => {
   )
 
   it('GET /api/v1/categories lists category groups', async () => {
-    const res = await request(app).get('/api/v1/categories')
+    const res = await api.get('/api/v1/categories')
 
     expect(res.status).toBe(200)
     expect(res.headers['content-type']).toMatch(/^application\/json/)
@@ -59,7 +70,7 @@ describe('existing routes answer as before', () => {
   })
 
   it('GET /api/v1/transactions searches transactions', async () => {
-    const res = await request(app).get('/api/v1/transactions')
+    const res = await api.get('/api/v1/transactions')
 
     expect(res.status).toBe(200)
     expect(res.headers['content-type']).toMatch(/^application\/json/)
@@ -67,7 +78,7 @@ describe('existing routes answer as before', () => {
   })
 
   it('PATCH /api/v1/transactions/:id reaches the transactions router', async () => {
-    const res = await request(app)
+    const res = await api
       .patch('/api/v1/transactions/999999')
       .send({ category: 'Bakeries' })
 
@@ -77,7 +88,7 @@ describe('existing routes answer as before', () => {
   })
 
   it('an unknown /api/v1 path is still a 404', async () => {
-    const res = await request(app).get('/api/v1/nope')
+    const res = await api.get('/api/v1/nope')
 
     expect(res.status).toBe(404)
   })
@@ -88,7 +99,7 @@ const EXISTING = ['accounts', 'categories', 'transactions']
 
 describe('placeholder routes', () => {
   it.each(PLACEHOLDERS)('GET /api/v1/%s answers 501 with a JSON error', async (name) => {
-    const res = await request(app).get(`/api/v1/${name}`)
+    const res = await api.get(`/api/v1/${name}`)
 
     expect(res.status).toBe(501)
     expect(res.headers['content-type']).toMatch(/^application\/json/)
@@ -99,10 +110,10 @@ describe('placeholder routes', () => {
     '/api/v1/%s answers 501 for any method and sub-path',
     async (name) => {
       for (const res of [
-        await request(app).post(`/api/v1/${name}`).send({}),
-        await request(app).patch(`/api/v1/${name}/1`).send({}),
-        await request(app).delete(`/api/v1/${name}/1`),
-        await request(app).get(`/api/v1/${name}/a/b`),
+        await api.post(`/api/v1/${name}`).send({}),
+        await api.patch(`/api/v1/${name}/1`).send({}),
+        await api.delete(`/api/v1/${name}/1`),
+        await api.get(`/api/v1/${name}/a/b`),
       ]) {
         expect(res.status).toBe(501)
         expect(res.body).toStrictEqual({ error: `Not implemented: ${name}` })

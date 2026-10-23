@@ -1,10 +1,13 @@
 import { rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import request from 'supertest'
-import type { Express } from 'express'
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { closeDb, freshApp } from '../test-utils/app.ts'
+import {
+  closeDb,
+  freshApp,
+  serveOnLoopback,
+  type LoopbackApi,
+} from '../test-utils/app.ts'
 
 // A stand-in client build. server.ts serves `public/` beside its own file,
 // as dist/server.js does in production; the repo has no build under server/,
@@ -39,10 +42,18 @@ vi.mock('node:url', async (importOriginal) => {
   }
 })
 
-let app: Express
+let served: LoopbackApi | undefined
+let api: LoopbackApi['api']
 
 beforeEach(async () => {
-  app = await freshApp()
+  served = await serveOnLoopback(await freshApp())
+  api = served.api
+})
+
+// beforeEach can fail before this test's server is listening.
+afterEach(async () => {
+  await served?.close()
+  served = undefined
 })
 
 afterAll(async () => {
@@ -64,7 +75,7 @@ const OTHER_ORIGIN = 'http://some-page.tailnet.example'
 // same-origin only: a page on another origin must not be able to read it (#91).
 describe('same-origin only: no CORS headers', () => {
   it('sends no Access-Control-Allow-Origin on a cross-origin API read', async () => {
-    const res = await request(app)
+    const res = await api
       .get('/api/v1/categories')
       .set('Origin', OTHER_ORIGIN)
 
@@ -74,7 +85,7 @@ describe('same-origin only: no CORS headers', () => {
   })
 
   it('answers a cross-origin preflight with no CORS headers', async () => {
-    const res = await request(app)
+    const res = await api
       .options('/api/v1/transactions/1')
       .set('Origin', OTHER_ORIGIN)
       .set('Access-Control-Request-Method', 'PATCH')
@@ -94,7 +105,7 @@ describe('client routes get index.html', () => {
   it.each(['/targets', '/settings', '/some/route/the/client/may/own'])(
     'GET %s from a browser returns index.html',
     async (path) => {
-      const res = await request(app).get(path).set('Accept', BROWSER_ACCEPT)
+      const res = await api.get(path).set('Accept', BROWSER_ACCEPT)
 
       expect(res.status).toBe(200)
       expect(res.headers['content-type']).toMatch(/^text\/html/)
@@ -103,14 +114,14 @@ describe('client routes get index.html', () => {
   )
 
   it('treats /apiary as a client route, not as /api', async () => {
-    const res = await request(app).get('/apiary').set('Accept', BROWSER_ACCEPT)
+    const res = await api.get('/apiary').set('Accept', BROWSER_ACCEPT)
 
     expect(res.status).toBe(200)
     expect(res.text).toBe(build.indexHtml)
   })
 
   it('still serves a static file as itself', async () => {
-    const res = await request(app).get('/assets/app.js')
+    const res = await api.get('/assets/app.js')
 
     expect(res.status).toBe(200)
     expect(res.text).toBe(build.asset)
@@ -120,7 +131,7 @@ describe('client routes get index.html', () => {
     const indexFile = join(build.root, 'public', 'index.html')
     rmSync(indexFile)
     try {
-      const res = await request(app)
+      const res = await api
         .get('/targets')
         .set('Accept', BROWSER_ACCEPT)
         .timeout(2000)
@@ -136,7 +147,7 @@ describe('client routes get index.html', () => {
   })
 
   it('does not answer a request that does not accept HTML', async () => {
-    const res = await request(app)
+    const res = await api
       .get('/targets')
       .set('Accept', 'application/json')
 
@@ -145,7 +156,7 @@ describe('client routes get index.html', () => {
   })
 
   it('does not answer a non-GET request', async () => {
-    const res = await request(app).post('/targets').set('Accept', BROWSER_ACCEPT)
+    const res = await api.post('/targets').set('Accept', BROWSER_ACCEPT)
 
     expect(res.status).toBe(404)
     expect(res.text).not.toBe(build.indexHtml)
@@ -161,7 +172,7 @@ describe('unknown /api routes 404 as JSON', () => {
     ['post', '/api/v1/nothing'],
     ['delete', '/api/v1/categories'],
   ] as const)('%s %s is a JSON 404, never index.html', async (method, path) => {
-    const res = await request(app)[method](path).set('Accept', BROWSER_ACCEPT)
+    const res = await api[method](path).set('Accept', BROWSER_ACCEPT)
 
     expect(res.status).toBe(404)
     expect(res.headers['content-type']).toMatch(/^application\/json/)
