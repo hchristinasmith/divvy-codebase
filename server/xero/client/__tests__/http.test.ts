@@ -311,6 +311,19 @@ describe('typed errors (issue #34 done-when 9)', () => {
     })
   })
 
+  it('rejects when fetch itself fails, passing the error through', async () => {
+    const networkDown = new TypeError('fetch failed')
+    const client = createXeroClient({
+      getAccessToken: async () => SENTINEL_TOKEN,
+      tenantId: SENTINEL_TENANT,
+      fetch: async () => {
+        throw networkDown
+      },
+    })
+
+    await expect(client.getReceivableInvoices()).rejects.toBe(networkDown)
+  })
+
   it('rejects a failure on page 2 instead of returning page 1 alone', async () => {
     const { client } = clientWith([
       fixture('invoices-accrec-page1.json'),

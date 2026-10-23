@@ -56,6 +56,15 @@ describe('parseXeroJson', () => {
     })
   })
 
+  it.each(['01', '1.', '1-2', '-', '1e', '.5'])(
+    'throws on the malformed number %s, as JSON.parse would',
+    (literal) => {
+      const text = `{"AmountDue": ${literal}}`
+      expect(() => JSON.parse(text)).toThrow(SyntaxError)
+      expect(() => parseXeroJson(text)).toThrow(SyntaxError)
+    },
+  )
+
   it('throws on a body that is not JSON', () => {
     expect(() => parseXeroJson('<Response><Invoices/></Response>')).toThrow(
       SyntaxError,

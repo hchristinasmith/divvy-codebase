@@ -116,6 +116,27 @@ describe('getReceivableInvoices', () => {
     })
   })
 
+  it.each([
+    ['Type', '"Type": "ACCREC"'],
+    ['Status', '"Status": "AUTHORISED"'],
+  ])(
+    'rejects a row with no %s instead of filtering it out to none',
+    async (key, field) => {
+      // Only the first invoice loses the key, so the call must fail, not
+      // quietly return the rest.
+      const page = fixture('invoices-accrec-page1.json').replace(
+        field,
+        `"${key.toLowerCase()}": "x"`,
+      )
+      const { client } = clientWith([page, fixture('invoices-empty.json')])
+
+      await expect(client.getReceivableInvoices()).rejects.toMatchObject({
+        code: 'bad_response',
+        message: `${key} is missing or not text`,
+      })
+    },
+  )
+
   it('rejects an amount it cannot convert exactly, rather than rounding', async () => {
     const page = fixture('invoices-accrec-page1.json').replace(
       '"AmountDue": 1150.00',

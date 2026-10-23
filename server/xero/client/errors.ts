@@ -1,7 +1,9 @@
 // The one error type the Xero client rejects with.
 //
 // A failure is never an empty list: a caller that sees zero invoices can trust
-// there are none, because every way of not knowing is one of these codes.
+// there are none. Every failure Xero reports is one of these codes; a failure
+// before Xero answers (the token function or `fetch` rejecting) propagates
+// unchanged, still as a rejection.
 //
 // Messages are fixed text plus an HTTP status or a field name. They never
 // carry the access token, the tenant id or a response body, so an error can be

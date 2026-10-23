@@ -6,21 +6,28 @@
 // module reads no environment variables and logs nothing.
 //
 // Every request is a GET (prd-05 done-when 5); see http.ts for how that is
-// enforced. Every amount comes back as integer cents. Every failure rejects
-// with `XeroClientError`; none resolves as an empty list.
+// enforced. Every amount comes back as integer cents. No failure resolves as
+// an empty list. Every failure Xero reports (a status or a body) rejects with
+// `XeroClientError`; a failure before Xero answers (`getAccessToken`
+// rejecting, or `fetch` itself, such as a network error or a refused
+// redirect) rejects with that error unchanged.
 //
 // Plain `fetch`, not the `xero-node` SDK: the SDK deserialises amounts into
 // JavaScript numbers before Divvy can see them, which is the float path
 // prd-05 Ruling 6 rules out, and it is a large dependency for a handful of
 // GETs.
 //
-// Read-only scopes each function needs (prd-05 Ruling 1). These names are
-// from memory and UNVERIFIED: Xero has been moving apps to granular scopes,
-// which may rename them. Whichever names apply, only `.read` scopes are
-// requested, and a missing one surfaces as `forbidden`, never as no data.
+// Read-only scopes each function needs (prd-05 Ruling 1). UNVERIFIED against
+// a live app: Xero apps created on or after 2 March 2026 get only granular
+// scopes, so a new Divvy app requests the granular names; the broad names in
+// brackets exist only on older apps (until September 2027). Whichever apply,
+// only `.read` scopes are requested, and a missing one surfaces as
+// `forbidden`, never as no data.
 //
-//   getReceivableInvoices, getPayableBills   accounting.transactions.read
-//   getProfitLoss                            accounting.reports.read
+//   getReceivableInvoices, getPayableBills   accounting.invoices.read
+//                                            (accounting.transactions.read)
+//   getProfitLoss                            accounting.reports.profitandloss.read
+//                                            (accounting.reports.read)
 //   getPayRuns                               payroll.payruns.read
 //
 // The sign-in consent also needs `offline_access` (for a refresh token);

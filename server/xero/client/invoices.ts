@@ -64,9 +64,16 @@ async function getOutstanding<T extends InvoiceType>(
     },
     readInvoicePage,
   )
+  // Type and Status are read, not just compared: a row without them is a
+  // shape this client does not know, and dropping it would look like "none
+  // owed".
   return rows
     .map((row) => readRecord(row, 'Invoice'))
-    .filter((raw) => raw.Type === type && raw.Status === 'AUTHORISED')
+    .filter(
+      (raw) =>
+        readString(raw, 'Type') === type &&
+        readString(raw, 'Status') === 'AUTHORISED',
+    )
     .map((raw) => mapDocument(raw, type))
     .filter((doc) => doc.amountDueCents > 0)
 }

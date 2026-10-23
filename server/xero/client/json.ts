@@ -16,8 +16,11 @@ function isDigit(ch: string): boolean {
   return ch >= '0' && ch <= '9'
 }
 
-// Characters a JSON number literal may contain. A malformed run such as `1-2`
-// is quoted as-is and then refused by whichever reader meets it.
+// Characters a JSON number literal may contain. The run they form is then
+// checked against JSON's number grammar, so `01`, `1.` or `1-2` fail the
+// parse as `JSON.parse` would, rather than becoming valid quoted text.
+const JSON_NUMBER = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/
+
 function isNumberChar(ch: string): boolean {
   return (
     isDigit(ch) ||
@@ -57,7 +60,11 @@ export function parseXeroJson(text: string): unknown {
     if (ch === '-' || isDigit(ch)) {
       let end = i + 1
       while (end < text.length && isNumberChar(text[end])) end += 1
-      out += `"${text.slice(i, end)}"`
+      const literal = text.slice(i, end)
+      if (!JSON_NUMBER.test(literal)) {
+        throw new SyntaxError('malformed number literal')
+      }
+      out += `"${literal}"`
       i = end
       continue
     }
