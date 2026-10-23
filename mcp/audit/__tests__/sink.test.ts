@@ -7,18 +7,21 @@
 //     a row without bound;
 //   - a record breaking the contract is stored instead of refused;
 //   - records land out of call order, or a second writer fails on a lock;
+//   - an unwritable path, missing directory or non-database file lets data
+//     through, or a failure sticks after the cause is gone;
+//   - the file is left in WAL mode, or cannot be read with a read-only open;
 //   - the sink imports anything beyond node:fs, node:path, sqlite3 and the
 //     contract, or `index.ts` exports more than `createAuditSink`.
 //
 // Every test works in its own mkdtemp directory, removed afterwards.
 
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import sqlite3 from 'sqlite3'
 import ts from 'typescript'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { READ_ONLY_ANNOTATIONS, UNKNOWN_TOOL, WAVE2_MODULES } from '../../contracts.ts'
@@ -479,5 +482,127 @@ describe('records are written one at a time, in call order', () => {
     ])
     expect(results.map((result) => result.status)).toEqual(['fulfilled', 'rejected', 'fulfilled'])
     expect((await readRows(path)).map((row) => row.tool)).toEqual(['before', 'after'])
+  })
+})
+
+// ---- Failing closed ----
+
+describe('an audit file that cannot be written fails closed', () => {
+  // The dispatcher reports each failed record on stderr; capture it rather
+  // than print it, and count it as evidence the sink rejected.
+  const quiet = () => vi.spyOn(console, 'error').mockImplementation(() => undefined)
+  let stderr: ReturnType<typeof quiet>
+  beforeEach(() => {
+    stderr = quiet()
+  })
+  afterEach(() => {
+    stderr.mockRestore()
+  })
+
+  it.each([
+    ['a successful call', 'fake_ok', { scope: 'personal' }],
+    ['a rejected call', 'fake_ok', { scope: 'nobody' }],
+    ['a throwing handler', 'fake_throws', { scope: 'personal' }],
+    ['an unknown tool', 'drop_table', {}],
+  ])('a missing directory: %s returns audit_unavailable and no data', async (_label, name, args) => {
+    const missing = join(scratch(), 'missing')
+    const result = await call(createAuditSink({ path: join(missing, 'audit.sqlite3') }), name, args)
+    expect(errorCode(result)).toBe('audit_unavailable')
+    expect(result.structuredContent).toBeUndefined()
+    expect(JSON.stringify(result)).not.toContain(SENTINEL)
+    expect(existsSync(missing)).toBe(false)
+    expect(stderr).toHaveBeenCalledTimes(1)
+  })
+
+  it.skipIf(process.getuid?.() === 0)('a directory without write permission: no data returned, no file made', async () => {
+    const locked = join(scratch(), 'locked')
+    mkdirSync(locked, { mode: 0o555 })
+    try {
+      const result = await call(createAuditSink({ path: join(locked, 'audit.sqlite3') }), 'fake_ok', { scope: 'personal' })
+      expect(errorCode(result)).toBe('audit_unavailable')
+      expect(JSON.stringify(result)).not.toContain(SENTINEL)
+      expect(readdirSync(locked)).toEqual([])
+    } finally {
+      chmodSync(locked, 0o755)
+    }
+  })
+
+  it('is not sticky: once the directory exists, the same sink records', async () => {
+    const missing = join(scratch(), 'missing')
+    const path = join(missing, 'audit.sqlite3')
+    const sink = createAuditSink({ path })
+    await expect(sink.record(validRecord())).rejects.toThrow()
+    mkdirSync(missing)
+    await sink.record(validRecord({ tool: 'after_mkdir' }))
+    expect((await readRows(path)).map((row) => row.tool)).toEqual(['after_mkdir'])
+  })
+
+  it('a file that is not a database: no data returned, its bytes unchanged', async () => {
+    const dir = scratch()
+    const path = join(dir, 'audit.sqlite3')
+    const garbage = Buffer.from('this is not a SQLite database\n'.repeat(200))
+    writeFileSync(path, garbage)
+    const result = await call(createAuditSink({ path }), 'fake_ok', { scope: 'personal' })
+    expect(errorCode(result)).toBe('audit_unavailable')
+    expect(JSON.stringify(result)).not.toContain(SENTINEL)
+    expect(readFileSync(path).equals(garbage)).toBe(true)
+    expect(readdirSync(dir)).toEqual(['audit.sqlite3'])
+  })
+})
+
+// ---- The journal, and the web app's read-only open ----
+
+function createDatabase(path: string): Promise<sqlite3.Database> {
+  return new Promise((resolve, reject) => {
+    const db = new sqlite3.Database(path, (error) => (error ? reject(error) : resolve(db)))
+  })
+}
+
+function exec(db: sqlite3.Database, sql: string): Promise<void> {
+  return new Promise((resolve, reject) => db.exec(sql, (error) => (error ? reject(error) : resolve())))
+}
+
+describe('the audit file keeps a rollback journal', () => {
+  // The only test that goes red if the sink stops setting journal_mode: a
+  // fresh file starts in DELETE mode anyway, so this one starts in WAL.
+  it('switches a WAL-mode file to journal_mode=delete and leaves no -wal or -shm', async () => {
+    const dir = scratch()
+    const path = join(dir, 'audit.sqlite3')
+    const fixture = await createDatabase(path)
+    await exec(fixture, 'PRAGMA journal_mode = WAL; CREATE TABLE unrelated (x INTEGER);')
+    await close(fixture)
+    expect(readFileSync(path)[18]).toBe(2) // header: WAL
+
+    await createAuditSink({ path }).record(validRecord())
+
+    expect(readFileSync(path)[18]).toBe(1) // header: legacy rollback journal
+    expect(await query<{ journal_mode: string }>(path, 'PRAGMA journal_mode')).toEqual([{ journal_mode: 'delete' }])
+    expect(readdirSync(dir)).toEqual(['audit.sqlite3'])
+  })
+
+  it('a quiescent file reads with a read-only open and the directory is unchanged', async () => {
+    const dir = scratch()
+    const path = join(dir, 'audit.sqlite3')
+    await createAuditSink({ path }).record(validRecord({ tool: 'read_me' }))
+    const listing = readdirSync(dir)
+    expect((await readRows(path)).map((row) => row.tool)).toEqual(['read_me'])
+    expect(readdirSync(dir)).toEqual(listing)
+  })
+
+  // Stands in for the web app, a different user with no write access to the
+  // file or its directory. Root ignores permissions, so it proves nothing there.
+  it.skipIf(process.getuid?.() === 0)('reads read-only with the file 0444 and the directory 0555', async () => {
+    const dir = scratch()
+    const path = join(dir, 'audit.sqlite3')
+    await createAuditSink({ path }).record(validRecord({ tool: 'read_me' }))
+    chmodSync(path, 0o444)
+    chmodSync(dir, 0o555)
+    try {
+      expect((await readRows(path)).map((row) => row.tool)).toEqual(['read_me'])
+      expect(readdirSync(dir)).toEqual(['audit.sqlite3'])
+    } finally {
+      chmodSync(dir, 0o755)
+      chmodSync(path, 0o644)
+    }
   })
 })
