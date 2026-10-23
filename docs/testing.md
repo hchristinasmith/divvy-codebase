@@ -18,7 +18,7 @@ Tests sit beside the code in a `__tests__/` folder, named after the file they co
 | `client/components/Dashboard/ActualVTarget.tsx` | `client/components/Dashboard/__tests__/ActualVTarget.test.tsx` |
 | `shared/<module>.ts` | `shared/__tests__/<module>.test.ts` |
 
-`vitest.config.ts` only collects `*.test.ts(x)` files inside `__tests__/` folders under `client/`, `server/`, `shared/` and `models/`. A test anywhere else does not run.
+`vitest.config.ts` only collects `*.test.ts(x)` files inside `__tests__/` folders under `client/`, `server/`, `shared/`, `models/` and `mcp/`. A test anywhere else does not run.
 
 ## Environments
 
@@ -60,6 +60,12 @@ Use Testing Library with jsdom. No snapshot tests.
 - vitest runs without globals, so Testing Library cannot clean up on its own: add `afterEach(cleanup)` to every component test file.
 - `@testing-library/jest-dom` is not installed; assert on the DOM directly (`textContent`, `queryByText(...)` is `null`, attributes).
 - Pick leaf components first. A component that needs Auth0, react-router or TanStack Query needs a provider wrapper; write that wrapper once in a shared test helper rather than per file.
+
+## Fixtures
+
+Recorded API responses live in a `__fixtures__/` folder beside the code, for example `server/xero/client/__fixtures__/`. Vitest does not collect them as tests.
+
+Read a fixture as raw text (`readFileSync(path, 'utf8')`) and feed it to the code as a response body. Never `import` it as JSON: that parses number literals into floats before the code under test sees them, which skips the exact-text cents conversion the tests exist to check.
 
 ## Assertions
 
