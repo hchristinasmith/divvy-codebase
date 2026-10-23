@@ -61,6 +61,12 @@ Use Testing Library with jsdom. No snapshot tests.
 - `@testing-library/jest-dom` is not installed; assert on the DOM directly (`textContent`, `queryByText(...)` is `null`, attributes).
 - Pick leaf components first. A component that needs Auth0, react-router or TanStack Query needs a provider wrapper; write that wrapper once in a shared test helper rather than per file.
 
+## Fixtures
+
+Recorded API responses live in a `__fixtures__/` folder beside the code, for example `server/xero/client/__fixtures__/`. Vitest does not collect them as tests.
+
+Read a fixture as raw text (`readFileSync(path, 'utf8')`) and feed it to the code as a response body. Never `import` it as JSON: that parses number literals into floats before the code under test sees them, which skips the exact-text cents conversion the tests exist to check.
+
 ## Assertions
 
 - When asserting the shape of a row or API response, pin the key set: `expect(Object.keys(body).sort()).toEqual([...].sort())`. `toEqual` alone cannot see a key that disappeared.
