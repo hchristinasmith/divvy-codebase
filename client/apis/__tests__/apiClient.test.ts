@@ -13,11 +13,14 @@ let http: Server
 let api: typeof import('../apiClient.ts')
 
 beforeAll(async () => {
-  http = server.listen(0)
-  const { port } = http.address() as AddressInfo
+  // Loopback only: another process can bind 127.0.0.1 on the same port (#97/#105).
+  http = await new Promise<Server>((resolve) => {
+    const listening = server.listen(0, '127.0.0.1', () => resolve(listening))
+  })
+  const { address, port } = http.address() as AddressInfo
   // apiClient resolves its base URL from the page; give it this server.
   ;(globalThis as { document?: unknown }).document = {
-    baseURI: `http://127.0.0.1:${port}/`,
+    baseURI: `http://${address}:${port}/`,
   }
   api = await import('../apiClient.ts')
 })
