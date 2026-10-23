@@ -33,6 +33,9 @@ const MCP_OUTFILE = '--outfile=dist/mcp/index.js'
 const MCP_ENTRY = ' mcp/index.ts'
 const PROBE_ENTRY = 'mcp/audit/index.ts'
 const PROBE_NAME = 'audit-probe.js'
+// Bounds each child process. The children run synchronously, so vitest's own
+// hook timeout cannot interrupt them; without this a hung child hangs the gate.
+const CHILD_TIMEOUT_MS = 30_000
 
 const RECORD = {
   at: '2026-10-23T01:02:03.000Z',
@@ -80,6 +83,7 @@ function sh(command: string): void {
     cwd: ROOT,
     env: { ...process.env, PATH: `${BIN_DIR}:${process.env.PATH ?? ''}` },
     stdio: 'pipe',
+    timeout: CHILD_TIMEOUT_MS,
   })
 }
 
@@ -136,9 +140,10 @@ describe('build:mcp ships the audit schema beside the bundle', () => {
     const child = spawnSync(process.execPath, ['--input-type=module', '-e', CHILD_SCRIPT, pathToFileURL(probePath).href, auditPath], {
       cwd: work,
       encoding: 'utf8',
+      timeout: CHILD_TIMEOUT_MS,
     })
     if (child.status !== 0) {
-      throw new Error(`the bundled sink did not resolve the record (exit ${child.status}):\n${child.stderr}`)
+      throw new Error(`the bundled sink did not resolve the record (exit ${child.status}, signal ${child.signal}):\n${child.stderr}`)
     }
     rows = await readRows(auditPath)
   })
