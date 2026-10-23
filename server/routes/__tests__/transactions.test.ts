@@ -30,6 +30,8 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  // beforeEach can fail before this test's server is listening.
+  if (!httpServer?.listening) return
   httpServer.closeAllConnections()
   await new Promise<void>((resolve, reject) =>
     httpServer.close((err) => (err ? reject(err) : resolve())),
