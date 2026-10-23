@@ -23,16 +23,19 @@ yet. If Tailscale is absent on the machine, run path B only and record path A as
 
 ```bash
 fly status -a <app>
-fly ssh console -a <app> -C "sh -c 'command -v useradd su node tailscale; node --version'"
+fly ssh console -a <app> -C "sh -c 'command -v useradd; command -v su; command -v node; command -v tailscale; node --version'"
 tailscale status
 ```
 
 - `fly status` shows no started machine: stop, there is nothing to test against.
 - `node --version` must be v22 (the bundle targets node22).
-- If `tailscale` is listed, record how prd-01 runs it:
+- `command -v` is one name per call: the machine's `sh` is dash, which
+  ignores every name after the first.
+- If `tailscale` is listed, record how prd-01 runs it. The slim image has no
+  `ps`, so this reads each process's command line from `/proc`:
 
   ```bash
-  fly ssh console -a <app> -C "sh -c 'ps -ef | grep [t]ailscaled; tailscale status --self'"
+  fly ssh console -a <app> -C "sh -c 'for f in /proc/[0-9]*/cmdline; do xargs -0 < \$f; done | grep [t]ailscaled; tailscale status --self'"
   ```
 
   Note userspace-networking (`--tun=userspace-networking`) or a tun device, and
@@ -208,11 +211,14 @@ secrets and no live-file access".
 
 ## Cleanup
 
+First remove the `divvy-spike-*` entries from `claude_desktop_config.json` and
+restart Claude desktop: while it holds a spike session open, a process runs as
+`divvy-mcp` and `userdel` refuses. Then:
+
 ```bash
 fly ssh console -a <app> -C "userdel -r divvy-mcp"
 fly ssh console -a <app> -C "rm -rf /tmp/divvy-mcp-spike"
 rm -rf /tmp/divvy-mcp-spike
 ```
 
-Remove the `divvy-spike-*` entries from `claude_desktop_config.json` and
-restart Claude desktop. Remove the ACL `ssh` rule if it was added only for this.
+Remove the ACL `ssh` rule if it was added only for this.
