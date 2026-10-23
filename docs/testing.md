@@ -18,7 +18,7 @@ Tests sit beside the code in a `__tests__/` folder, named after the file they co
 | `client/components/Dashboard/ActualVTarget.tsx` | `client/components/Dashboard/__tests__/ActualVTarget.test.tsx` |
 | `shared/<module>.ts` | `shared/__tests__/<module>.test.ts` |
 
-`vitest.config.ts` only collects `*.test.ts(x)` files inside `__tests__/` folders under `client/`, `server/`, `shared/` and `models/`. A test anywhere else does not run.
+`vitest.config.ts` only collects `*.test.ts(x)` files inside `__tests__/` folders under `client/`, `server/`, `shared/`, `models/` and `mcp/`. A test anywhere else does not run.
 
 ## Environments
 
