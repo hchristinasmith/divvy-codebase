@@ -3,12 +3,16 @@
 //   - `schema.sql` holds anything but `CREATE TABLE IF NOT EXISTS`, a column
 //     goes missing, or a second open changes or duplicates the schema;
 //   - a call through the real dispatcher leaves no row or two;
+//   - returned data or error text reaches the file, or a parameter can grow
+//     a row without bound;
+//   - a record breaking the contract is stored instead of refused;
+//   - records land out of call order, or a second writer fails on a lock;
 //   - the sink imports anything beyond node:fs, node:path, sqlite3 and the
 //     contract, or `index.ts` exports more than `createAuditSink`.
 //
 // Every test works in its own mkdtemp directory, removed afterwards.
 
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -28,9 +32,9 @@ import type {
   ToolContext,
   ToolDefinition,
 } from '../../contracts.ts'
-import { dispatchToolCall } from '../../tools/registry.ts'
+import { MAX_REJECTED_PARAMS_LENGTH, dispatchToolCall } from '../../tools/registry.ts'
 import * as auditModule from '../index.ts'
-import { createAuditSink } from '../sink.ts'
+import { MAX_AUDIT_PARAMS_LENGTH, createAuditSink } from '../sink.ts'
 
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url))
 const AUDIT_DIR = fileURLToPath(new URL('../', import.meta.url))
@@ -96,6 +100,11 @@ async function query<T>(path: string, sql: string): Promise<T[]> {
 
 function readRows(path: string): Promise<AuditRow[]> {
   return query<AuditRow>(path, 'SELECT * FROM advisor_audit ORDER BY id')
+}
+
+/** Every file in `dir` whose raw bytes contain `needle`. */
+function filesContaining(dir: string, needle: string): string[] {
+  return readdirSync(dir).filter((name) => readFileSync(join(dir, name)).includes(needle))
 }
 
 // ---- The dispatcher's context, with the real sink ----
@@ -276,4 +285,199 @@ describe('the module surface', () => {
       expect(() => createAuditSink({ path })).toThrow(new TypeError('the audit path must be an absolute file path'))
     },
   )
+})
+
+// ---- What a row may hold ----
+
+describe('returned data is never stored', () => {
+  it('a result and an exception carrying the sentinel leave it nowhere in the directory', async () => {
+    const dir = scratch()
+    const sink = createAuditSink({ path: join(dir, 'audit.sqlite3') })
+    const ok = await call(sink, 'fake_ok', { scope: 'personal' })
+    expect(JSON.stringify(ok)).toContain(SENTINEL)
+    await call(sink, 'fake_throws', { scope: 'personal' })
+    await call(sink, 'fake_blob', { blob: 'short' })
+
+    expect(await readRows(join(dir, 'audit.sqlite3'))).toHaveLength(3)
+    expect(readdirSync(dir)).toEqual(['audit.sqlite3'])
+    expect(filesContaining(dir, SENTINEL)).toEqual([])
+  })
+
+  it('positive control: the same scan finds the sentinel when it is a validated parameter', async () => {
+    const dir = scratch()
+    await call(createAuditSink({ path: join(dir, 'audit.sqlite3') }), 'fake_blob', { blob: SENTINEL })
+    expect(filesContaining(dir, SENTINEL)).toEqual(['audit.sqlite3'])
+  })
+
+  it('stray result and error keys on a record are ignored, not stored', async () => {
+    const dir = scratch()
+    const entry = { ...validRecord(), result: { note: SENTINEL }, error: new Error(SENTINEL) }
+    await createAuditSink({ path: join(dir, 'audit.sqlite3') }).record(entry)
+    const rows = await readRows(join(dir, 'audit.sqlite3'))
+    expect(rows).toHaveLength(1)
+    expect(rows[0].params_json).toBe('{}')
+    expect(filesContaining(dir, SENTINEL)).toEqual([])
+  })
+})
+
+describe('parameters are bounded', () => {
+  const oversized = (length: number) => JSON.stringify({ oversized_params_length: length })
+
+  it('uses the same bound as the dispatcher', () => {
+    expect(MAX_AUDIT_PARAMS_LENGTH).toBe(MAX_REJECTED_PARAMS_LENGTH)
+  })
+
+  it('a 5 MB parameter on the ok path is stored as its length only', async () => {
+    const dir = scratch()
+    const path = join(dir, 'audit.sqlite3')
+    const blob = 'x'.repeat(5 * 1024 * 1024)
+    const result = await call(createAuditSink({ path }), 'fake_blob', { blob })
+    expect(result.isError).toBeUndefined()
+
+    const rows = await readRows(path)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].params_json).toBe(oversized(JSON.stringify({ blob }).length))
+    expect(statSync(path).size).toBeLessThan(64 * 1024)
+  })
+
+  it("passes the dispatcher's own marker for an oversized rejected call through as given", async () => {
+    const path = join(scratch(), 'audit.sqlite3')
+    const args = { scope: 'x'.repeat(5000) }
+    await call(createAuditSink({ path }), 'fake_ok', args)
+    const rows = await readRows(path)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ outcome: 'rejected', params_json: oversized(JSON.stringify(args).length) })
+  })
+
+  it('stores JSON of exactly the bound verbatim and one character more as the marker', async () => {
+    const path = join(scratch(), 'audit.sqlite3')
+    const sink = createAuditSink({ path })
+    // A string's JSON is the string plus its two quotes.
+    const atBound = 'a'.repeat(MAX_AUDIT_PARAMS_LENGTH - 2)
+    const overBound = 'b'.repeat(MAX_AUDIT_PARAMS_LENGTH - 1)
+    await sink.record(validRecord({ params: atBound }))
+    await sink.record(validRecord({ params: overBound }))
+    const rows = await readRows(path)
+    expect(rows[0].params_json).toBe(JSON.stringify(atBound))
+    expect(rows[0].params_json).toHaveLength(MAX_AUDIT_PARAMS_LENGTH)
+    expect(rows[1].params_json).toBe(oversized(MAX_AUDIT_PARAMS_LENGTH + 1))
+  })
+})
+
+describe('parameters that do not serialise', () => {
+  const cycle: Record<string, unknown> = {}
+  cycle.self = cycle
+  let deep: unknown = 'bottom'
+  for (let i = 0; i < 100_000; i++) deep = [deep]
+
+  it.each([
+    ['undefined', undefined],
+    ['a function', () => SENTINEL],
+    ['a BigInt', BigInt(1)],
+    ['a cycle', cycle],
+    ['a throwing toJSON', { toJSON: () => { throw new Error(SENTINEL) } }],
+    ['a very deep nest', deep],
+  ])('%s is stored as the unserialisable marker, in one row', async (_label, params) => {
+    const dir = scratch()
+    const path = join(dir, 'audit.sqlite3')
+    await createAuditSink({ path }).record(validRecord({ params }))
+    const rows = await readRows(path)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].params_json).toBe('{"unserialisable_params":true}')
+    expect(filesContaining(dir, SENTINEL)).toEqual([])
+  })
+
+  it('null is stored as null', async () => {
+    const path = join(scratch(), 'audit.sqlite3')
+    await createAuditSink({ path }).record(validRecord({ params: null }))
+    expect((await readRows(path))[0].params_json).toBe('null')
+  })
+})
+
+describe('a record that breaks the contract is refused before the file is touched', () => {
+  const BAD = 'BAD-VALUE-4e1d'
+
+  it.each([
+    ['outcome', { outcome: BAD }],
+    ['outcome', { outcome: undefined }],
+    ['durationMs', { durationMs: -1 }],
+    ['durationMs', { durationMs: Number.NaN }],
+    ['durationMs', { durationMs: Number.POSITIVE_INFINITY }],
+    ['durationMs', { durationMs: BAD }],
+    ['rowCount', { rowCount: -1 }],
+    ['rowCount', { rowCount: 1.5 }],
+    ['rowCount', { rowCount: undefined }],
+    ['rowCount', { rowCount: BAD }],
+    ['at', { at: '2026-10-23T01:02:03Z' }],
+    ['at', { at: '2026-10-23T01:02:03.000+00:00' }],
+    ['at', { at: BAD }],
+    ['tool', { tool: '' }],
+    ['tool', { tool: `${BAD}${'x'.repeat(64)}` }],
+    ['tool', { tool: `${BAD}\nforged` }],
+    ['tool', { tool: `${BAD}‮` }],
+    ['tool', { tool: 42 }],
+  ])('%s: %j', async (field, overrides) => {
+    const dir = scratch()
+    const path = join(dir, 'audit.sqlite3')
+    const error = await createAuditSink({ path }).record(validRecord(overrides)).catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(TypeError)
+    expect((error as TypeError).message).toBe(`invalid audit record: ${field}`)
+    expect((error as TypeError).message).not.toContain(BAD)
+    expect(existsSync(path)).toBe(false)
+  })
+
+  it('entry: null', async () => {
+    const path = join(scratch(), 'audit.sqlite3')
+    const sink = createAuditSink({ path })
+    await expect(sink.record(null as unknown as AuditRecord)).rejects.toThrow(new TypeError('invalid audit record: entry'))
+    expect(existsSync(path)).toBe(false)
+  })
+
+  it('accepts the boundaries: rowCount 0, rowCount null, durationMs 0, a fractional duration rounded', async () => {
+    const path = join(scratch(), 'audit.sqlite3')
+    const sink = createAuditSink({ path })
+    await sink.record(validRecord({ rowCount: 0, durationMs: 0 }))
+    await sink.record(validRecord({ rowCount: null, durationMs: 2.6 }))
+    const rows = await readRows(path)
+    expect(rows.map((row) => [row.row_count, row.duration_ms])).toEqual([
+      [0, 0],
+      [null, 3],
+    ])
+  })
+})
+
+describe('records are written one at a time, in call order', () => {
+  it('25 concurrent records from one sink land in the order they were called', async () => {
+    const path = join(scratch(), 'audit.sqlite3')
+    const sink = createAuditSink({ path })
+    const tools = Array.from({ length: 25 }, (_, i) => `tool_${String(i).padStart(2, '0')}`)
+    await Promise.all(tools.map((tool) => sink.record(validRecord({ tool }))))
+    expect((await readRows(path)).map((row) => row.tool)).toEqual(tools)
+  })
+
+  // Two sinks on one file are two writers. Without the busy timeout this goes
+  // red only when their writes collide, so it is a probabilistic check.
+  it('two sinks writing ten records each to one file both succeed', async () => {
+    const path = join(scratch(), 'audit.sqlite3')
+    const a = createAuditSink({ path })
+    const b = createAuditSink({ path })
+    const writes = Array.from({ length: 10 }, (_, i) => [
+      a.record(validRecord({ tool: `a_${i}` })),
+      b.record(validRecord({ tool: `b_${i}` })),
+    ]).flat()
+    await Promise.all(writes)
+    expect(await readRows(path)).toHaveLength(20)
+  })
+
+  it('a failed record does not stop the ones queued behind it', async () => {
+    const path = join(scratch(), 'audit.sqlite3')
+    const sink = createAuditSink({ path })
+    const results = await Promise.allSettled([
+      sink.record(validRecord({ tool: 'before' })),
+      sink.record(validRecord({ outcome: 'nonsense' as AuditRecord['outcome'] })),
+      sink.record(validRecord({ tool: 'after' })),
+    ])
+    expect(results.map((result) => result.status)).toEqual(['fulfilled', 'rejected', 'fulfilled'])
+    expect((await readRows(path)).map((row) => row.tool)).toEqual(['before', 'after'])
+  })
 })
