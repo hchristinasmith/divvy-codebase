@@ -1,11 +1,19 @@
 import { readdirSync } from 'node:fs'
+import { connect } from 'node:net'
 import * as Path from 'node:path'
 import * as URL from 'node:url'
+import express from 'express'
 import knex from 'knex'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, describe, expect, it } from 'vitest'
 
 import connection from '../../db/connection.ts'
-import { assertInMemory, closeDb, freshApp } from '../app.ts'
+import {
+  assertInMemory,
+  closeDb,
+  freshApp,
+  serveOnLoopback,
+  type LoopbackApi,
+} from '../app.ts'
 
 const __dirname = Path.dirname(URL.fileURLToPath(import.meta.url))
 const migrationsDir = Path.join(__dirname, '../../db/migrations')
@@ -59,5 +67,57 @@ describe('assertInMemory', () => {
     } finally {
       await onDisk.destroy()
     }
+  })
+})
+
+// Opens a TCP connection and drops it again; rejects with the socket error
+// (e.g. ECONNREFUSED when nothing listens on that port).
+function connectTo(host: string, port: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const socket = connect({ host, port })
+    socket.once('connect', () => {
+      socket.destroy()
+      resolve()
+    })
+    socket.once('error', (err) => {
+      socket.destroy()
+      reject(err)
+    })
+  })
+}
+
+describe('serveOnLoopback', () => {
+  // A failing assertion must not leak a listening server into later tests.
+  // close() is idempotent, so closing an already-closed server here is fine.
+  let served: LoopbackApi | undefined
+  afterEach(async () => {
+    await served?.close()
+    served = undefined
+  })
+
+  it('binds the server to 127.0.0.1 over IPv4', async () => {
+    served = await serveOnLoopback(express())
+
+    expect(served.address.address).toBe('127.0.0.1')
+    expect(served.address.family).toBe('IPv4')
+  })
+
+  it('close() stops the server, so the bound port refuses connections', async () => {
+    served = await serveOnLoopback(express())
+    const { port } = served.address
+
+    await served.close()
+
+    await expect(connectTo('127.0.0.1', port)).rejects.toMatchObject({
+      code: 'ECONNREFUSED',
+    })
+  })
+
+  it('close() called twice resolves both times', async () => {
+    served = await serveOnLoopback(express())
+
+    await served.close()
+
+    await expect(served.close()).resolves.toBeUndefined()
   })
 })
