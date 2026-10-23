@@ -1,0 +1,23 @@
+{
+  "id": "6b2e9f30-0000-4000-8000-00000000d002",
+  "providerName": "Divvy fixture",
+  "dateTimeUTC": "2026-10-23T00:00:00",
+  "httpStatusCode": "OK",
+  "pagination": { "page": 2, "pageSize": 2, "pageCount": 2, "itemCount": 3 },
+  "problem": null,
+  "payRuns": [
+    {
+      "payRunID": "e7c1a5d2-0000-4000-8000-000000000303",
+      "payrollCalendarID": "a9b8c7d6-0000-4000-8000-0000000000f1",
+      "periodStartDate": "2026-10-01T00:00:00",
+      "periodEndDate": "2026-10-31T00:00:00",
+      "paymentDate": "2026-11-01T00:00:00",
+      "totalCost": 1234567.89,
+      "totalPay": 0.10,
+      "payRunStatus": "Draft",
+      "payRunType": "Unscheduled",
+      "calendarType": "Monthly",
+      "postedDateTime": null
+    }
+  ]
+}

@@ -1,0 +1,62 @@
+{
+  "Id": "7c3f0a40-0000-4000-8000-00000000e001",
+  "Status": "OK",
+  "ProviderName": "Divvy fixture",
+  "DateTimeUTC": "/Date(1792742400000)/",
+  "Reports": [
+    {
+      "ReportID": "ProfitAndLoss",
+      "ReportName": "Profit and Loss",
+      "ReportType": "ProfitAndLoss",
+      "ReportTitles": ["Profit & Loss", "Kowhai Demo Company (NZ)", "1 April 2026 to 30 September 2026"],
+      "ReportDate": "23 October 2026",
+      "UpdatedDateUTC": "/Date(1792742400000)/",
+      "Fields": [],
+      "Rows": [
+        { "RowType": "Header", "Cells": [{ "Value": "" }, { "Value": "30 Sep 26" }] },
+        {
+          "RowType": "Section",
+          "Title": "Income",
+          "Rows": [
+            {
+              "RowType": "Row",
+              "Cells": [
+                { "Value": "Sales", "Attributes": [{ "Value": "1d2c3b4a-0000-4000-8000-0000000000a1", "Id": "account" }] },
+                { "Value": "48250.00", "Attributes": [{ "Value": "1d2c3b4a-0000-4000-8000-0000000000a1", "Id": "account" }] }
+              ]
+            },
+            { "RowType": "SummaryRow", "Cells": [{ "Value": "Total Income" }, { "Value": "48250.00" }] }
+          ]
+        },
+        {
+          "RowType": "Section",
+          "Title": "Less Cost of Sales",
+          "Rows": [
+            { "RowType": "Row", "Cells": [{ "Value": "Purchases" }, { "Value": "6100.00" }] },
+            { "RowType": "SummaryRow", "Cells": [{ "Value": "Total Cost of Sales" }, { "Value": "6100.00" }] }
+          ]
+        },
+        {
+          "RowType": "Section",
+          "Title": "",
+          "Rows": [{ "RowType": "Row", "Cells": [{ "Value": "Gross Profit" }, { "Value": "42150.00" }] }]
+        },
+        {
+          "RowType": "Section",
+          "Title": "Less Operating Expenses",
+          "Rows": [
+            { "RowType": "Row", "Cells": [{ "Value": "Rent" }, { "Value": "14400.00" }] },
+            { "RowType": "Row", "Cells": [{ "Value": "Subscriptions" }, { "Value": "1324.70" }] },
+            { "RowType": "Row", "Cells": [{ "Value": "Wages and Salaries" }, { "Value": "8000.00" }] },
+            { "RowType": "SummaryRow", "Cells": [{ "Value": "Total Operating Expenses" }, { "Value": "23724.70" }] }
+          ]
+        },
+        {
+          "RowType": "Section",
+          "Title": "",
+          "Rows": [{ "RowType": "Row", "Cells": [{ "Value": "Net Profit" }, { "Value": "18425.30" }] }]
+        }
+      ]
+    }
+  ]
+}
