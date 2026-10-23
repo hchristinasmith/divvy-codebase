@@ -1,5 +1,3 @@
-import request from 'supertest'
-import type { Express } from 'express'
 import {
   afterAll,
   afterEach,
@@ -10,7 +8,12 @@ import {
   vi,
 } from 'vitest'
 
-import { closeDb, freshApp } from '../../test-utils/app.ts'
+import {
+  closeDb,
+  freshApp,
+  serveOnLoopback,
+  type LoopbackApi,
+} from '../../test-utils/app.ts'
 
 // The route calls Akahu through superagent. Replace it so no test reaches
 // the network and every upstream URL the route builds is recorded.
@@ -28,24 +31,29 @@ const upstream = vi.hoisted(() => {
 
 vi.mock('superagent', () => ({ default: { get: upstream.get } }))
 
-let app: Express
+let served: LoopbackApi | undefined
+let api: LoopbackApi['api']
 
 beforeEach(async () => {
-  app = await freshApp()
+  served = await serveOnLoopback(await freshApp())
+  api = served.api
   upstream.get.mockClear()
   vi.stubEnv('AKAHU_USER_TOKEN', 'test-user-token')
   vi.stubEnv('AKAHU_APP_ID', 'test-app-id')
 })
 
-afterEach(() => {
+// beforeEach can fail before this test's server is listening.
+afterEach(async () => {
   vi.unstubAllEnvs()
+  await served?.close()
+  served = undefined
 })
 
 afterAll(closeDb)
 
 describe('GET /api/v1/accounts/:accountId/transactions', () => {
   it('refuses a path-traversal accountId with 400 and never calls Akahu', async () => {
-    const res = await request(app).get(
+    const res = await api.get(
       '/api/v1/accounts/..%2F..%2Fusers/transactions',
     )
 
@@ -70,7 +78,7 @@ describe('GET /api/v1/accounts/:accountId/transactions', () => {
     ['an underscore after the prefix', 'acc_a_b'],
     ['an upper-case prefix', 'ACC_abc'],
   ])('refuses %s with 400 and never calls Akahu', async (_label, segment) => {
-    const res = await request(app).get(
+    const res = await api.get(
       `/api/v1/accounts/${segment}/transactions`,
     )
 
@@ -79,7 +87,7 @@ describe('GET /api/v1/accounts/:accountId/transactions', () => {
   })
 
   it('forwards a well-formed account id to that account on Akahu', async () => {
-    const res = await request(app).get(
+    const res = await api.get(
       '/api/v1/accounts/acc_ck1a2b3c4d5e6f/transactions',
     )
 
