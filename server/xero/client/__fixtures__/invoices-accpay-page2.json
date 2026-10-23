@@ -1,0 +1,45 @@
+{
+  "Id": "5a1d7e10-0000-4000-8000-00000000b002",
+  "Status": "OK",
+  "ProviderName": "Divvy fixture",
+  "DateTimeUTC": "/Date(1792742400000)/",
+  "pagination": { "page": 2, "pageSize": 3, "pageCount": 2, "itemCount": 5 },
+  "Invoices": [
+    {
+      "Type": "ACCPAY",
+      "Contact": { "ContactID": "c0a1b2c3-0000-4000-8000-0000000000ca", "Name": "Totara Office Rentals" },
+      "InvoiceID": "8d4e2a90-0000-4000-8000-000000000204",
+      "DateString": "2026-10-01T00:00:00",
+      "Status": "AUTHORISED",
+      "Total": 420.00,
+      "AmountDue": 210.00,
+      "AmountPaid": 210.00,
+      "CurrencyCode": "NZD"
+    },
+    {
+      "Type": "ACCPAY",
+      "InvoiceID": "8d4e2a90-0000-4000-8000-000000000205",
+      "InvoiceNumber": "TC-355",
+      "Contact": { "ContactID": "c0a1b2c3-0000-4000-8000-0000000000c9", "Name": "Tui Couriers" },
+      "DateString": "2026-10-09T00:00:00",
+      "DueDateString": "2026-10-23T00:00:00",
+      "Status": "AUTHORISED",
+      "Total": 8.00,
+      "AmountDue": 8.00,
+      "AmountPaid": 0.00,
+      "CurrencyCode": "NZD"
+    },
+    {
+      "Type": "ACCPAY",
+      "InvoiceID": "8d4e2a90-0000-4000-8000-000000000206",
+      "InvoiceNumber": "KW-2001",
+      "Contact": { "ContactID": "c0a1b2c3-0000-4000-8000-0000000000c8", "Name": "Kauri Web Hosting" },
+      "DateString": "2026-10-15T00:00:00",
+      "Status": "DRAFT",
+      "Total": 99.00,
+      "AmountDue": 99.00,
+      "AmountPaid": 0.00,
+      "CurrencyCode": "NZD"
+    }
+  ]
+}

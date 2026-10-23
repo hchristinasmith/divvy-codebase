@@ -1,0 +1,37 @@
+{
+  "Id": "7c3f0a40-0000-4000-8000-00000000e002",
+  "Status": "OK",
+  "ProviderName": "Divvy fixture",
+  "DateTimeUTC": "/Date(1792742400000)/",
+  "Reports": [
+    {
+      "ReportID": "ProfitAndLoss",
+      "ReportName": "Profit and Loss",
+      "ReportType": "ProfitAndLoss",
+      "ReportTitles": ["Profit & Loss", "Kowhai Demo Company (NZ)", "1 October 2026 to 22 October 2026"],
+      "ReportDate": "23 October 2026",
+      "Rows": [
+        { "RowType": "Header", "Cells": [{ "Value": "" }, { "Value": "22 Oct 26" }] },
+        {
+          "RowType": "Section",
+          "Title": "Income",
+          "Rows": [{ "RowType": "SummaryRow", "Cells": [{ "Value": "Total Income" }, { "Value": "980.00" }] }]
+        },
+        {
+          "RowType": "Section",
+          "Title": "Less Operating Expenses",
+          "Rows": [
+            { "RowType": "Row", "Cells": [{ "Value": "Rent" }, { "Value": "2400.00" }] },
+            { "RowType": "Row", "Cells": [{ "Value": "Subscriptions" }, { "Value": "100.45" }] },
+            { "RowType": "SummaryRow", "Cells": [{ "Value": "Total Operating Expenses" }, { "Value": "2500.45" }] }
+          ]
+        },
+        {
+          "RowType": "Section",
+          "Title": "",
+          "Rows": [{ "RowType": "Row", "Cells": [{ "Value": "Net Profit" }, { "Value": "-1520.45" }] }]
+        }
+      ]
+    }
+  ]
+}

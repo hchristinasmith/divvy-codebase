@@ -1,0 +1,8 @@
+{
+  "Type": null,
+  "Title": "Unauthorized",
+  "Status": 401,
+  "Detail": "AuthenticationUnsuccessful",
+  "Instance": "0e5f6a7b-0000-4000-8000-00000000f401",
+  "Extensions": {}
+}

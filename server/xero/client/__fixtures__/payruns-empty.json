@@ -1,0 +1,9 @@
+{
+  "id": "6b2e9f30-0000-4000-8000-00000000d003",
+  "providerName": "Divvy fixture",
+  "dateTimeUTC": "2026-10-23T00:00:00",
+  "httpStatusCode": "OK",
+  "pagination": { "page": 1, "pageSize": 100, "pageCount": 0, "itemCount": 0 },
+  "problem": null,
+  "payRuns": []
+}

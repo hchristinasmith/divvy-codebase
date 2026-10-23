@@ -1,0 +1,72 @@
+{
+  "Id": "5a1d7e10-0000-4000-8000-00000000a002",
+  "Status": "OK",
+  "ProviderName": "Divvy fixture",
+  "DateTimeUTC": "/Date(1792742400000)/",
+  "Invoices": [
+    {
+      "Type": "ACCREC",
+      "InvoiceID": "3f2b8c41-0000-4000-8000-000000000107",
+      "InvoiceNumber": "INV-0107",
+      "Contact": { "ContactID": "c0a1b2c3-0000-4000-8000-0000000000c5", "Name": "Kowhai Design Studio" },
+      "DateString": "2026-09-25T00:00:00",
+      "DueDateString": "2026-10-25T00:00:00",
+      "Status": "AUTHORISED",
+      "Total": 1234567.89,
+      "AmountDue": 1234567.89,
+      "AmountPaid": 0.00,
+      "CurrencyCode": "NZD"
+    },
+    {
+      "Type": "ACCPAY",
+      "InvoiceID": "3f2b8c41-0000-4000-8000-000000000108",
+      "InvoiceNumber": "SUP-77",
+      "Contact": { "ContactID": "c0a1b2c3-0000-4000-8000-0000000000c6", "Name": "Southern Paper Supplies" },
+      "DateString": "2026-09-03T00:00:00",
+      "DueDateString": "2026-09-30T00:00:00",
+      "Status": "AUTHORISED",
+      "Total": 320.00,
+      "AmountDue": 320.00,
+      "AmountPaid": 0.00,
+      "CurrencyCode": "NZD"
+    },
+    {
+      "Type": "ACCREC",
+      "InvoiceID": "3f2b8c41-0000-4000-8000-000000000109",
+      "InvoiceNumber": "INV-0109",
+      "Contact": { "ContactID": "c0a1b2c3-0000-4000-8000-0000000000c3", "Name": "Matai Street Cafe" },
+      "DateString": "2026-10-01T00:00:00",
+      "DueDateString": "2026-10-31T00:00:00",
+      "Status": "SUBMITTED",
+      "Total": 210.00,
+      "AmountDue": 210.00,
+      "AmountPaid": 0.00,
+      "CurrencyCode": "NZD"
+    },
+    {
+      "Type": "ACCREC",
+      "InvoiceID": "3f2b8c41-0000-4000-8000-000000000110",
+      "InvoiceNumber": "INV-0110",
+      "Contact": { "ContactID": "c0a1b2c3-0000-4000-8000-0000000000c4", "Name": "Pohutukawa Print Co" },
+      "DateString": "2026-09-05T00:00:00",
+      "DueDateString": "2026-10-05T00:00:00",
+      "Status": "AUTHORISED",
+      "Total": 150.00,
+      "AmountDue": 0.00,
+      "AmountPaid": 0.00,
+      "AmountCredited": 150.00,
+      "CurrencyCode": "NZD"
+    },
+    {
+      "Type": "ACCREC",
+      "InvoiceID": "3f2b8c41-0000-4000-8000-000000000111",
+      "Contact": { "ContactID": "c0a1b2c3-0000-4000-8000-0000000000c7", "Name": "Rimu \"Corner 24\" Store" },
+      "DateString": "2026-10-12T00:00:00",
+      "Status": "AUTHORISED",
+      "Total": 19.99,
+      "AmountDue": 19.99,
+      "AmountPaid": 0.00,
+      "CurrencyCode": "NZD"
+    }
+  ]
+}

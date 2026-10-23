@@ -1,0 +1,48 @@
+{
+  "Id": "5a1d7e10-0000-4000-8000-00000000b001",
+  "Status": "OK",
+  "ProviderName": "Divvy fixture",
+  "DateTimeUTC": "/Date(1792742400000)/",
+  "pagination": { "page": 1, "pageSize": 3, "pageCount": 2, "itemCount": 5 },
+  "Invoices": [
+    {
+      "Type": "ACCPAY",
+      "InvoiceID": "8d4e2a90-0000-4000-8000-000000000201",
+      "InvoiceNumber": "SPS-4410",
+      "Contact": { "ContactID": "c0a1b2c3-0000-4000-8000-0000000000c6", "Name": "Southern Paper Supplies" },
+      "DateString": "2026-10-02T00:00:00",
+      "DueDateString": "2026-10-20T00:00:00",
+      "Status": "AUTHORISED",
+      "Total": 86.25,
+      "AmountDue": 86.25,
+      "AmountPaid": 0.00,
+      "CurrencyCode": "NZD"
+    },
+    {
+      "Type": "ACCPAY",
+      "InvoiceID": "8d4e2a90-0000-4000-8000-000000000202",
+      "InvoiceNumber": "KW-1990",
+      "Contact": { "ContactID": "c0a1b2c3-0000-4000-8000-0000000000c8", "Name": "Kauri Web Hosting" },
+      "DateString": "2026-09-01T00:00:00",
+      "DueDateString": "2026-09-15T00:00:00",
+      "Status": "PAID",
+      "Total": 140.00,
+      "AmountDue": 0.00,
+      "AmountPaid": 140.00,
+      "CurrencyCode": "NZD"
+    },
+    {
+      "Type": "ACCPAY",
+      "InvoiceID": "8d4e2a90-0000-4000-8000-000000000203",
+      "InvoiceNumber": "TC-301",
+      "Contact": { "ContactID": "c0a1b2c3-0000-4000-8000-0000000000c9", "Name": "Tui Couriers" },
+      "DateString": "2026-08-18T00:00:00",
+      "DueDateString": "2026-09-18T00:00:00",
+      "Status": "VOIDED",
+      "Total": 55.00,
+      "AmountDue": 55.00,
+      "AmountPaid": 0.00,
+      "CurrencyCode": "NZD"
+    }
+  ]
+}
