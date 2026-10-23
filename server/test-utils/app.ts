@@ -11,6 +11,7 @@
 // Never point a test at a developer's real `.sqlite3` file (CLAUDE.md,
 // Testing): `assertInMemory` refuses before anything is rolled back.
 import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import type { Express } from 'express'
 import type { Knex } from 'knex'
 import request from 'supertest'
@@ -46,6 +47,8 @@ export async function closeDb(): Promise<void> {
 
 export type LoopbackApi = {
   api: ReturnType<typeof request>
+  // The socket the server bound; tests read it to pin the bind address and port.
+  address: AddressInfo
   close(): Promise<void>
 }
 
@@ -68,8 +71,13 @@ export async function serveOnLoopback(httpApp: Express): Promise<LoopbackApi> {
       resolve()
     })
   })
+  const address = httpServer.address()
+  if (address === null || typeof address !== 'object') {
+    throw new Error(`Expected a TCP address, got ${JSON.stringify(address)}`)
+  }
   return {
     api: request(httpServer),
+    address,
     async close() {
       if (!httpServer.listening) return
       httpServer.closeAllConnections()
