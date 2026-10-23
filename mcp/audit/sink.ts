@@ -8,16 +8,26 @@
 // Each `record` opens the file, applies the schema, inserts one row, closes
 // the file, and only then resolves. Nothing is held open between calls, so
 // there is no connection to leak and no state that a failure can poison: an
-// unwritable path, a missing directory or a file that is not a database
-// rejects that record, and the dispatcher answers the call with no data.
-// The next record tries again from scratch.
+// unwritable path, a missing directory, a file that is not a database or a
+// database that is not an audit file rejects that record, and the dispatcher
+// answers the call with no data. The next record tries again from scratch.
+//
+// The sink writes only to a file that is its own: one with no tables but
+// `advisor_audit` (and the `sqlite_sequence` its AUTOINCREMENT brings) and
+// an `application_id` that is unset or `AUDIT_APPLICATION_ID`. Any other
+// database is refused before anything in it changes, so a mistyped path
+// never converts someone else's file out of WAL or adds a table to it. Every
+// write stamps the id, so an audit file says what it is.
 //
 // What a row holds is bounded here, whatever the caller passes:
 //   - only the six `AuditRecord` fields are read, so a stray `result` or
 //     `error` on the entry is never stored;
 //   - a record whose fields are not what the contract says is refused
 //     before the file is touched, naming the field but not its value;
-//   - parameters are stored as JSON no longer than `MAX_AUDIT_PARAMS_LENGTH`;
+//   - parameters are stored as JSON with every control and format character
+//     written as a `\uXXXX` escape, so the Privacy screen never renders a
+//     bidi override or an invisible character from a parameter;
+//   - that escaped JSON is no longer than `MAX_AUDIT_PARAMS_LENGTH`;
 //     anything longer, or anything that does not serialise, is replaced by
 //     a small marker rather than cut, so `params_json` is always valid JSON.
 //
@@ -47,10 +57,21 @@ const MAX_TOOL_LENGTH = 64
 /** How long a write waits for another connection's lock before failing. */
 const BUSY_TIMEOUT_MS = 5000
 
+/**
+ * The `application_id` every audit file carries in its header: the ASCII
+ * bytes `DVAU`, for Divvy audit, read as a big-endian 32-bit integer.
+ */
+const AUDIT_APPLICATION_ID = 0x44564155
+
+/** The only `sqlite_master` names an audit file may hold. */
+const AUDIT_FILE_NAMES: readonly string[] = ['advisor_audit', 'sqlite_sequence']
+
 const OUTCOMES: readonly AuditOutcome[] = ['ok', 'rejected', 'error']
 
-// Control (Cc) and format (Cf) characters have no place in a tool name.
+// Control (Cc) and format (Cf) characters have no place in a tool name, and
+// are escaped wherever they appear in `params_json`.
 const CONTROL_OR_FORMAT = /[\p{Cc}\p{Cf}]/u
+const CONTROL_OR_FORMAT_ALL = /[\p{Cc}\p{Cf}]/gu
 
 const INSERT_ROW =
   'INSERT INTO advisor_audit (at, tool, params_json, row_count, outcome, duration_ms) VALUES (?, ?, ?, ?, ?, ?)'
@@ -83,8 +104,26 @@ function isIsoUtcWithMillis(value: unknown): value is string {
 }
 
 /**
- * The parameters as JSON, bounded. Replaced, never truncated: cut JSON is
- * not JSON, and the schema refuses a `params_json` that is not.
+ * Every control and format character in `json` as a `\uXXXX` escape, one per
+ * UTF-16 unit, so a format character outside the BMP becomes its surrogate
+ * pair. `JSON.stringify` only puts such characters inside strings, and never
+ * after an unescaped backslash, so the result is valid JSON that parses to
+ * the same value.
+ */
+function escapeControlAndFormat(json: string): string {
+  return json.replace(CONTROL_OR_FORMAT_ALL, (character) => {
+    let escaped = ''
+    for (let i = 0; i < character.length; i++) {
+      escaped += `\\u${character.charCodeAt(i).toString(16).padStart(4, '0')}`
+    }
+    return escaped
+  })
+}
+
+/**
+ * The parameters as escaped JSON, bounded. Replaced, never truncated: cut
+ * JSON is not JSON, and the schema refuses a `params_json` that is not. The
+ * bound is on the escaped text, which is what the row stores.
  */
 function boundedParamsJson(params: unknown): string {
   let json: string | undefined
@@ -94,8 +133,9 @@ function boundedParamsJson(params: unknown): string {
     json = undefined
   }
   if (json === undefined) return JSON.stringify({ unserialisable_params: true })
-  if (json.length > MAX_AUDIT_PARAMS_LENGTH) return JSON.stringify({ oversized_params_length: json.length })
-  return json
+  const escaped = escapeControlAndFormat(json)
+  if (escaped.length > MAX_AUDIT_PARAMS_LENGTH) return JSON.stringify({ oversized_params_length: escaped.length })
+  return escaped
 }
 
 /** Checks one record against the contract. Throws `invalid(field)`. */
@@ -152,6 +192,12 @@ function exec(db: sqlite3.Database, sql: string): Promise<void> {
   })
 }
 
+function all(db: sqlite3.Database, sql: string): Promise<Record<string, unknown>[]> {
+  return new Promise((resolve, reject) => {
+    db.all<Record<string, unknown>>(sql, (error, rows) => (error ? reject(error) : resolve(rows)))
+  })
+}
+
 function journalMode(db: sqlite3.Database): Promise<unknown> {
   return new Promise((resolve, reject) => {
     db.get<{ journal_mode?: unknown }>('PRAGMA journal_mode = DELETE', (error, row) => {
@@ -187,13 +233,30 @@ function schema(): string {
   return schemaText
 }
 
-/** Writes one checked row: open, schema, insert, close. Rejects on any failure. */
+/**
+ * Rejects unless the open file is empty or an audit file: an `application_id`
+ * of 0 or `AUDIT_APPLICATION_ID`, and no `sqlite_master` entry but the audit
+ * file's own. Only reads. The message names no path and no table.
+ */
+async function assertAuditFile(db: sqlite3.Database): Promise<void> {
+  const [header] = await all(db, 'PRAGMA application_id')
+  const applicationId = header?.application_id
+  const entries = await all(db, 'SELECT name FROM sqlite_master')
+  const ownId = applicationId === 0 || applicationId === AUDIT_APPLICATION_ID
+  const ownEntries = entries.every((entry) => typeof entry.name === 'string' && AUDIT_FILE_NAMES.includes(entry.name))
+  if (!ownId || !ownEntries) throw new Error('the audit path holds a database that is not an audit file')
+}
+
+/** Writes one checked row: open, check, schema, insert, close. Rejects on any failure. */
 async function writeRow(path: string, row: AuditRow): Promise<void> {
   const db = await openFile(path)
   try {
     db.configure('busyTimeout', BUSY_TIMEOUT_MS)
+    // Before anything that writes, the journal pragma included: a file that
+    // is not the sink's own is refused unmodified.
+    await assertAuditFile(db)
     // A journal-mode change cannot happen inside a transaction, so it comes
-    // first. SQLite answers with the mode it is now in; anything but
+    // before one. SQLite answers with the mode it is now in; anything but
     // `delete` means the switch did not take, and the record fails.
     const mode = await journalMode(db)
     if (mode !== 'delete') throw new Error('audit file did not switch to a rollback journal')
@@ -202,6 +265,7 @@ async function writeRow(path: string, row: AuditRow): Promise<void> {
     // busy timeout instead of one failing on a lock upgrade.
     await exec(db, 'BEGIN IMMEDIATE')
     await exec(db, schema())
+    await exec(db, `PRAGMA application_id = ${AUDIT_APPLICATION_ID}`)
     const changes = await insert(db, row)
     if (changes !== 1) throw new Error('audit insert did not write exactly one row')
     await exec(db, 'COMMIT')
@@ -215,14 +279,10 @@ async function writeRow(path: string, row: AuditRow): Promise<void> {
   await closeFile(db)
 }
 
+// The absolute-path rule is what refuses `''`, `:memory:` and `file:` URIs:
+// none of them is absolute.
 function assertFilePath(path: unknown): asserts path is string {
-  if (
-    typeof path !== 'string' ||
-    path.length === 0 ||
-    path === ':memory:' ||
-    path.startsWith('file:') ||
-    !isAbsolute(path)
-  ) {
+  if (typeof path !== 'string' || !isAbsolute(path)) {
     throw new TypeError('the audit path must be an absolute file path')
   }
 }
@@ -230,8 +290,8 @@ function assertFilePath(path: unknown): asserts path is string {
 /**
  * The audit sink for the file at `path`. Does no I/O: the file is created,
  * given its schema and written on each `record`. Throws only for a path that
- * is not an absolute file path (empty, relative, `:memory:` or a `file:`
- * URI); every I/O failure is a rejected `record`, never a throw here.
+ * is not absolute, which is also what refuses an empty path, `:memory:` and
+ * a `file:` URI; every I/O failure is a rejected `record`, never a throw here.
  *
  * Records are written one at a time, in the order `record` was called. A
  * failed record does not stop the ones queued behind it.

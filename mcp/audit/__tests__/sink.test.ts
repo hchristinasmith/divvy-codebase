@@ -3,12 +3,16 @@
 //   - `schema.sql` holds anything but `CREATE TABLE IF NOT EXISTS`, a column
 //     goes missing, or a second open changes or duplicates the schema;
 //   - a call through the real dispatcher leaves no row or two;
-//   - returned data or error text reaches the file, or a parameter can grow
-//     a row without bound;
+//   - returned data or error text reaches the file, a parameter can grow a
+//     row without bound, or a control or format character in a parameter is
+//     stored raw;
 //   - a record breaking the contract is stored instead of refused;
 //   - records land out of call order, or a second writer fails on a lock;
 //   - an unwritable path, missing directory or non-database file lets data
 //     through, or a failure sticks after the cause is gone;
+//   - a database that is not an audit file is written to, or an audit file
+//     is left without the sink's application_id;
+//   - a failed record leaves the write lock held;
 //   - the file is left in WAL mode, or cannot be read with a read-only open;
 //   - the sink imports anything beyond node:fs, node:path, sqlite3 and the
 //     contract, or `index.ts` exports more than `createAuditSink`.
@@ -206,6 +210,13 @@ describe('the audit file', () => {
     expect(Object.keys(row).sort()).toEqual(COLUMNS)
   })
 
+  it("carries the sink's application_id, the ASCII bytes DVAU, in its header", async () => {
+    const path = join(scratch(), 'audit.sqlite3')
+    await createAuditSink({ path }).record(validRecord())
+    expect(await query<{ application_id: number }>(path, 'PRAGMA application_id')).toEqual([{ application_id: 0x44564155 }])
+    expect(readFileSync(path).subarray(68, 72).toString('latin1')).toBe('DVAU')
+  })
+
   it('keeps its schema unchanged and single when a second sink opens it', async () => {
     const path = join(scratch(), 'audit.sqlite3')
     const schemaOf = () => query<{ type: string; name: string; sql: string | null }>(path, 'SELECT type, name, sql FROM sqlite_master ORDER BY type, name')
@@ -367,6 +378,31 @@ describe('parameters are bounded', () => {
   })
 })
 
+describe('control and format characters in parameters are escaped', () => {
+  // U+202E RIGHT-TO-LEFT OVERRIDE (Cf), U+200B ZERO WIDTH SPACE (Cf), U+0085
+  // NEXT LINE (Cc), and U+E0041 TAG LATIN CAPITAL A (Cf, outside the BMP).
+  const RAW = ['\u202e', '\u200b', '\u0085', '\u{e0041}']
+
+  it('none is stored raw, and the stored JSON parses back to the same value', async () => {
+    const path = join(scratch(), 'audit.sqlite3')
+    const params = { note: `paid ${RAW.join('')} txt.exe`, [`key${RAW[0]}`]: RAW[2], list: RAW }
+    await createAuditSink({ path }).record(validRecord({ params }))
+    const [row] = await readRows(path)
+    for (const character of RAW) expect(row.params_json).not.toContain(character)
+    expect(row.params_json).toContain('\\u202e')
+    expect(JSON.parse(row.params_json)).toEqual(params)
+  })
+
+  it('bounds the escaped text, not the raw JSON', async () => {
+    const path = join(scratch(), 'audit.sqlite3')
+    // Each U+202E is one character of raw JSON and six once escaped.
+    const params = RAW[0].repeat(200)
+    expect(JSON.stringify(params).length).toBeLessThan(MAX_AUDIT_PARAMS_LENGTH)
+    await createAuditSink({ path }).record(validRecord({ params }))
+    expect((await readRows(path))[0].params_json).toBe(JSON.stringify({ oversized_params_length: 2 + 200 * 6 }))
+  })
+})
+
 describe('parameters that do not serialise', () => {
   const cycle: Record<string, unknown> = {}
   cycle.self = cycle
@@ -416,6 +452,10 @@ describe('a record that breaks the contract is refused before the file is touche
     ['at', { at: '2026-10-23T01:02:03.000+00:00' }],
     ['at', { at: BAD }],
     ['at', { at: '+010000-01-01T00:00:00.000Z' }],
+    ['at', { at: '2026-02-30T00:00:00.000Z' }],
+    ['at', { at: '2026-13-01T00:00:00.000Z' }],
+    ['at', { at: '2026-10-23T25:00:00.000Z' }],
+    ['at', { at: '2026-10-32T00:00:00.000Z' }],
     ['tool', { tool: '' }],
     ['tool', { tool: `${BAD}${'x'.repeat(64)}` }],
     ['tool', { tool: `${BAD}\nforged` }],
@@ -489,6 +529,26 @@ describe('records are written one at a time, in call order', () => {
     await close(holder)
     await pending
     expect((await readRows(path)).map((row) => row.tool)).toEqual(['first', 'waited'])
+  })
+
+  // The fixture's advisor_audit has none of the real columns, so the schema
+  // is a no-op and the insert fails inside the open transaction. Red if a
+  // failed record leaves its connection, and so its write lock, open.
+  it('a record that fails inside its transaction releases the write lock', async () => {
+    const path = join(scratch(), 'audit.sqlite3')
+    const fixture = await createDatabase(path)
+    await exec(fixture, 'CREATE TABLE advisor_audit (id INTEGER)')
+    await close(fixture)
+
+    await expect(createAuditSink({ path }).record(validRecord())).rejects.toThrow()
+
+    const next = await createDatabase(path)
+    try {
+      next.configure('busyTimeout', 200)
+      await exec(next, 'BEGIN IMMEDIATE; COMMIT;')
+    } finally {
+      await close(next)
+    }
   })
 
   it('a failed record does not stop the ones queued behind it', async () => {
@@ -572,6 +632,55 @@ describe('an audit file that cannot be written fails closed', () => {
     expect((await readRows(path)).map((row) => row.tool)).toEqual(['after_mkdir'])
   })
 
+  // A mistyped path that lands on someone else's database. Before the sink
+  // checked, this converted the file out of WAL and added advisor_audit.
+  it("another application's WAL database: no data returned, its bytes unchanged", async () => {
+    const dir = scratch()
+    const path = join(dir, 'audit.sqlite3')
+    const fixture = await createDatabase(path)
+    await exec(fixture, "PRAGMA journal_mode = WAL; CREATE TABLE accounts (id INTEGER, name TEXT); INSERT INTO accounts VALUES (1, 'BNZ');")
+    await close(fixture)
+    const before = readFileSync(path)
+    expect(before[18]).toBe(2) // header: WAL
+
+    const result = await call(createAuditSink({ path }), 'fake_ok', { scope: 'personal' })
+    expect(errorCode(result)).toBe('audit_unavailable')
+    expect(JSON.stringify(result)).not.toContain(SENTINEL)
+
+    expect(readFileSync(path).equals(before)).toBe(true)
+    expect(readFileSync(path)[18]).toBe(2)
+    // Checked before the read below: a read-only open of a WAL file leaves
+    // its own -wal and -shm behind.
+    expect(readdirSync(dir)).toEqual(['audit.sqlite3'])
+    expect(await query<{ name: string }>(path, 'SELECT name FROM sqlite_master')).toEqual([{ name: 'accounts' }])
+  })
+
+  it('a database with a foreign application_id and no tables: refused, its bytes unchanged', async () => {
+    const path = join(scratch(), 'audit.sqlite3')
+    const fixture = await createDatabase(path)
+    await exec(fixture, 'PRAGMA application_id = 1234')
+    await close(fixture)
+    const before = readFileSync(path)
+    expect(before.readInt32BE(68)).toBe(1234)
+
+    const error = await createAuditSink({ path }).record(validRecord()).catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toBe('the audit path holds a database that is not an audit file')
+    expect(readFileSync(path).equals(before)).toBe(true)
+  })
+
+  it('the refusal names neither the path nor a table', async () => {
+    const dir = scratch()
+    const path = join(dir, 'audit.sqlite3')
+    const fixture = await createDatabase(path)
+    await exec(fixture, 'CREATE TABLE accounts (id INTEGER)')
+    await close(fixture)
+    const error = await createAuditSink({ path }).record(validRecord()).catch((e: unknown) => e)
+    expect((error as Error).message).toBe('the audit path holds a database that is not an audit file')
+    expect((error as Error).message).not.toContain(dir)
+    expect((error as Error).message).not.toContain('accounts')
+  })
+
   it('a file that is not a database: no data returned, its bytes unchanged', async () => {
     const dir = scratch()
     const path = join(dir, 'audit.sqlite3')
@@ -599,12 +708,13 @@ function exec(db: sqlite3.Database, sql: string): Promise<void> {
 
 describe('the audit file keeps a rollback journal', () => {
   // The only test that goes red if the sink stops setting journal_mode: a
-  // fresh file starts in DELETE mode anyway, so this one starts in WAL.
-  it('switches a WAL-mode file to journal_mode=delete and leaves no -wal or -shm', async () => {
+  // fresh file starts in DELETE mode anyway, so this one starts in WAL. It
+  // is an audit file already, since the sink refuses any other database.
+  it('switches a WAL-mode audit file to journal_mode=delete and leaves no -wal or -shm', async () => {
     const dir = scratch()
     const path = join(dir, 'audit.sqlite3')
     const fixture = await createDatabase(path)
-    await exec(fixture, 'PRAGMA journal_mode = WAL; CREATE TABLE unrelated (x INTEGER);')
+    await exec(fixture, `PRAGMA journal_mode = WAL; ${SCHEMA_SQL}`)
     await close(fixture)
     expect(readFileSync(path)[18]).toBe(2) // header: WAL
 
