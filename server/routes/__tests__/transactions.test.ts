@@ -1,4 +1,5 @@
-import { afterAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { createServer, type Server } from 'node:http'
 import request from 'supertest'
 import server from '../../server.ts'
 import connection from '../../db/connection.ts'
@@ -10,12 +11,31 @@ import { categories } from '../../../data/cats.js'
 // Route tests run against the app's own connection, which is the in-memory
 // SQLite `test` config under vitest (NODE_ENV=test). Each test starts from a
 // freshly migrated and seeded database.
+//
+// Each test gets its own HTTP server, listening on 127.0.0.1. Given the bare
+// Express app, supertest opens and closes a server on every request, bound to
+// all interfaces; under parallel load that let requests reach the wrong
+// socket (socket hang up). A server that is already listening is used as is.
+let httpServer: Server
+let api: ReturnType<typeof request>
 
 beforeEach(async () => {
   delete process.env.DIVVY_SEED_TRANSACTIONS
   await connection.migrate.rollback(undefined, true)
   await connection.migrate.latest()
   await connection.seed.run()
+  httpServer = createServer(server)
+  await new Promise<void>((resolve) => httpServer.listen(0, '127.0.0.1', resolve))
+  api = request(httpServer)
+})
+
+afterEach(async () => {
+  // beforeEach can fail before this test's server is listening.
+  if (!httpServer?.listening) return
+  httpServer.closeAllConnections()
+  await new Promise<void>((resolve, reject) =>
+    httpServer.close((err) => (err ? reject(err) : resolve())),
+  )
 })
 
 afterAll(async () => {
@@ -24,7 +44,7 @@ afterAll(async () => {
 
 describe('GET /api/v1/transactions', () => {
   it('returns every transaction when no description is given', async () => {
-    const res = await request(server).get('/api/v1/transactions')
+    const res = await api.get('/api/v1/transactions')
 
     expect(res.status).toBe(200)
     expect(res.body.txns.map((t: { akahu_id: string }) => t.akahu_id).sort()).toEqual(
@@ -33,7 +53,7 @@ describe('GET /api/v1/transactions', () => {
   })
 
   it('filters by a description substring', async () => {
-    const res = await request(server)
+    const res = await api
       .get('/api/v1/transactions')
       .query({ description: 'Superette' })
 
@@ -49,7 +69,7 @@ describe('GET /api/v1/transactions', () => {
   })
 
   it('returns money as integer cents and no dollar fields', async () => {
-    const res = await request(server)
+    const res = await api
       .get('/api/v1/transactions')
       .query({ description: 'Sample Superette' })
 
@@ -81,7 +101,7 @@ describe('PATCH /api/v1/transactions/:id', () => {
     expect(before.category).toBe('Supermarkets and grocery stores')
     expect(before.category_source).toBe('akahu')
 
-    const res = await request(server)
+    const res = await api
       .patch(`/api/v1/transactions/${before.id}`)
       .send({ category: 'Convenience stores' })
 
@@ -111,12 +131,12 @@ describe('PATCH /api/v1/transactions/:id', () => {
 
   it('persists: a fresh read returns the user category', async () => {
     const { id } = await rowFor('trans_fixture_003')
-    await request(server)
+    await api
       .patch(`/api/v1/transactions/${id}`)
       .send({ category: 'Bakeries' })
       .expect(200)
 
-    const res = await request(server)
+    const res = await api
       .get('/api/v1/transactions')
       .query({ description: 'Fixture Flat White' })
     const row = res.body.txns.find((t: { id: number }) => t.id === id)
@@ -127,7 +147,7 @@ describe('PATCH /api/v1/transactions/:id', () => {
     const before = await rowFor('trans_fixture_001')
     expect(before.category).toBeNull()
 
-    await request(server)
+    await api
       .patch(`/api/v1/transactions/${before.id}`)
       .send({ category: 'Financial services (not elsewhere classified)' })
       .expect(200)
@@ -148,7 +168,7 @@ describe('PATCH /api/v1/transactions/:id', () => {
   ])('refuses %s with 400 and writes nothing', async (_, body) => {
     const before = await rowFor('trans_fixture_002')
 
-    const res = await request(server)
+    const res = await api
       .patch(`/api/v1/transactions/${before.id}`)
       .send(body)
 
@@ -158,7 +178,7 @@ describe('PATCH /api/v1/transactions/:id', () => {
   })
 
   it('returns 404 for a transaction that does not exist', async () => {
-    const res = await request(server)
+    const res = await api
       .patch('/api/v1/transactions/999999')
       .send({ category: 'Bakeries' })
 
@@ -172,7 +192,7 @@ describe('PATCH /api/v1/transactions/:id', () => {
     async (id) => {
       const before = await connection('transactions').select().orderBy('id')
 
-      const res = await request(server)
+      const res = await api
         .patch(`/api/v1/transactions/${id}`)
         .send({ category: 'Bakeries' })
 
@@ -184,7 +204,7 @@ describe('PATCH /api/v1/transactions/:id', () => {
 
   it('no longer answers PUT, the old half of the contract', async () => {
     const { id } = await rowFor('trans_fixture_002')
-    const res = await request(server)
+    const res = await api
       .put(`/api/v1/transactions/${id}`)
       .send({ category_group_name: 'Other' })
 
@@ -195,7 +215,7 @@ describe('PATCH /api/v1/transactions/:id', () => {
 
 describe('GET /api/v1/categories', () => {
   it('serves data/cats.js, the list the Category dropdown reads', async () => {
-    const res = await request(server).get('/api/v1/categories')
+    const res = await api.get('/api/v1/categories')
 
     expect(res.status).toBe(200)
     expect(res.body).toEqual({
@@ -206,18 +226,23 @@ describe('GET /api/v1/categories', () => {
     })
   })
 
+  // One PATCH per category, sent in sequence, so the time this takes grows
+  // with the category list; it gets more than the default timeout under load.
   it('lists only names the PATCH route accepts', async () => {
-    const res = await request(server).get('/api/v1/categories')
+    const res = await api.get('/api/v1/categories')
     const { id } = await rowFor('trans_fixture_002')
+    const rejected: string[] = []
 
     for (const group of res.body.items) {
       for (const category of group.categories) {
-        await request(server)
+        const patch = await api
           .patch(`/api/v1/transactions/${id}`)
           .send({ category })
-          .expect(200)
+        if (patch.status !== 200) rejected.push(category)
       }
     }
-  })
+
+    expect(rejected).toEqual([])
+  }, 20_000)
 })
 
