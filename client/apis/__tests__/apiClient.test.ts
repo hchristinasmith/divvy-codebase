@@ -14,8 +14,13 @@ let api: typeof import('../apiClient.ts')
 
 beforeAll(async () => {
   // Loopback only: another process can bind 127.0.0.1 on the same port (#97/#105).
-  http = await new Promise<Server>((resolve) => {
-    const listening = server.listen(0, '127.0.0.1', () => resolve(listening))
+  http = await new Promise<Server>((resolve, reject) => {
+    const listening = server
+      .listen(0, '127.0.0.1', () => {
+        listening.off('error', reject)
+        resolve(listening)
+      })
+      .once('error', reject)
   })
   const { address, port } = http.address() as AddressInfo
   // apiClient resolves its base URL from the page; give it this server.
