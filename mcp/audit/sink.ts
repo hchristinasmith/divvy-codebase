@@ -70,8 +70,13 @@ function invalid(field: string): TypeError {
   return new TypeError(`invalid audit record: ${field}`)
 }
 
+// The schema's `at` shape. `toISOString` alone also yields `+010000-…` and
+// `-000001-…` for years outside 0000–9999, which the schema would refuse
+// only after the file is touched.
+const ISO_UTC_MILLIS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
+
 function isIsoUtcWithMillis(value: unknown): value is string {
-  if (typeof value !== 'string') return false
+  if (typeof value !== 'string' || !ISO_UTC_MILLIS.test(value)) return false
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return false
   return date.toISOString() === value

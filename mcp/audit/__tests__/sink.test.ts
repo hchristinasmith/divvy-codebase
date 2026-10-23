@@ -407,6 +407,7 @@ describe('a record that breaks the contract is refused before the file is touche
     ['durationMs', { durationMs: Number.NaN }],
     ['durationMs', { durationMs: Number.POSITIVE_INFINITY }],
     ['durationMs', { durationMs: BAD }],
+    ['durationMs', { durationMs: Number.MAX_SAFE_INTEGER + 1 }],
     ['rowCount', { rowCount: -1 }],
     ['rowCount', { rowCount: 1.5 }],
     ['rowCount', { rowCount: undefined }],
@@ -414,6 +415,7 @@ describe('a record that breaks the contract is refused before the file is touche
     ['at', { at: '2026-10-23T01:02:03Z' }],
     ['at', { at: '2026-10-23T01:02:03.000+00:00' }],
     ['at', { at: BAD }],
+    ['at', { at: '+010000-01-01T00:00:00.000Z' }],
     ['tool', { tool: '' }],
     ['tool', { tool: `${BAD}${'x'.repeat(64)}` }],
     ['tool', { tool: `${BAD}\nforged` }],
@@ -458,8 +460,9 @@ describe('records are written one at a time, in call order', () => {
     expect((await readRows(path)).map((row) => row.tool)).toEqual(tools)
   })
 
-  // Two sinks on one file are two writers. Without the busy timeout this goes
-  // red only when their writes collide, so it is a probabilistic check.
+  // Two sinks on one file are two writers. With a deferred BEGIN this goes red
+  // only when their writes collide (one fails on the lock upgrade), so it is a
+  // probabilistic check. The busy timeout has its own test below.
   it('two sinks writing ten records each to one file both succeed', async () => {
     const path = join(scratch(), 'audit.sqlite3')
     const a = createAuditSink({ path })
@@ -470,6 +473,22 @@ describe('records are written one at a time, in call order', () => {
     ]).flat()
     await Promise.all(writes)
     expect(await readRows(path)).toHaveLength(20)
+  })
+
+  // Another connection holds the write lock for 1.5 s: longer than the 1 s
+  // node-sqlite3 sets on every open, shorter than BUSY_TIMEOUT_MS. Red if the
+  // sink stops raising the timeout.
+  it('waits past the driver default for another connection to release the write lock', async () => {
+    const path = join(scratch(), 'audit.sqlite3')
+    await createAuditSink({ path }).record(validRecord({ tool: 'first' }))
+    const holder = await createDatabase(path)
+    await exec(holder, 'BEGIN IMMEDIATE')
+    const pending = createAuditSink({ path }).record(validRecord({ tool: 'waited' }))
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    await exec(holder, 'COMMIT')
+    await close(holder)
+    await pending
+    expect((await readRows(path)).map((row) => row.tool)).toEqual(['first', 'waited'])
   })
 
   it('a failed record does not stop the ones queued behind it', async () => {
@@ -524,6 +543,22 @@ describe('an audit file that cannot be written fails closed', () => {
       expect(readdirSync(locked)).toEqual([])
     } finally {
       chmodSync(locked, 0o755)
+    }
+  })
+
+  // SQLite opens a write-protected file read-only without complaint; the
+  // write must still fail rather than the call return data unlogged.
+  it.skipIf(process.getuid?.() === 0)('a read-only audit file: no data returned, no row added', async () => {
+    const path = join(scratch(), 'audit.sqlite3')
+    await createAuditSink({ path }).record(validRecord({ tool: 'before' }))
+    chmodSync(path, 0o444)
+    try {
+      const result = await call(createAuditSink({ path }), 'fake_ok', { scope: 'personal' })
+      expect(errorCode(result)).toBe('audit_unavailable')
+      expect(JSON.stringify(result)).not.toContain(SENTINEL)
+      expect((await readRows(path)).map((row) => row.tool)).toEqual(['before'])
+    } finally {
+      chmodSync(path, 0o644)
     }
   })
 
