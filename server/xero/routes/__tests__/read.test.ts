@@ -373,6 +373,37 @@ describe('GET /api/v1/xero/totals', () => {
     })
   })
 
+  it('profit rows fetched at the same instant: the later-stored row (higher id) wins', async () => {
+    await seedConnection('connected')
+    await pl({
+      period_from: '2026-04-01',
+      period_to: '2026-10-23',
+      net_profit_cents: 111_100,
+      fetched_at: FRESH,
+    })
+    await pl({
+      period_from: '2026-04-01',
+      period_to: '2026-10-24',
+      net_profit_cents: 222_200,
+      fetched_at: FRESH,
+    })
+
+    const totals = await getTotals()
+    const status = await getStatus()
+
+    expect(totals.body.profit).toStrictEqual({
+      netProfitCents: 222_200,
+      periodFrom: '2026-04-01',
+      periodTo: '2026-10-24',
+      fetchedAt: FRESH,
+    })
+    // The week's figure comes from the same pick.
+    expect(status.body.pulledThisWeek.profit).toStrictEqual({
+      count: 2,
+      netProfitCents: 222_200,
+    })
+  })
+
   it('profit is null when no profit row is stored but other Xero data is', async () => {
     await seedConnection('connected')
     await invoice({ amount_due_cents: 5_000 })
@@ -438,6 +469,25 @@ describe('GET /api/v1/xero/totals', () => {
         totalCostCents: 310_000,
         totalPayCents: 260_000,
       },
+    ])
+  })
+
+  it('pay runs on the same payment date are ordered by pay run id descending', async () => {
+    await seedConnection('connected')
+    // Stored in neither id order nor its reverse, so neither the table's
+    // insertion order nor the primary-key index can supply the expected order.
+    for (const id of ['pr-same-b', 'pr-same-c', 'pr-same-a']) {
+      await payRun({ pay_run_id: id, payment_date: '2026-10-14' })
+    }
+    await payRun({ pay_run_id: 'pr-same-0', payment_date: '2026-10-21' })
+
+    const res = await getTotals()
+
+    expect(res.body.payRuns.map((run: { payRunId: string }) => run.payRunId)).toStrictEqual([
+      'pr-same-0',
+      'pr-same-c',
+      'pr-same-b',
+      'pr-same-a',
     ])
   })
 
@@ -593,8 +643,53 @@ describe('connection state (Done-when 8)', () => {
       })
       expect(status.body.state).toBe('needs_reconnect')
       expect(status.body.lastSyncedAt).toBe(at)
+      // Needing a reconnect still reports what this week's syncs stored.
+      expect(keys(status.body.pulledThisWeek)).toEqual(PULLED_KEYS)
+      expect(status.body.pulledThisWeek).toStrictEqual({
+        since: iso(-7 * DAY),
+        receivables: {
+          nzd: { amountDueCents: 6_500, count: 1 },
+          otherCurrencies: [],
+        },
+        payables: ZERO,
+        payRuns: { count: 0, totalCostCents: 0, totalPayCents: 0 },
+        profit: { count: 0, netProfitCents: null },
+      })
     },
   )
+
+  it('needs_reconnect with nothing ever stored says so, with null figures and a zero week', async () => {
+    await seedConnection('needs_reconnect')
+
+    const totals = await getTotals()
+    expect(totals.status).toBe(200)
+    expect(keys(totals.body)).toEqual(TOTALS_KEYS)
+    expect(totals.body).toStrictEqual({
+      connection: 'needs_reconnect',
+      lastSyncedAt: null,
+      receivables: null,
+      payables: null,
+      profit: null,
+      payRuns: null,
+    })
+
+    const status = await getStatus()
+    expect(status.status).toBe(200)
+    expect(keys(status.body)).toEqual(STATUS_KEYS)
+    expect(keys(status.body.pulledThisWeek)).toEqual(PULLED_KEYS)
+    expect(status.body).toStrictEqual({
+      state: 'needs_reconnect',
+      lastSyncedAt: null,
+      lastRun: null,
+      pulledThisWeek: {
+        since: iso(-7 * DAY),
+        receivables: ZERO,
+        payables: ZERO,
+        payRuns: { count: 0, totalCostCents: 0, totalPayCents: 0 },
+        profit: { count: 0, netProfitCents: null },
+      },
+    })
+  })
 
   const OLD = iso(-2 * 60 * MINUTE)
   const seeders = {
