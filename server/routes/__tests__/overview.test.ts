@@ -56,7 +56,7 @@ const STAMP = '2026-10-20T00:00:00.000Z'
 type Row = Record<string, unknown>
 
 // The fixture is a copy of the one in server/db/__tests__/overview.test.ts
-// (copy 4 of the account/transaction builders; the others are there, in
+// (and of the account/transaction builders there, in
 // server/db/__tests__/synced.test.ts and in
 // server/routes/__tests__/accounts.test.ts).
 function account(fields: Row): Row {

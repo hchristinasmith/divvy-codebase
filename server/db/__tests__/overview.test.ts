@@ -162,8 +162,8 @@ const STAMP = '2026-10-20T00:00:00.000Z'
 
 type Row = Record<string, unknown>
 
-// Row builders: copy 3 of the account/transaction builders; the others are
-// in server/db/__tests__/synced.test.ts and
+// Row builders: a copy of the account/transaction builders in
+// server/db/__tests__/synced.test.ts and
 // server/routes/__tests__/accounts.test.ts (and this file's fixture is
 // copied again in server/routes/__tests__/overview.test.ts).
 function account(fields: Row): Row {
@@ -1317,6 +1317,35 @@ describe('readOverview: recent activity', () => {
     expect((err as Error).message).toBe('a transaction is incomplete')
   })
 
+  // The activity list refuses an incomplete row too, but only one among its
+  // newest rows. Here newer complete rows push it out of that list, so only
+  // the window query can refuse it.
+  it.each([
+    ['no date', { date: null }],
+    [
+      'no amount, oldest in the window',
+      { amount_cents: null, date: '2026-10-26T12:00:00.000Z' },
+    ],
+  ])(
+    'a row with %s is refused by the window even outside the activity list',
+    async (_why, fields) => {
+      await connection('accounts').insert(
+        account({ id: 1, akahu_id: 'acc_a', balance_cents: 100 }),
+      )
+      await connection('transactions').insert([
+        tx('acc_a', '2026-10-27T03:00:00.000Z', -1, fields),
+        ...Array.from({ length: RECENT_ACTIVITY_LIMIT }, () =>
+          tx('acc_a', '2026-10-27T03:00:00.000Z', -1),
+        ),
+      ])
+
+      const err = await errorOf(() => readOverview('all', NOW, connection))
+
+      expect(err).toBeInstanceOf(OverviewDataError)
+      expect((err as Error).message).toBe('a transaction is incomplete')
+    },
+  )
+
   it('an incomplete row on an account that is not stored is ignored', async () => {
     await connection('accounts').insert(
       account({ id: 1, akahu_id: 'acc_a', balance_cents: 100 }),
@@ -1381,6 +1410,11 @@ describe('readOverview: dataAsOf', () => {
       run(3, '2026-10-27T05:00:00.000Z', '2026-10-27T05:01:00.000Z', 'failed'),
       // Sorts after every ISO time as text, but is not in toISOString form.
       run(4, 'not-a-timestamp', '2026-10-27T09:00:00.000Z', 'success'),
+      // julianday() reads this one as later than every row above, so only
+      // the toISOString-form filter keeps it out; run 4 alone would pass
+      // without that filter, because julianday() of junk is NULL and ranks
+      // last.
+      run(5, '2026-10-27 09:00:00', '2026-10-27T09:30:00.000Z', 'success'),
     ])
 
     expect((await readOverview('all', NOW, connection)).dataAsOf).toBe(
