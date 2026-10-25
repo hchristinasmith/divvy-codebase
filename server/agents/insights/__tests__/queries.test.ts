@@ -1188,6 +1188,44 @@ describe('cleanLabel', () => {
       if (!passesAsValue(out)) expect.fail(`${JSON.stringify(out)} is refused by the chart validator`)
     }
   })
+
+  // #312 pins today's behaviour for a Hangul filler: a letter that draws
+  // nothing and is kept, so it sits between digit groups where a space would
+  // let LONG_DIGIT_RUN count through. NFKC folds U+3164 and U+FFA0 to U+1160
+  // first; U+115F and U+1160 are kept as they are. The digits are invented
+  // (not Luhn-valid, not a known test card).
+  it.each([
+    ['U+3164', '\u3164', '\u1160'],
+    ['U+115F', '\u115F', '\u115F'],
+    ['U+1160', '\u1160', '\u1160'],
+    ['U+FFA0', '\uFFA0', '\u1160'],
+  ])('#312 regression: a 16-digit number split by %s keeps its digits unmasked today', (_name, filler, kept) => {
+    const out = cleanLabel(['5550', '0123', '4567', '8901'].join(filler), FALLBACK)
+    expect(out).toBe(['5550', '0123', '4567', '8901'].join(kept))
+    expect(out).not.toContain('####')
+  })
+
+  it('#312 regression: the same number split by spaces is masked today, so only the filler hides it', () => {
+    expect(cleanLabel('5550 0123 4567 8901', FALLBACK)).toBe('####')
+  })
+
+  it.each([
+    ['one U+3164', '\u3164', '\u1160'],
+    ['three U+3164', '\u3164\u3164\u3164', '\u1160\u1160\u1160'],
+    ['one U+115F', '\u115F', '\u115F'],
+    ['one U+FFA0', '\uFFA0', '\u1160'],
+  ])('#312 regression: a label of only %s is not the fallback today', (_name, input, output) => {
+    expect(cleanLabel(input, FALLBACK)).toBe(output)
+    expect(cleanLabel(input, FALLBACK)).not.toBe(FALLBACK)
+  })
+
+  it('#312 regression: "Shop" and "Shop" plus a U+3164 differ today', () => {
+    const plain = cleanLabel('Shop', FALLBACK)
+    const padded = cleanLabel('Shop\u3164', FALLBACK)
+    expect(plain).toBe('Shop')
+    expect(padded).toBe('Shop\u1160')
+    expect(padded).not.toBe(plain)
+  })
 })
 
 // Why a cleaned label breaks #304's mark rule, or null: every run of marks
