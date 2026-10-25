@@ -822,6 +822,7 @@ describe('failure and repeat', () => {
   it.each([
     ['an unknown scope', 'everyone', {}, 'scope must be personal or strawb'],
     ['a bad period', 'personal', { period: '2026-W99' }, 'period must be an ISO week label (YYYY-Www)'],
+    ['a period past the year 9999', 'personal', { period: '9999-W52' }, 'period must be an ISO week label (YYYY-Www)'],
     ['a sync trigger', 'personal', { trigger: 'sync' }, 'trigger must be manual or weekly'],
   ])('%s is refused before any run is logged', async (_why, scope, options, message) => {
     await expect(

@@ -995,12 +995,6 @@ describe('dates', () => {
     expect(isoWeekOf('9999-12-31')).toBe('9999-W52')
   })
 
-  // That week's Sunday is 10000-01-02, which no YYYY-MM-DD names, so the
-  // range is refused rather than returned with a five-digit year.
-  it('weekRange(9999-W52) is a RangeError', () => {
-    expect(() => weekRange('9999-W52')).toThrow(RangeError)
-  })
-
   // The class only: the refusal's text belongs to whichever parser reads the
   // date, so it is not pinned.
   it.each(['2026-02-30', '2026-13-01', 'x'])('isoWeekOf and monthsEnding refuse %j with a RangeError', (date) => {
@@ -1011,6 +1005,56 @@ describe('dates', () => {
   // A Saturday: its week's Thursday is in the year -1, which no YYYY-MM-DD names.
   it('isoWeekOf(0000-01-01) is a RangeError', () => {
     expect(() => isoWeekOf('0000-01-01')).toThrow(RangeError)
+  })
+
+  // 9999-W52's Sunday is 10000-01-02, which no YYYY-MM-DD names, and a later
+  // week has no day in 9999 at all, so a date helper throws its own
+  // RangeError. weekRange turns it into its own refusal, so the range is
+  // never returned with a five-digit year and the caller gets the period text.
+  it.each(['9999-W52', '9999-W53', '9999-W54'])(
+    'weekRange(%s) refuses with the period message, not a date helper message',
+    (label) => {
+      let caught: unknown
+      try {
+        weekRange(label)
+      } catch (err) {
+        caught = err
+      }
+      expect(caught).toBeInstanceOf(RangeError)
+      expect((caught as Error).message).toBe('period must be an ISO week label (YYYY-Www)')
+    },
+  )
+
+  // 0000-W01 is Monday 0000-01-03 to Sunday 0000-01-09: a real week, so it is returned.
+  it('weekRange(0000-W01) is returned, not refused', () => {
+    expect(weekRange('0000-W01')).toStrictEqual({ label: '0000-W01', start: '0000-01-03', end: '0000-01-09' })
+  })
+
+  // A window that would start before 0000-01 has no label for its earliest
+  // months, so it is refused with a fixed text that names `end` and echoes no
+  // value. The boundary cases are the window that starts at 0000-01 exactly
+  // (kept below) and the one that starts one month earlier (refused here).
+  it.each([
+    ['0000-01-01', 3],
+    ['0000-01-01', 2],
+    ['0000-02-01', 3],
+  ])('monthsEnding(%s, %i) refuses a window that starts before 0000-01, naming the field and not the value', (end, n) => {
+    let caught: unknown
+    try {
+      monthsEnding(end, n)
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(RangeError)
+    expect((caught as Error).message).toBe(
+      'end leaves no room for the months asked: the window would start before 0000-01',
+    )
+  })
+
+  it('monthsEnding keeps a window that starts exactly at 0000-01', () => {
+    expect(monthsEnding('0000-03-15', 3)).toStrictEqual(['0000-01', '0000-02', '0000-03'])
+    expect(monthsEnding('0000-02-01', 2)).toStrictEqual(['0000-01', '0000-02'])
+    expect(monthsEnding('0000-01-01', 1)).toStrictEqual(['0000-01'])
   })
 
   it('lastCompleteWeek refuses an invalid instant', () => {
