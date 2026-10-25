@@ -198,6 +198,10 @@ describe('insertProposal', () => {
     ['reason tag characters (non-BMP)', { reason: '\u{E0041}\u{E0042}' }, /^reason must not be blank$/],
     ['reason a variation selector', { reason: '\ufe0f' }, /^reason must not be blank$/],
     ['reason U+200B, space, U+3164 and tab', { reason: '\u200b \u3164\t' }, /^reason must not be blank$/],
+    // The blank check runs before the cap: a blank value over the cap is blank.
+    ['reason 2,001 spaces', { reason: ' '.repeat(2_001) }, /^reason must not be blank$/],
+    ['reason 2,001 U+200B', { reason: '\u200b'.repeat(2_001) }, /^reason must not be blank$/],
+    ['reason 42', { reason: 42 as unknown as string }, /^reason must not be blank$/],
     [
       'origin claude',
       { origin: 'claude' as unknown as NewProposal['origin'] },

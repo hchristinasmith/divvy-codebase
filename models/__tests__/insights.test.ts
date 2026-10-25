@@ -401,6 +401,9 @@ describe('default-ignorable characters are stripped before the URL check', () =>
     // NFKC runs before the strip; U+FFA0 folds to U+1160, itself
     // default-ignorable, so the fold does not let it through.
     ['a halfwidth Hangul filler (U+FFA0) splitting javascript', `java\uffa0script:${CANARY}`],
+    // Two default-ignorable characters in a row: each one must be stripped on its own.
+    ['two zero-width spaces splitting javascript', `java\u200b\u200bscript:${CANARY}`],
+    ['a Hangul filler and a variation selector splitting http', `ht\u3164\ufe0ftp://${CANARY}.example`],
   ])('refuses a title with %s', (_name, title) => {
     const spec = base()
     spec.title = title

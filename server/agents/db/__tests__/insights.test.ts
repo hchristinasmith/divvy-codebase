@@ -194,6 +194,11 @@ describe('insertInsight', () => {
     ['title tag characters (non-BMP)', { title: '\u{E0041}\u{E0042}' }, /^title must not be blank$/],
     ['body_md a variation selector', { body_md: '\ufe0f' }, /^body_md must not be blank$/],
     ['period U+200B, space, U+3164 and tab', { period: '\u200b \u3164\t' }, /^period must not be blank$/],
+    // The blank check runs before the cap: a blank value over the cap is blank.
+    ['title 201 spaces', { title: ' '.repeat(201) }, /^title must not be blank$/],
+    ['title 201 U+200B', { title: '\u200b'.repeat(201) }, /^title must not be blank$/],
+    ['body_md 20,001 spaces', { body_md: ' '.repeat(20_001) }, /^body_md must not be blank$/],
+    ['title 42', { title: 42 as unknown as string }, /^title must not be blank$/],
   ]
 
   it.each(BAD)('throws on a bad %s, and writes nothing', async (_, fields, message) => {
