@@ -75,6 +75,21 @@ const GUARDS: Guard[] = [
         createdBy: '20261024100004_category_corrections.js',
         row: { from_category: null, to_category: 'Bakeries', corrected_at: AT, source: 'user' },
       },
+      {
+        table: 'category_proposals',
+        column: 'transaction_id',
+        onDelete: 'CASCADE',
+        createdBy: '20261025160000_agent_inboxes.js',
+        row: {
+          current_category: null,
+          proposed_category: 'Bakeries',
+          confidence: 0.9,
+          reason: 'Moved to Bakeries twice',
+          origin: 'rule',
+          status: 'pending',
+          created_at: AT,
+        },
+      },
     ],
   },
   {
