@@ -1137,3 +1137,210 @@ describe('#354: a 500 carrying a constant-shaped err.code logs the name, the cod
     },
   )
 })
+
+// #363: an Error whose traps throw. Today some of the handler's reads of the
+// error sit outside any try, so a throw there makes the handler itself throw.
+// On the normal path Express's default handler then answers an HTML 500 that
+// carries the thrown text; after the response started it logs the thrown
+// Error's stack, the trap's text included. The stage-2 fix flips these rows to
+// the fixed JSON 500 and the fixed log line; the 401 rows already answer the
+// fixed JSON and must keep doing so. Each `readSite` is the frame of the
+// handler's read that threw first, so a pin fails if a different read throws.
+// Each Proxy is over the coded Error the route raises.
+
+// The Error the last trap threw. Express logs that Error's stack after a
+// throw from the handler, so a headers-sent test pins the exact log line.
+let lastTrap: Error | undefined
+function trapError(): Error {
+  lastTrap = new Error(FIELD_SECRET)
+  return lastTrap
+}
+function lastTrapped(): Error {
+  if (lastTrap === undefined) throw new Error('no trap was thrown')
+  return lastTrap
+}
+
+// The anonymous handler's frame in server.ts. Matched by shape, not by line,
+// so an edit above the handler does not move the pin. The `[^\n<]` keeps the
+// match on one line of the served HTML, whose lines end at `<br>`.
+const ANONYMOUS_HANDLER_FRAME = /at \/[^\n<]*server\/server\.ts:\d+:\d+/
+
+// `get` throws for every key.
+const GET_THROWS = (err: Error): Error =>
+  new Proxy(err, {
+    get() {
+      throw trapError()
+    },
+  })
+
+// `get` passes through, so `stack` stays readable; `has` throws for every key.
+const HAS_THROWS = (err: Error): Error =>
+  new Proxy(err, {
+    get(target, prop) {
+      return Reflect.get(target, prop) as unknown
+    },
+    has() {
+      throw trapError()
+    },
+  })
+
+const PROTOTYPE_THROWS = (err: Error): Error =>
+  new Proxy(err, {
+    getPrototypeOf() {
+      throw trapError()
+    },
+  })
+
+// Every trap other than `get` and `has`, each throwing.
+const OTHER_TRAPS_THROW: ProxyHandler<Error> = {
+  getPrototypeOf() {
+    throw trapError()
+  },
+  getOwnPropertyDescriptor() {
+    throw trapError()
+  },
+  ownKeys() {
+    throw trapError()
+  },
+  defineProperty() {
+    throw trapError()
+  },
+  set() {
+    throw trapError()
+  },
+  deleteProperty() {
+    throw trapError()
+  },
+  isExtensible() {
+    throw trapError()
+  },
+  preventExtensions() {
+    throw trapError()
+  },
+  setPrototypeOf() {
+    throw trapError()
+  },
+}
+
+const EVERY_TRAP_THROWS = (err: Error): Error =>
+  new Proxy(err, {
+    ...OTHER_TRAPS_THROW,
+    get() {
+      throw trapError()
+    },
+    has() {
+      throw trapError()
+    },
+  })
+
+// A 401 whose `get` throws for every key: `'status' in err` is true, and then
+// reading `status` throws.
+const GET_THROWS_ON_401 = (err: Error): Error =>
+  new Proxy(Object.assign(err, { status: 401 }), {
+    get() {
+      throw trapError()
+    },
+  })
+
+// A 401 whose `status` is readable and whose every other trap and key throws.
+// Its class cannot be read, so the 4xx line names it `unknown`.
+const ONLY_STATUS_READS = (err: Error): Error =>
+  new Proxy(Object.assign(err, { status: 401 }), {
+    ...OTHER_TRAPS_THROW,
+    get(target, prop) {
+      if (prop === 'status') return Reflect.get(target, prop) as unknown
+      throw trapError()
+    },
+    has(target, prop) {
+      if (prop === 'status') return Reflect.has(target, prop)
+      throw trapError()
+    },
+  })
+
+describe('#363: an Error behind a Proxy whose traps throw', () => {
+  it.each([
+    ['a get trap that throws for every key', GET_THROWS, /at nameAndFrames \(/],
+    ['a has trap that throws for every key', HAS_THROWS, /at clientStatus \(/],
+    ['a getPrototypeOf trap that throws', PROTOTYPE_THROWS, ANONYMOUS_HANDLER_FRAME],
+    ['every trap that throws', EVERY_TRAP_THROWS, /at clientStatus \(/],
+    ['a 401 whose get trap throws for every key', GET_THROWS_ON_401, /at clientStatus \(/],
+  ] as const)(
+    'today, %s on the normal path answers an HTML 500 carrying the thrown text',
+    async (_what, make, readSite) => {
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      codeCase.make = make
+
+      const res = await api
+        .get('/api/v1/__test/coded-case')
+        .set('X-Divvy-Test', HEADER_SECRET)
+
+      expect(res.status).toBe(500)
+      expect(res.headers['content-type']).toMatch(/^text\/html/)
+      expect(res.text).toContain(`Error: ${FIELD_SECRET}`)
+      expect(res.text).toMatch(readSite)
+      // The handler threw before reaching its own log line.
+      expect(errorLog.mock.calls).toStrictEqual([])
+    },
+  )
+
+  it('today, a 401 whose status is readable and whose other traps and keys throw answers the fixed 401 and logs `unknown`', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+    codeCase.make = ONLY_STATUS_READS
+
+    const res = await api
+      .get('/api/v1/__test/coded-case')
+      .set('X-Divvy-Test', HEADER_SECRET)
+
+    expect(res.status).toBe(401)
+    expect(res.headers['content-type']).toMatch(/^application\/json/)
+    expect(res.body).toStrictEqual({ error: 'Client error' })
+    expect(Object.keys(res.body)).toEqual(['error'])
+    expectNoLeak(res.text)
+    expect(errorLog.mock.calls).toStrictEqual([
+      [UNKNOWN_4XX_LOG, 401, 'unknown'],
+    ])
+    expectNoLogLeak(errorLog.mock.calls)
+  })
+
+  // Express logs the stack of the Error the trap threw, not a line of the
+  // handler's own, so the pin is that stack exactly. Its text is in the log,
+  // which is the leak stage 2 closes.
+  it.each([
+    ['a get trap that throws for every key', GET_THROWS, /at nameAndFrames \(/],
+    ['a getPrototypeOf trap that throws', PROTOTYPE_THROWS, ANONYMOUS_HANDLER_FRAME],
+    ['every trap that throws', EVERY_TRAP_THROWS, ANONYMOUS_HANDLER_FRAME],
+    ['a 401 whose get trap throws for every key', GET_THROWS_ON_401, /at nameAndFrames \(/],
+    ['a 401 whose other traps and keys throw', ONLY_STATUS_READS, ANONYMOUS_HANDLER_FRAME],
+  ] as const)(
+    'today, %s after the response started logs the thrown Error and its frames',
+    async (_what, make, readSite) => {
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      codeCase.make = make
+
+      lastTrap = undefined
+      await requestAfterHeaders('/api/v1/__test/after-headers-coded-case')
+
+      // Exactly the thrown Error's stack, once, as the only argument.
+      expect(errorLog.mock.calls).toStrictEqual([[lastTrapped().stack]])
+      // The first frame in server.ts is the handler's read that threw.
+      const readFrame = lastTrapped()
+        .stack?.split('\n')
+        .find((line) => line.includes('server.ts'))
+      expect(readFrame).toMatch(readSite)
+    },
+  )
+
+  it('today, a has trap that throws for every key after the response started logs `Error` and its frames', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+    codeCase.make = HAS_THROWS
+
+    await requestAfterHeaders('/api/v1/__test/after-headers-coded-case')
+
+    expect(errorLog.mock.calls).toStrictEqual([
+      [
+        'Unhandled /api error after the response started:',
+        ['Error', ...framesOfCoded()].join('\n'),
+      ],
+    ])
+  })
+})
