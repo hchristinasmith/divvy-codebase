@@ -336,10 +336,11 @@ const RUN_TIMEOUT_MS = (SOCKET_WAIT_SECS + 15) * 1000
 // under load and failed as `expected null to be +0` (#369): spawnSync killed
 // start.sh and returned no status. Measured the same day with the 1-minute
 // load at 130-210 (the suite was not run with extra load), boot runs took
-// 5.3-13.2s, so this is about four and a half times the slowest. spawnSync is
-// synchronous, so vitest cannot time the test out during it: this limit is
-// the one that ends a hang, and it sits under the describe block's 70s.
-const BOOT_RUN_TIMEOUT_MS = 60 * 1000
+// 5.3-13.2s, but the failing run took longer than RUN_TIMEOUT_MS, and how
+// much longer is unknown; this doubles the limit it ran past. vitest arms a
+// test's timeout only after a synchronous test returns, so it never ends a
+// spawnSync: this limit is the one that ends a hang.
+const BOOT_RUN_TIMEOUT_MS = 2 * RUN_TIMEOUT_MS
 const SERVE_OK = '|-- / proxy http://127.0.0.1:3005\n'
 
 // tailscaled is node so it can hold a real unix socket. It is wrapped in sh
