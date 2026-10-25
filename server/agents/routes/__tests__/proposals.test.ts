@@ -439,6 +439,12 @@ describe('POST /api/v1/agents/proposals/:id/accept', () => {
     it.each([
       ['against no category, on a transaction with one', null, 'Supermarkets and grocery stores'],
       ['against a category, on a transaction with none', 'Supermarkets and grocery stores', null],
+      // Not hand-set: sync recategorised it, so only the comparison refuses it.
+      [
+        'against one category, on a transaction with another',
+        'Supermarkets and grocery stores',
+        'Cafes and restaurants',
+      ],
     ])('a proposal %s: 409, pending, nothing written', async (_why, current, category) => {
       await seedMain()
       const tx = await seedTransaction('drifted', { category })
@@ -451,6 +457,52 @@ describe('POST /api/v1/agents/proposals/:id/accept', () => {
       expect(res.body).toStrictEqual(STALE)
       expect(await snapshotTables()).toEqual(before)
       expect((await proposalRow(id)).status).toBe('pending')
+    })
+
+    it('a second proposal, after another accept moved the category: 409, pending, nothing written', async () => {
+      const { target, targetProposal } = await seedMain()
+      const second = await seedProposal(
+        proposal(target, { proposed_category: 'Convenience stores' }),
+        LATER,
+      )
+      expect((await accept(targetProposal)).status).toBe(200)
+      expect(await transactionRow(target)).toMatchObject({
+        category: 'Bakeries',
+        category_source: 'rule',
+      })
+      const afterFirst = await snapshotTables()
+
+      const res = await accept(second)
+
+      expect(res.status).toBe(409)
+      expect(res.body).toStrictEqual(STALE)
+      expect(await snapshotTables()).toEqual(afterFirst)
+      expect((await proposalRow(second)).status).toBe('pending')
+    })
+
+    it('a proposed category no longer in the list is refused for that, before staleness', async () => {
+      const { target } = await seedMain()
+      expect((await patch(target, 'Convenience stores')).status).toBe(200)
+      // Direct insert: insertProposal refuses an unknown category.
+      const [both] = await connection('category_proposals').insert({
+        transaction_id: target,
+        current_category: 'Supermarkets and grocery stores',
+        proposed_category: 'Not A Category',
+        confidence: 0.8,
+        reason: 'An invented reason',
+        origin: 'rule',
+        status: 'pending',
+        created_at: NOW.toISOString(),
+      })
+      const before = await snapshotTables()
+
+      const res = await accept(both)
+
+      expect(res.status).toBe(409)
+      expect(res.body).toStrictEqual({
+        error: 'Proposed category is no longer in the category list',
+      })
+      expect(await snapshotTables()).toEqual(before)
     })
 
     it('a stale proposal can still be rejected', async () => {

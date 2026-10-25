@@ -524,6 +524,20 @@ describe('the guard’s inputs', () => {
     expect(ctx.writers.has(EXEMPTION.module)).toBe(true)
   })
 
+  // The exemption admits a name, not a body: a reader that grew a write
+  // would pass every other rule here.
+  it.each(EXEMPTION.names.filter((n) => n !== 'setUserCategory'))(
+    'the exempt %s only reads',
+    (name) => {
+      const source = parse(EXEMPTION.module, read(EXEMPTION.module))
+      const fn = source.statements.find(
+        (s) => ts.isFunctionDeclaration(s) && s.name?.text === name,
+      )
+      expect(fn).toBeDefined()
+      expect(containsWrite(EXEMPTION.module, fn?.getText(source) ?? '')).toBe(false)
+    },
+  )
+
   it('finds the modules under server/agents/, the routes and the accessors among them', () => {
     expect(agentModules().map((f) => f.path)).toEqual(
       expect.arrayContaining([
