@@ -212,7 +212,7 @@ From [Get accounts][ref-accounts], read on 2026-10-25, compared with a real
 | `formatted_account` | optional | `formatted_account` |
 | `status` | required; `ACTIVE`, `INACTIVE` | `status`, no CHECK |
 | `type` | required; `CHECKING`, `SAVINGS`, `CREDITCARD`, `LOAN`, `KIWISAVER`, `INVESTMENT`, `TERMDEPOSIT`, `FOREIGN`, `TAX`, `REWARDS`, `WALLET` | `type`, no CHECK |
-| `attributes` | required array of `TRANSACTIONS`, `PAYMENT_TO`, `PAYMENT_FROM` | `attributes`, JSON text |
+| `attributes` | required array; an open set (the page lists `TRANSACTIONS`, `PAYMENT_TO`, `PAYMENT_FROM`) | `attributes`, JSON text, in the order sent; none sent is `[]` |
 | `balance.currency`, `.current` | required within an optional `balance` | `currency`, `balance_cents` |
 | `balance.available`, `.limit` | optional | `available_balance_cents`, `credit_limit_cents` |
 | `balance.overdrawn` | optional boolean | not stored |
@@ -220,10 +220,22 @@ From [Get accounts][ref-accounts], read on 2026-10-25, compared with a real
 | `meta` (holder, loan details) | optional | not stored |
 | `_migrated` | optional; the account's predecessor id | not stored |
 
-`status` and `type` are Akahu's enums, and Akahu can add to them; the
-columns store whatever arrives rather than refusing a new value. The real
-response matched the docs: its key set included `_migrated` and
-`connection.connection_type`, and no account carried `overdrawn`.
+`status` and `type` are Akahu's enums, and `attributes` is an open set. Akahu
+can add to all three; the columns store whatever arrives rather than refusing
+a new value. Sync checks no `attributes` value, so a value the docs do not
+list (the test fixtures carry `TRANSFER_FROM` and `TRANSFER_TO`, which the
+page does not list) is stored as sent. The real response matched the docs:
+its key set included `_migrated` and `connection.connection_type`, and no
+account carried `overdrawn`.
+
+Sync reads the docs-required `_authorisation`, `attributes`,
+`connection.connection_type` and `connection.logo` as optional, on purpose
+(#155). A missing one is stored as NULL, or as `[]` for
+`attributes`. A value of the wrong type fails the whole `/v1/accounts`
+listing, so the client returns no account from it. `_credentials`, which the
+docs call deprecated, is read the same way. Sync goes the other way on
+`balance`: it reads `balance` as required, so a missing one fails the
+listing, and reads `balance.currency` as optional, though the docs require it.
 
 **Finding, not fixed here:** `models/akahu.ts` has drifted from both the
 docs and the real response. Its account `Item` has no `_migrated`,
@@ -231,8 +243,17 @@ docs and the real response. Its account `Item` has no `_migrated`,
 `refreshed.transactions`; marks `balance`, `balance.overdrawn` and `meta`
 required though Akahu marks them optional; and types `refreshed.*` as `Date`
 where JSON sends strings. `AkahuTransaction` has no `_migrated`,
-`_migrated_account`, `merchant.nzbn` or `meta.conversion`. There is no type
-for a pending transaction.
+`_migrated_account`, `merchant.nzbn` or `meta.conversion`. The file has no
+type for a pending transaction.
+
+Sync does not use `models/akahu.ts`; nothing in `server/sync/` imports it.
+Its types are in `server/sync/types.ts`, which has `PendingTransaction`. Since
+#155 they carry the merchant `logo`, `meta.card_suffix`, `meta.conversion`,
+the account `_authorisation` and `_credentials` ids, `attributes`, and the
+connection type and logo. `posted_date` and `merchant.nzbn` are read by the
+client, but no upsert stores them yet; #191 adds their columns. A conversion
+amount is in hundredths of its currency, JPY included (`types.ts`); #192
+tracks currency minor units.
 
 [guide]: https://developers.akahu.nz/docs/accessing-transactional-data
 [model]: https://developers.akahu.nz/docs/the-transaction-model
