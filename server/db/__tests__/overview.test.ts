@@ -1468,11 +1468,21 @@ describe('readOverview: transfers that are not drawings (#264 regression)', () =
     ['with no partner inflow', []],
     [
       'with a personal inflow 1 cent short',
-      [tx(AKAHU.everyday, NEXT_DAY, 29999, { id: 102, description: 'Invented transfer in' })],
+      [
+        tx(AKAHU.everyday, NEXT_DAY, 29999, {
+          id: 102,
+          description: 'Invented transfer in',
+        }),
+      ],
     ],
     [
       'with a personal inflow 1 cent over',
-      [tx(AKAHU.everyday, NEXT_DAY, 30001, { id: 102, description: 'Invented transfer in' })],
+      [
+        tx(AKAHU.everyday, NEXT_DAY, 30001, {
+          id: 102,
+          description: 'Invented transfer in',
+        }),
+      ],
     ],
   ])(
     'a strawb outflow %s counts toward Strawb spending as today',
@@ -1508,13 +1518,15 @@ describe('readOverview: transfers that are not drawings (#264 regression)', () =
       expect(all.safeToSpend.safeCents).toBe(416500)
 
       // Shown with its stored category, not anything derived.
-      expect(
-        all.recentActivity.find((r) => r.id === '101'),
-      ).toMatchObject({ category: 'Software', categorySource: 'akahu' })
+      expect(all.recentActivity.find((r) => r.id === '101')).toMatchObject({
+        category: 'Software',
+        categorySource: 'akahu',
+      })
       if (partner.length > 0) {
-        expect(
-          all.recentActivity.find((r) => r.id === '102'),
-        ).toMatchObject({ category: null, categorySource: 'akahu' })
+        expect(all.recentActivity.find((r) => r.id === '102')).toMatchObject({
+          category: null,
+          categorySource: 'akahu',
+        })
       }
     },
   )
@@ -1540,17 +1552,17 @@ describe('readOverview: transfers that are not drawings (#264 regression)', () =
     // Personal Groceries 9500 + 3000 = 12500 spent, 7500 remaining; the
     // personal remaining budget falls from 10500 to 7500 and the safe figure
     // rises by 3000: 28500 + 3000 = 31500.
-    expect(personal.safeToSpend.budgets.find((b) => b.id === '1')).toStrictEqual(
-      {
-        id: '1',
-        scope: 'personal',
-        category: 'Groceries',
-        limitCents: 20000,
-        spentCents: 12500,
-        remainingCents: 7500,
-        overCents: 0,
-      },
-    )
+    expect(
+      personal.safeToSpend.budgets.find((b) => b.id === '1'),
+    ).toStrictEqual({
+      id: '1',
+      scope: 'personal',
+      category: 'Groceries',
+      limitCents: 20000,
+      spentCents: 12500,
+      remainingCents: 7500,
+      overCents: 0,
+    })
     expect(personal.safeToSpend.remainingBudgetCents).toBe(7500)
     expect(personal.safeToSpend.safeCents).toBe(31500)
     // The strawb inflow is money in: Software is still 2500 spent.
@@ -1562,12 +1574,14 @@ describe('readOverview: transfers that are not drawings (#264 regression)', () =
     })
     expect(strawb.safeToSpend.safeCents).toBe(380500)
 
-    expect(
-      personal.recentActivity.find((r) => r.id === '101'),
-    ).toMatchObject({ category: 'Groceries', categorySource: 'akahu' })
-    expect(
-      strawb.recentActivity.find((r) => r.id === '102'),
-    ).toMatchObject({ category: 'Software', categorySource: 'akahu' })
+    expect(personal.recentActivity.find((r) => r.id === '101')).toMatchObject({
+      category: 'Groceries',
+      categorySource: 'akahu',
+    })
+    expect(strawb.recentActivity.find((r) => r.id === '102')).toMatchObject({
+      category: 'Software',
+      categorySource: 'akahu',
+    })
   })
 })
 
@@ -1617,7 +1631,9 @@ describe('readOverview: drawings (prd-02 Ruling 15)', () => {
       overCents: 0,
     })
     expect(strawb.safeToSpend.safeCents).toBe(380500)
-    expect((await readOverview('personal', NOW, connection)).safeToSpend.safeCents).toBe(28500)
+    expect(
+      (await readOverview('personal', NOW, connection)).safeToSpend.safeCents,
+    ).toBe(28500)
     const all = await readOverview('all', NOW, connection)
     expect(all.safeToSpend.safeCents).toBe(409000)
     expect(all.recentActivity.find((r) => r.id === '101')).toMatchObject({
@@ -1640,7 +1656,9 @@ describe('readOverview: drawings (prd-02 Ruling 15)', () => {
 
     const strawb = await readOverview('strawb', NOW, connection)
     // Software 2500 + 30000, as in the regression block.
-    expect(strawb.safeToSpend.budgets.find((b) => b.id === '3')?.spentCents).toBe(32500)
+    expect(
+      strawb.safeToSpend.budgets.find((b) => b.id === '3')?.spentCents,
+    ).toBe(32500)
     expect(strawb.recentActivity.find((r) => r.id === '101')).toMatchObject({
       category: 'Software',
       categorySource: 'user',

@@ -639,7 +639,12 @@ describe('a row the matcher cannot place does not break the transaction lists', 
   // (`centsToDollars` refuses it), so only the date case checks that list.
   it.each([
     ['a date past year 9999', '+275760-09-13T00:00:00.000Z', -30000, true],
-    ['an amount that is not whole cents', '2026-10-27T01:00:00.000Z', -1234.5, false],
+    [
+      'an amount that is not whole cents',
+      '2026-10-27T01:00:00.000Z',
+      -1234.5,
+      false,
+    ],
   ])(
     'the transaction lists still answer 200 beside %s',
     async (_why, date, cents, checkAccounts) => {
