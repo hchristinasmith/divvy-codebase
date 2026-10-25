@@ -29,7 +29,7 @@
 // told from spending is not set by #47 or prd-04; it is the open question on
 // #52 (Baseline decision 0a37d21b). The rule here is an interim one the #47
 // lane chose, and it lives in one place: `excludeOwnAccountTransfers` and
-// the TRANSFER_WINDOW_DAYS it reads (which `collectAggregates` also uses to
+// the TRANSFER_WINDOW_DAYS it reads (which `analysisWindow` also uses to
 // pad the ledger read). When #52 is answered, that function's body is what
 // changes.
 //
@@ -72,7 +72,7 @@ export interface LedgerRow {
 // not set by #47 or prd-04: it follows #52's answer (Baseline decision
 // 0a37d21b). Two legs of a transfer between the scope's own accounts may
 // post on different days; legs further apart than this are not paired.
-// `collectAggregates` also pads the ledger read by it, so a leg just outside
+// `analysisWindow` also pads the ledger read by it, so a leg just outside
 // the window still pairs; if #52's rule needs no window, drop the padding
 // with it.
 export const TRANSFER_WINDOW_DAYS = 2
@@ -140,9 +140,28 @@ export interface WeekRange {
   end: IsoDate
 }
 
-/** The Monday and Sunday of an ISO week label. Throws on a label that names no week. */
+function periodRefusal(): RangeError {
+  return new RangeError('period must be an ISO week label (YYYY-Www)')
+}
+
+/**
+ * The Monday and Sunday of an ISO week label. Refuses, with the period text,
+ * a label that names no week, or whose analysis window (`analysisWindow`:
+ * the monthly months, the unusual-spend lookback and the ledger read's
+ * padding) leaves the years 0000 to 9999. So a week it returns is one
+ * `collectAggregates` can read, and a run is never logged for one it cannot
+ * (#349).
+ */
 export function weekRange(label: string): WeekRange {
-  const refused = new RangeError('period must be an ISO week label (YYYY-Www)')
+  const range = weekDays(label)
+  analysisWindow(range)
+  return range
+}
+
+// The Monday and Sunday of an ISO week label, refused only when the label
+// names no week. `weekRange` adds the analysis-window check.
+function weekDays(label: string): WeekRange {
+  const refused = periodRefusal()
   const match = typeof label === 'string' ? WEEK_LABEL.exec(label) : null
   if (!match) throw refused
   const [, y, w] = match
@@ -160,6 +179,42 @@ export function weekRange(label: string): WeekRange {
     // A week whose days leave the years 0000 to 9999 makes a date helper
     // throw its own RangeError (#337). The caller gets this refusal instead.
     if (err instanceof RangeError) throw refused
+    throw err
+  }
+}
+
+interface AnalysisWindow {
+  // The months the monthly chart covers, ascending, ending with the month
+  // the week's Sunday falls in.
+  months: string[]
+  // The earlier of the first monthly month's first day and the start of the
+  // unusual-spend lookback.
+  start: IsoDate
+  // The ledger read: `start` to the week's Sunday, TRANSFER_WINDOW_DAYS wider
+  // on both sides so a transfer whose other leg falls just outside still pairs.
+  readFrom: IsoDate
+  readTo: IsoDate
+}
+
+// Every day one `collectAggregates` run touches for a week, built in this one
+// place so `weekRange`'s check and the read cannot drift (#349). It also
+// builds the read's own UTC-day padding (`ledgerDayBounds`). A day outside the
+// years 0000 to 9999 makes a date helper (or `monthsEnding`) throw its own
+// RangeError; the caller gets the period refusal instead.
+function analysisWindow(range: WeekRange): AnalysisWindow {
+  try {
+    const months = monthsEnding(range.end, MONTHLY_MONTHS)
+    const [firstMonth] = months
+    const monthStart = `${firstMonth}-01`
+    const lookbackStart = addDaysIso(range.start, -7 * UNUSUAL_LOOKBACK_WEEKS)
+    const start = monthStart < lookbackStart ? monthStart : lookbackStart
+    const readFrom = addDaysIso(start, -TRANSFER_WINDOW_DAYS)
+    const readTo = addDaysIso(range.end, TRANSFER_WINDOW_DAYS)
+    // Built only so a padded read that leaves the years is refused here.
+    ledgerDayBounds(readFrom, readTo)
+    return { months, start, readFrom, readTo }
+  } catch (err) {
+    if (err instanceof RangeError) throw periodRefusal()
     throw err
   }
 }
@@ -333,6 +388,15 @@ export async function loadLedger(
   return (await readLedger(scope, from, to, db)).rows
 }
 
+// `date` is stored as UTC ISO-8601 text. The SQL bounds are whole UTC days
+// padded past the NZ offset either way (`upperDay` is exclusive); the exact
+// NZ day is applied after conversion. `analysisWindow` builds them too, so a
+// week whose padded read would leave the years 0000 to 9999 is refused
+// before a run.
+function ledgerDayBounds(from: IsoDate, to: IsoDate): { lowerDay: IsoDate; upperDay: IsoDate } {
+  return { lowerDay: addDaysIso(from, -1), upperDay: addDaysIso(to, 2) }
+}
+
 async function readLedger(
   scope: InsightScope,
   from: IsoDate,
@@ -345,11 +409,7 @@ async function readLedger(
   // A personal run never reads the candidates, which hold strawb rows; a
   // hand-set Drawings category still drops a personal row below.
   const drawingIds = scope === 'strawb' ? await loadDrawingIds(db) : new Set<number>()
-  // `date` is stored as UTC ISO-8601 text. The SQL bounds are whole UTC
-  // days padded past the NZ offset either way; the exact NZ day is applied
-  // below, after conversion.
-  const lowerDay = addDaysIso(from, -1)
-  const upperDay = addDaysIso(to, 2)
+  const { lowerDay, upperDay } = ledgerDayBounds(from, to)
   const stored: StoredRow[] = await db('transactions as t')
     .join('accounts as a', 't.account_id', 'a.akahu_id')
     .where({ 'a.scope': scope, 'a.source': 'akahu', 't.source': 'akahu', 't.status': 'settled' })
@@ -428,7 +488,7 @@ function push<K>(map: Map<K, number[]>, key: K, value: number): void {
  * (Baseline decision 0a37d21b, which weighs pairing on amounts, Akahu's
  * TRANSFER type and the other account's number). This function is the one
  * place the rule lives; when #52 is answered, replace its body (and the
- * TRANSFER_WINDOW_DAYS read padding in `collectAggregates`, if the new rule
+ * TRANSFER_WINDOW_DAYS read padding in `analysisWindow`, if the new rule
  * needs none).
  *
  * Today's rule pairs on amounts. An outflow pairs with an
@@ -590,7 +650,11 @@ export interface WeekOverWeek {
 /** Spend in the week against the week before it, in total and per category. */
 export function weekOverWeek(rows: readonly LedgerRow[], week: string): WeekOverWeek {
   const current = weekRange(week)
-  const previous = weekRange(isoWeekOf(addDaysIso(current.start, -7)))
+  // `weekDays`, not `weekRange`: the previous week's own window may start
+  // before 0000-01-01 when this week's does not. Its days lie inside this
+  // week's analysis window, so for a week `weekRange` accepted this step back
+  // cannot leave the years; for one it refused, `current` has already thrown.
+  const previous = weekDays(isoWeekOf(addDaysIso(current.start, -7)))
   const thisWeek = new Map<string, number[]>()
   const lastWeek = new Map<string, number[]>()
   for (const row of rows) {
@@ -722,18 +786,9 @@ export async function collectAggregates(
   db = connection,
 ): Promise<Aggregates> {
   const range = weekRange(weekLabel)
-  const months = monthsEnding(range.end, MONTHLY_MONTHS)
-  const [firstMonth] = months
-  const monthStart = `${firstMonth}-01`
-  const lookbackStart = addDaysIso(range.start, -7 * UNUSUAL_LOOKBACK_WEEKS)
-  const windowStart = monthStart < lookbackStart ? monthStart : lookbackStart
+  const { months, start: windowStart, readFrom, readTo } = analysisWindow(range)
 
-  const { rows: loaded, drawingDays } = await readLedger(
-    scope,
-    addDaysIso(windowStart, -TRANSFER_WINDOW_DAYS),
-    addDaysIso(range.end, TRANSFER_WINDOW_DAYS),
-    db,
-  )
+  const { rows: loaded, drawingDays } = await readLedger(scope, readFrom, readTo, db)
   const inWindow = (r: LedgerRow) => inRange(r, windowStart, range.end)
   const kept = excludeOwnAccountTransfers(loaded).filter(inWindow)
   const drawingsInWindow = drawingDays.filter((d) => d >= windowStart && d <= range.end).length
