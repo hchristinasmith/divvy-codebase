@@ -1165,6 +1165,37 @@ describe('budgetSpentCents', () => {
       budgetSpentCents({ accounts, transactions: [row({ accountId: 'ghost' })], ...window }),
     ).toThrow(/unknown account "ghost"/)
   })
+
+  // `safeToSpend` checks these before it calls `budgetSpentCents`, so only a
+  // direct call reaches the guards inside it (#127). Each message is matched
+  // whole: with the guard gone the call either returns or fails elsewhere
+  // with a different message (a fractional amount reaches `sumCents`).
+  it.each<[string, Partial<Parameters<typeof budgetSpentCents>[0]>, RegExp]>([
+    [
+      'a bad from date',
+      { from: '2026-10-1' },
+      /^from must be a YYYY-MM-DD calendar date, got "2026-10-1"$/,
+    ],
+    [
+      'a bad to date',
+      { to: '2026-11-31' },
+      /^to must be a YYYY-MM-DD calendar date, got "2026-11-31"$/,
+    ],
+    [
+      'a fractional transaction amount',
+      { transactions: [row({ amountCents: -1.5 })] },
+      /^transaction amountCents must be an integer number of cents, got -1.5$/,
+    ],
+    [
+      'a bad transaction date',
+      { transactions: [row({ date: '2026-10-1' })] },
+      /^transaction date must be a YYYY-MM-DD calendar date, got "2026-10-1"$/,
+    ],
+  ])('refuses %s', (_name, overrides, message) => {
+    expect(() =>
+      budgetSpentCents({ accounts, transactions: [row({})], ...window, ...overrides }),
+    ).toThrow(message)
+  })
 })
 
 describe('paydays', () => {
@@ -1275,9 +1306,24 @@ describe('refusals', () => {
     ],
     ['an impossible date', { today: '2026-02-30' }, /today must be a YYYY-MM-DD calendar date/],
     ['a timestamp, not a date', { today: '2026-10-23T09:00:00Z' }, /today must be a YYYY-MM-DD calendar date/],
+    // Text before the date, so the pattern is anchored at the start as well
+    // as the end (#127).
+    [
+      'a date with a leading character',
+      { today: 'x2026-10-23' },
+      /^today must be a YYYY-MM-DD calendar date, got "x2026-10-23"$/,
+    ],
     ['a fractional tax rate', { taxRateBasisPoints: 2812.5 }, /taxRateBasisPoints must be a whole number/],
     ['a tax rate over 100%', { taxRateBasisPoints: 10001 }, /taxRateBasisPoints must be a whole number/],
     ['fractional profit', { profitCents: 100.5 }, /profitCents must be an integer number of cents/],
+    // 2500 × 10_000_000_000_000 = 25_000_000_000_000_000, past
+    // Number.MAX_SAFE_INTEGER (about 9.007 × 10^15), though each input is a
+    // safe integer (#127).
+    [
+      'a tax rate × profit past the safe-integer range',
+      { taxRateBasisPoints: 2500, profitCents: 10_000_000_000_000 },
+      /^taxRateBasisPoints × profitCents must be an integer number of cents, got 25000000000000000$/,
+    ],
     [
       'a fractional balance',
       { accounts: [{ id: 'p-cur', scope: 'personal', role: 'current', balanceCents: 10.5 }], transactions: [] },
