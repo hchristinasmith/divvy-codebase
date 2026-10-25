@@ -12,7 +12,6 @@ import {
   lastCompleteWeek,
   loadLedger,
   monthsEnding,
-  nzCalendarDate,
   spendByCategoryPerMonth,
   topMerchants,
   unusualSpends,
@@ -20,6 +19,7 @@ import {
   weekRange,
   type LedgerRow,
 } from '../queries.ts'
+import { nzCalendarDate } from '../../../../shared/nz-dates.ts'
 
 // The insights agent's typed queries (#47; prd-04 Rulings 3, 7 and 8). Each
 // test starts from an empty, freshly migrated in-memory database and inserts
@@ -989,6 +989,12 @@ describe('dates', () => {
   // steps into the year 10000.
   it('isoWeekOf(9999-12-31) is 9999-W52', () => {
     expect(isoWeekOf('9999-12-31')).toBe('9999-W52')
+  })
+
+  // That week's Sunday is 10000-01-02, which no YYYY-MM-DD names, so the
+  // range is refused rather than returned with a five-digit year.
+  it('weekRange(9999-W52) is a RangeError', () => {
+    expect(() => weekRange('9999-W52')).toThrow(RangeError)
   })
 
   // The class only: the refusal's text belongs to whichever parser reads the

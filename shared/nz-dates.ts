@@ -6,7 +6,9 @@ import { daysInMonth } from './safe-to-spend.ts'
 // and which occurrences of a repeating bill fall due. The overview
 // (server/db/overview.ts) and the Bills screen (server/db/bills.ts) both
 // read occurrences from here, so the two screens cannot disagree on which
-// dates a bill falls due or on how many unpaid ones are too many.
+// dates a bill falls due or on how many unpaid ones are too many. The
+// insights agent (server/agents/insights/queries.ts) reads its date helpers
+// from here too.
 //
 // Today is the calendar date in Pacific/Auckland, never UTC: safe-to-spend
 // takes `today` in Hannah's timezone (shared/safe-to-spend.ts, prd-02
@@ -19,7 +21,9 @@ import { daysInMonth } from './safe-to-spend.ts'
 //
 // Errors are RangeErrors with a fixed text that echoes no value, so a
 // caller can turn one into its own closed-set error without a stored value
-// or a row id reaching a response.
+// or a row id reaching a response. The refusal texts name a bill because
+// bills came first; a caller that surfaces an error turns it into its own
+// fixed text.
 //
 // This module is pure: no clock, no server imports. Keep it free of
 // TypeScript-only runtime syntax (enums, namespaces, parameter properties)
@@ -66,7 +70,12 @@ interface CivilDate {
   day: number
 }
 
-function parseIsoDate(value: IsoDate): CivilDate {
+/**
+ * A `YYYY-MM-DD` calendar date as its year, month (1 to 12) and day. Anything
+ * else, a day past the month's end included, is a RangeError with a fixed
+ * text; the value is not echoed.
+ */
+export function parseIsoDate(value: IsoDate): CivilDate {
   const match = ISO_DATE.exec(value)
   if (match) {
     const year = Number(match[1])
