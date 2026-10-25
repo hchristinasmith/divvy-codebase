@@ -977,3 +977,73 @@ describe('the advisor banner', () => {
     expect(link.getAttribute('referrerpolicy')).toBe('no-referrer')
   })
 })
+
+describe('today: active and cancelled rows share one list (pinned before #390)', () => {
+  // Active and cancelled interleaved on purpose, across both scopes, so a
+  // list that grouped by status or by scope would change the order.
+  const mixed = response({
+    subscriptions: [
+      row({ merchantKey: 'm:merchant_invented_north', name: 'North Invented' }),
+      row({
+        merchantKey: 'm:merchant_invented_east',
+        scope: 'strawb',
+        name: 'East Invented',
+        status: 'cancelled',
+        cancelledOn: '2026-10-05',
+      }),
+      row({
+        merchantKey: 'm:merchant_invented_south',
+        scope: 'strawb',
+        name: 'South Invented',
+      }),
+      row({
+        merchantKey: 'm:merchant_invented_west',
+        name: 'West Invented',
+        status: 'cancelled',
+        cancelledOn: '2026-09-20',
+      }),
+    ],
+    // Deliberately not a sum of the rows (each is 1599 a month) and the year
+    // is not 12 x the month.
+    totals: {
+      perMonthCents: 2468,
+      perYearCents: 30001,
+      countedCount: 2,
+      uncountedCount: 1,
+    },
+  })
+
+  it('lists every row in the route order, cancelled ones struck through and active ones not', async () => {
+    setup(mixed)
+    await loaded()
+
+    expect(listNames()).toEqual([
+      'North Invented',
+      'East Invented',
+      'South Invented',
+      'West Invented',
+    ])
+
+    const struck = (scope: string, merchantKey: string): boolean =>
+      within(item(scope, merchantKey))
+        .getByTestId('subscription-name')
+        .classList.contains('line-through')
+    expect(struck('personal', 'm:merchant_invented_north')).toBe(false)
+    expect(struck('strawb', 'm:merchant_invented_east')).toBe(true)
+    expect(struck('strawb', 'm:merchant_invented_south')).toBe(false)
+    expect(struck('personal', 'm:merchant_invented_west')).toBe(true)
+  })
+
+  it("the totals are the route's figures, with cancelled rows in the response", async () => {
+    setup(mixed)
+    await loaded()
+
+    expect(screen.getByTestId('total-month').textContent).toBe('$24.68')
+    expect(screen.getByTestId('total-year').textContent).toBe('$300.01')
+    expect(
+      screen.getByText(
+        '1 subscription left out of these totals: no regular pattern yet',
+      ),
+    ).not.toBeNull()
+  })
+})
