@@ -5,6 +5,7 @@ export type ScreenKey =
   | 'overview'
   | 'budgets'
   | 'bills'
+  | 'subscriptions'
   | 'goals'
   | 'habits'
   | 'advisor'
@@ -24,6 +25,7 @@ const PATHS: Record<ScreenKey, string[]> = {
     'M9.5 12h5',
     'M9.5 15.5h3',
   ],
+  subscriptions: ['M5 7h14', 'M5 12h14', 'M5 17h14', 'M18 15.5l1.5 1.5-1.5 1.5'],
   goals: [
     'M12 20s-7-4.4-7-9.6A3.9 3.9 0 0 1 12 8a3.9 3.9 0 0 1 7 2.4C19 15.6 12 20 12 20z',
   ],

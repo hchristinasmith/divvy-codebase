@@ -4,6 +4,7 @@ import type { ScreenKey } from '../components/Shell/icons.tsx'
 import Overview from './Overview/index.tsx'
 import Budgets from './Budgets/index.tsx'
 import Bills from './Bills/index.tsx'
+import Subscriptions from '../components/Subscriptions/index.tsx'
 import Goals from './Goals/index.tsx'
 import Habits from './Habits/index.tsx'
 import Advisor from './Advisor/index.tsx'
@@ -44,6 +45,12 @@ export const screens: readonly ScreenRoute[] = [
     tab: { label: 'Budgets', order: 2 },
   },
   { key: 'bills', path: '/bills', label: 'Bills', Component: Bills },
+  {
+    key: 'subscriptions',
+    path: '/subscriptions',
+    label: 'Subscriptions',
+    Component: Subscriptions,
+  },
   {
     key: 'goals',
     path: '/goals',
