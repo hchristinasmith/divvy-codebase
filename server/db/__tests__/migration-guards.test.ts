@@ -1,17 +1,28 @@
-// #134: no migration after 20261024100004_category_corrections.js may
-// rebuild `transactions`. knex rebuilds a SQLite table to drop or alter a
-// column (`dropColumn`, `.alter()`), and the rebuild runs inside knex's
-// migration transaction, where PRAGMA foreign_keys = OFF is ignored, so the
-// ON DELETE CASCADE on `category_corrections.transaction_id` deletes every
-// correction. `migrate:latest` runs on every boot with no backup before it,
-// so the loss would be silent. See the hazard notes in
-// 20261023120000_money_as_cents.js and 20261024100004_category_corrections.js.
+// #134, #165: no migration may rebuild a table that another table references
+// with ON DELETE CASCADE or SET NULL. knex rebuilds a SQLite table to drop or
+// alter a column (`dropColumn`, `.alter()`), and the rebuild runs inside
+// knex's migration transaction, where PRAGMA foreign_keys = OFF is ignored,
+// so dropping the old copy of the parent deletes every CASCADE child row and
+// clears every SET NULL column. `migrate:latest` runs on every boot with no
+// backup before it, so the loss would be silent. A lost `credit_card` role
+// overstates safe-to-spend (prd-02 Ruling 10). See the hazard notes in
+// 20261023120000_money_as_cents.js, 20261024100004_category_corrections.js
+// and 20261025120000_prd02_budgets_bills_goals_roles_dismissals.js.
 //
-// The guard seeds a correction in the schema 100004 leaves and runs every
-// later migration over it, so it also covers migrations not written yet. The
-// canary runs the same flow with one extra in-test migration that rebuilds
-// `transactions`, and expects the guard's own check to fail: proof that the
-// hazard is real on this knex and that the guard can go red.
+// One guard per parent. Each seeds the parent and a row in every child table
+// in the schema left by the migration that created the parent's last child,
+// and runs every later migration over them, so it also covers migrations not
+// written yet. A parent whose last child came from the newest migration has
+// nothing after it to check yet; its guard is skipped until a migration
+// lands after that point, and runs from then on without anyone editing it.
+//
+// Each canary runs the same flow with one extra in-test migration that
+// rebuilds that parent, and expects the guard's own check to fail: proof that
+// the hazard is real on this knex and that the guard can go red, including
+// for the parents whose guard is skipped today.
+//
+// The first test pins GUARDS against the schema: a new CASCADE or SET NULL
+// foreign key with no guard fails it.
 import { readdirSync } from 'node:fs'
 import * as Path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -19,19 +30,166 @@ import knex, { Knex } from 'knex'
 import config from '../knexfile.js'
 import { migrateThrough } from './migrateToJustBefore.ts'
 
-const CORRECTIONS = '20261024100004_category_corrections.js'
 const AT = '2026-10-25T03:00:00.000Z'
 
 type Row = Record<string, unknown>
 
-// What a later migration must leave exactly as it found it. The correction
-// rows are compared whole, so a column added to or dropped from
-// `category_corrections` also fails here; if that was deliberate, this test
-// is the place to say so.
+type Child = {
+  table: string
+  // The column holding the parent's id. The guard writes it.
+  column: string
+  onDelete: 'CASCADE' | 'SET NULL'
+  // A valid row in the schema the guard seeds in, without `column`.
+  row: Row
+}
+
+type Guard = {
+  parent: string
+  // The migration that created the last of the parent's children. The seed
+  // is written in the schema it leaves.
+  seededAfter: string
+  // A valid parent row, distinct for each `name`.
+  parentRow: (name: string) => Row
+  children: Child[]
+}
+
+const GUARDS: Guard[] = [
+  {
+    parent: 'transactions',
+    seededAfter: '20261024100004_category_corrections.js',
+    parentRow: (name) => ({
+      akahu_id: `trans_fixture_${name}`,
+      account_id: 'acc_fixture_everyday',
+      amount_cents: -450,
+    }),
+    children: [
+      {
+        table: 'category_corrections',
+        column: 'transaction_id',
+        onDelete: 'CASCADE',
+        row: { from_category: null, to_category: 'Bakeries', corrected_at: AT, source: 'user' },
+      },
+    ],
+  },
+  {
+    parent: 'users',
+    seededAfter: '20250619122214_challenges.js',
+    parentRow: (name) => ({ email: `${name}@example.com`, password: 'x' }),
+    // `targets` was a child too, until prd-02 Ruling 6 dropped it in
+    // 20261025120000; nothing of it is left for a later migration to lose.
+    children: [
+      {
+        table: 'wishlist_items',
+        column: 'user_id',
+        onDelete: 'CASCADE',
+        row: {
+          name: 'Bike',
+          target_amt: 120000,
+          saved_amt: 5000,
+          priority: 'high',
+          url: 'https://example.com/bike',
+          img_url: null,
+          created_at: AT,
+          updated_at: AT,
+        },
+      },
+      {
+        table: 'settings',
+        column: 'user_id',
+        onDelete: 'CASCADE',
+        row: { id: 'setting_fixture', key: 'currency', value: 'NZD', updated_at: AT },
+      },
+      {
+        table: 'user_challenges',
+        column: 'user_id',
+        onDelete: 'CASCADE',
+        row: {
+          id: 'challenge_fixture',
+          challenge_id: 'no_spend_week',
+          status: 'active',
+          progress: 40,
+          started_at: AT,
+          completed_at: null,
+        },
+      },
+    ],
+  },
+  {
+    parent: 'accounts',
+    seededAfter: '20261025120000_prd02_budgets_bills_goals_roles_dismissals.js',
+    parentRow: (name) => ({
+      akahu_id: `acc_fixture_${name}`,
+      name,
+      created_at: AT,
+      updated_at: AT,
+    }),
+    children: [
+      {
+        table: 'account_settings',
+        column: 'account_id',
+        onDelete: 'CASCADE',
+        row: { role: 'credit_card', updated_at: AT },
+      },
+      {
+        table: 'bills',
+        column: 'account_id',
+        onDelete: 'SET NULL',
+        row: {
+          scope: 'personal',
+          name: 'Power',
+          amount_cents: 18450,
+          repeat: 'monthly',
+          first_due_date: '2026-10-31',
+          created_at: AT,
+          updated_at: AT,
+        },
+      },
+    ],
+  },
+  {
+    parent: 'bills',
+    seededAfter: '20261025120000_prd02_budgets_bills_goals_roles_dismissals.js',
+    parentRow: (name) => ({
+      scope: 'personal',
+      name,
+      amount_cents: 18450,
+      repeat: 'monthly',
+      first_due_date: '2026-10-31',
+      created_at: AT,
+      updated_at: AT,
+    }),
+    children: [
+      {
+        table: 'bill_payments',
+        column: 'bill_id',
+        onDelete: 'CASCADE',
+        row: { due_date: '2026-10-31', amount_cents: 18450, paid_at: AT },
+      },
+    ],
+  },
+  {
+    parent: 'goals',
+    seededAfter: '20261025120000_prd02_budgets_bills_goals_roles_dismissals.js',
+    parentRow: (name) => ({ name, target_cents: 120000, created_at: AT, updated_at: AT }),
+    children: [
+      {
+        table: 'goal_contributions',
+        column: 'goal_id',
+        onDelete: 'CASCADE',
+        row: { amount_cents: 5000, contributed_at: AT },
+      },
+    ],
+  },
+]
+
+// What a later migration must leave exactly as it found it. Child rows are
+// compared whole, so a column added to or dropped from a child table also
+// fails here; if that was deliberate, this test is the place to say so. The
+// parent is compared by id only: adding a column to it is not the hazard.
 type Survivors = {
-  corrections: Row[]
-  transactionIds: number[]
-  transactionsSequence: number | undefined
+  children: Record<string, Row[]>
+  parentIds: number[]
+  parentSequence: number | undefined
 }
 
 let db: Knex | undefined
@@ -41,121 +199,166 @@ afterEach(async () => {
   db = undefined
 })
 
-async function survivors(db: Knex, transactionId: number): Promise<Survivors> {
-  const seq = await db('sqlite_sequence').where({ name: 'transactions' }).first('seq')
+async function survivors(db: Knex, guard: Guard, parentId: number): Promise<Survivors> {
+  const children: Record<string, Row[]> = {}
+  for (const child of guard.children) children[child.table] = await db(child.table).orderBy('id')
+  const seq = await db('sqlite_sequence').where({ name: guard.parent }).first('seq')
   return {
-    corrections: await db('category_corrections').orderBy('id'),
-    transactionIds: await db('transactions').where({ id: transactionId }).pluck('id'),
-    transactionsSequence: seq?.seq,
+    children,
+    parentIds: await db(guard.parent).where({ id: parentId }).pluck('id'),
+    parentSequence: seq?.seq,
   }
 }
 
-// A transaction with a user correction on it, plus a later transaction that
-// was inserted and deleted, so the AUTOINCREMENT high-water mark sits above
-// every live id. A rebuild copies the live rows into a new table, whose
-// counter then restarts at the highest live id.
-async function seed(db: Knex): Promise<{ transactionId: number; before: Survivors }> {
-  const [transactionId] = await db('transactions').insert({
-    akahu_id: 'trans_fixture_corrected',
-    account_id: 'acc_fixture_everyday',
-    amount_cents: -450,
-  })
-  const [deletedId] = await db('transactions').insert({
-    akahu_id: 'trans_fixture_deleted',
-    account_id: 'acc_fixture_everyday',
-    amount_cents: -100,
-  })
-  await db('transactions').where({ id: deletedId }).delete()
-  await db('category_corrections').insert({
-    transaction_id: transactionId,
-    from_category: null,
-    to_category: 'Bakeries',
-    corrected_at: AT,
-    source: 'user',
-  })
+// A parent with one row in every child table, plus a later parent that was
+// inserted and deleted, so the AUTOINCREMENT high-water mark sits above every
+// live id. A rebuild copies the live rows into a new table, whose counter
+// then restarts at the highest live id.
+async function seed(db: Knex, guard: Guard): Promise<{ parentId: number; before: Survivors }> {
+  const [parentId] = await db(guard.parent).insert(guard.parentRow('kept'))
+  const [deletedId] = await db(guard.parent).insert(guard.parentRow('deleted'))
+  await db(guard.parent).where({ id: deletedId }).delete()
+  for (const child of guard.children) {
+    await db(child.table).insert({ ...child.row, [child.column]: parentId })
+  }
 
-  const before = await survivors(db, transactionId)
-  // The seed itself, so a guard over an empty table cannot pass.
-  expect(before.corrections).toHaveLength(1)
-  expect(before.corrections[0]).toMatchObject({ transaction_id: transactionId, source: 'user' })
-  expect(before.transactionIds).toEqual([transactionId])
-  expect(before.transactionsSequence).toBe(deletedId)
-  return { transactionId, before }
+  const before = await survivors(db, guard, parentId)
+  // The seed itself, so a guard over an empty table cannot pass, and every
+  // SET NULL column starts out set.
+  for (const child of guard.children) {
+    expect(before.children[child.table], child.table).toHaveLength(1)
+    expect(before.children[child.table][0], child.table).toMatchObject({
+      ...child.row,
+      [child.column]: parentId,
+    })
+  }
+  expect(before.parentIds).toEqual([parentId])
+  expect(before.parentSequence).toBe(deletedId)
+  return { parentId, before }
 }
 
 // The guard's check, shared with the canary so the canary exercises it
 // rather than a copy.
-async function expectSurvivedLatest(db: Knex, transactionId: number, before: Survivors) {
+async function expectSurvivedLatest(db: Knex, guard: Guard, parentId: number, before: Survivors) {
   expect(
-    await survivors(db, transactionId),
-    'category corrections, their transaction and its id counter after migrate:latest',
+    await survivors(db, guard, parentId),
+    `children of ${guard.parent}, the parent row and its id counter after migrate:latest`,
   ).toStrictEqual(before)
 }
 
 // Every real migration, by file name as knex's directory source orders
-// them, then one that rebuilds `transactions` the way a careless later
-// migration would. Nothing is written to server/db/migrations/.
+// them. Read once here so a guard knows, while tests are collected, whether
+// any migration runs after its seed point.
 const MIGRATIONS = config.test.migrations.directory
-const REBUILD = '99999999999999_canary_rebuild_transactions.js'
-const rebuildTransactions: Knex.Migration = {
-  up: (knex) =>
-    knex.schema.alterTable('transactions', (table) => {
-      table.dropColumn('logo')
-    }),
-  down: (knex) =>
-    knex.schema.alterTable('transactions', (table) => {
-      table.string('logo')
-    }),
+function realMigrations(): string[] {
+  return readdirSync(MIGRATIONS)
+    .filter((file) => file.endsWith('.js'))
+    .sort()
 }
-const withRebuild: Knex.MigrationSource<{ file: string }> = {
-  async getMigrations() {
-    const real = readdirSync(MIGRATIONS)
-      .filter((file) => file.endsWith('.js'))
-      .sort()
-    return [...real, REBUILD].map((file) => ({ file }))
-  },
-  getMigrationName: (migration) => migration.file,
-  async getMigration(migration) {
-    if (migration.file === REBUILD) return rebuildTransactions
-    return (await import(Path.join(MIGRATIONS, migration.file))) as Knex.Migration
-  },
+function nothingRunsAfter(file: string): boolean {
+  const real = realMigrations()
+  return real.indexOf(file) === real.length - 1
 }
 
-describe('migrations after category_corrections (#134)', () => {
-  it('leave every category correction, its transaction and the transactions id counter untouched', async () => {
-    db = knex(config.test)
-    await migrateThrough(db, CORRECTIONS)
-    const { transactionId, before } = await seed(db)
+// The real migrations, then one that rebuilds `parent` the way a careless
+// later migration would: adding a column is native, and dropping it makes
+// knex rebuild the table, leaving its rows as they were. Nothing is written
+// to server/db/migrations/.
+function canaryFile(parent: string): string {
+  return `99999999999999_canary_rebuild_${parent}.js`
+}
+function withRebuild(parent: string): Knex.MigrationSource<{ file: string }> {
+  const rebuild: Knex.Migration = {
+    up: async (knex) => {
+      await knex.schema.alterTable(parent, (table) => {
+        table.string('canary_rebuild')
+      })
+      await knex.schema.alterTable(parent, (table) => {
+        table.dropColumn('canary_rebuild')
+      })
+    },
+    down: async () => {},
+  }
+  return {
+    async getMigrations() {
+      return [...realMigrations(), canaryFile(parent)].map((file) => ({ file }))
+    },
+    getMigrationName: (migration) => migration.file,
+    async getMigration(migration) {
+      if (migration.file === canaryFile(parent)) return rebuild
+      return (await import(Path.join(MIGRATIONS, migration.file))) as Knex.Migration
+    },
+  }
+}
 
-    await db.migrate.latest()
+it('guards every ON DELETE CASCADE or SET NULL foreign key in the latest schema', async () => {
+  db = knex(config.test)
+  await db.migrate.latest()
+  const actual: string[] = []
+  for (const table of await db('sqlite_master').where({ type: 'table' }).pluck('name')) {
+    const keys: { table: string; from: string; on_delete: string }[] = await db.raw(
+      'PRAGMA foreign_key_list(??)',
+      [table],
+    )
+    for (const key of keys) {
+      if (key.on_delete === 'NO ACTION' || key.on_delete === 'RESTRICT') continue
+      actual.push(`${table}.${key.from} -> ${key.table} ON DELETE ${key.on_delete}`)
+    }
+  }
 
-    await expectSurvivedLatest(db, transactionId, before)
-  })
+  const guarded = GUARDS.flatMap((guard) =>
+    guard.children.map(
+      (child) => `${child.table}.${child.column} -> ${guard.parent} ON DELETE ${child.onDelete}`,
+    ),
+  )
+  expect(guarded.length).toBeGreaterThan(0)
+  expect(guarded.sort()).toEqual(actual.sort())
+})
+
+describe.each(GUARDS)('migrations after the last child of $parent (#134, #165)', (guard) => {
+  const vacuous = nothingRunsAfter(guard.seededAfter)
+
+  it.skipIf(vacuous)(
+    `leave every child of ${guard.parent}, the parent row and its id counter untouched${
+      vacuous ? ` (skipped: no migration runs after ${guard.seededAfter} yet)` : ''
+    }`,
+    async () => {
+      db = knex(config.test)
+      await migrateThrough(db, guard.seededAfter)
+      const { parentId, before } = await seed(db, guard)
+
+      await db.migrate.latest()
+
+      await expectSurvivedLatest(db, guard, parentId, before)
+    },
+  )
 
   // knex's directory source also loads `.ts` and `.cjs` files; the canary's
   // `.js` filter would silently skip one, so the two lists are pinned equal.
   it("canary's migration source lists the same real migrations as knex's directory source", async () => {
     db = knex(config.test)
     const [, pending] = (await db.migrate.list()) as [unknown, { file: string }[]]
-    const canary = (await withRebuild.getMigrations([])).map((m) => m.file)
-    expect(canary).toEqual([...pending.map((m) => m.file), REBUILD])
+    const canary = (await withRebuild(guard.parent).getMigrations([])).map((m) => m.file)
+    expect(canary).toEqual([...pending.map((m) => m.file), canaryFile(guard.parent)])
   })
 
-  it('canary: a migration that rebuilds transactions cascades the corrections away, and the guard catches it', async () => {
-    db = knex({ ...config.test, migrations: { migrationSource: withRebuild } })
-    await migrateThrough(db, CORRECTIONS)
-    const { transactionId, before } = await seed(db)
+  it(`canary: a migration that rebuilds ${guard.parent} takes its children, and the guard catches it`, async () => {
+    db = knex({ ...config.test, migrations: { migrationSource: withRebuild(guard.parent) } })
+    await migrateThrough(db, guard.seededAfter)
+    const { parentId, before } = await seed(db, guard)
 
     await db.migrate.latest()
 
-    // The reason the guard goes red: the rebuild kept the transaction but
-    // the cascade took its correction.
-    expect(await db('transactions').where({ id: transactionId }).pluck('id')).toEqual([
-      transactionId,
-    ])
-    expect(await db('category_corrections').count('* as n').first()).toEqual({ n: 0 })
-    await expect(expectSurvivedLatest(db, transactionId, before)).rejects.toThrow(
-      'category corrections, their transaction and its id counter after migrate:latest',
+    // The reason the guard goes red: the rebuild kept the parent row but
+    // the foreign keys fired on every child.
+    expect(await db(guard.parent).where({ id: parentId }).pluck('id')).toEqual([parentId])
+    for (const child of guard.children) {
+      const rows: Row[] = await db(child.table)
+      if (child.onDelete === 'CASCADE') expect(rows, child.table).toEqual([])
+      else expect(rows.map((row) => row[child.column]), child.table).toEqual([null])
+    }
+    await expect(expectSurvivedLatest(db, guard, parentId, before)).rejects.toThrow(
+      `children of ${guard.parent}, the parent row and its id counter after migrate:latest`,
     )
   })
 })
