@@ -58,6 +58,14 @@ chmod 700 "$state_dir"
 #    TLS certs live on the volume so restarts keep identity and cert cache.
 #    `env -i` keeps AKAHU_*, XERO_* and the Litestream credentials out of
 #    tailscaled's /proc/<pid>/environ; env execs, so $! is tailscaled itself.
+#    Every tailscale and timeout call below starts the same way, with PATH
+#    alone (#319), so none of them holds those secrets either. They need
+#    nothing more: the socket goes by flag, the auth key by argv, and each
+#    call talks only to tailscaled over the socket. With the auth key
+#    docs/deploy.md section 3 makes, tailscaled, not the CLI, reaches the
+#    control plane; an OAuth client secret as the key would have the CLI call
+#    Tailscale's API itself. env execs, so each call's exit status is the
+#    command's own and `|| die` sees it unchanged.
 env -i PATH="$PATH" tailscaled --tun=userspace-networking --statedir="$state_dir" --socket="$socket" &
 tsd_pid=$!
 
@@ -71,7 +79,7 @@ done
 
 # 3. Join. Flags are not remembered: restate every boot; --reset makes this
 #    line the single source of config. --accept-dns=false keeps Fly's resolv.conf.
-tailscale --socket="$socket" up \
+env -i PATH="$PATH" tailscale --socket="$socket" up \
   --auth-key="$authkey" --hostname="$ts_hostname" \
   --accept-dns=false --reset --timeout=60s \
   || die "tailscale up failed or timed out; not starting the app"
@@ -80,11 +88,12 @@ unset authkey
 # 4. Publish on the tailnet. `serve` can exit 0 having configured nothing when
 #    HTTPS certs are off, so bound it and verify the result. The proxy match
 #    ends at a newline, so a target that merely starts with ours (:30050) fails.
-timeout 30 tailscale --socket="$socket" serve reset \
+#    timeout runs inside `env -i`, so the tailscale it execs inherits only PATH.
+env -i PATH="$PATH" timeout 30 tailscale --socket="$socket" serve reset \
   || die "tailscale serve reset failed"
-timeout 30 tailscale --socket="$socket" serve --bg --https=443 "$serve_target" \
+env -i PATH="$PATH" timeout 30 tailscale --socket="$socket" serve --bg --https=443 "$serve_target" \
   || die "tailscale serve failed or timed out (are MagicDNS and HTTPS certificates enabled on the tailnet?)"
-status="$(tailscale --socket="$socket" serve status 2>&1)" \
+status="$(env -i PATH="$PATH" tailscale --socket="$socket" serve status 2>&1)" \
   || die "tailscale serve status failed"
 case "$status" in
   *"Funnel on"*) die "Funnel is on: that would publish the app to the internet" ;;
@@ -129,6 +138,8 @@ log "serving $serve_target on the tailnet as $ts_hostname"
 #    newline is made without a backslash, so an echo of the -exec string
 #    cannot turn it into a line break.
 fail='fail() { echo "start.sh: ERROR: $* Refusing to start the app." >&2; exit 1; }'
+# A replica on a non-S3 provider needs this scrub and the check extended
+# first: see docs/restore.md, section 1.
 # shellcheck disable=SC2016 # sh -c expands these, not start.sh
 scrub='unset scrub_nl scrub_env scrub_line scrub_name; scrub_nl=$(echo; echo x); scrub_nl=${scrub_nl%x}; IFS=$scrub_nl; set -f; scrub_env=$(env) || fail "env failed, so the LITESTREAM_ and AWS_ variables were not removed."; for scrub_line in $scrub_env; do scrub_name=${scrub_line%%=*}; case $scrub_name in *[!A-Za-z0-9_]*) ;; LITESTREAM_* | AWS_*) unset "$scrub_name" || fail "unset failed on a LITESTREAM_ or AWS_ variable."; esac; done'
 # shellcheck disable=SC2016 # sh -c expands these, not start.sh
