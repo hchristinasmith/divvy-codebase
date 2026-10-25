@@ -1,6 +1,7 @@
 import type { Transaction } from '../../models/transactions.ts'
 import type {
   CategoryCorrection,
+  CorrectionSource,
   TransactionStatus,
 } from '../../models/sync.ts'
 import connection from './connection.ts'
@@ -24,9 +25,15 @@ export async function searchTxns(
 
 /**
  * Sets the user's category on a transaction (prd-01 Ruling 4): writes the
- * effective `category`, marks it `category_source = 'user'` so sync never
+ * effective `category`, marks `category_source` with `source` so sync never
  * overwrites it, and appends a `category_corrections` row recording the
- * change. Akahu's own category_* columns are left as received.
+ * change with the same `source`. Akahu's own category_* columns are left as
+ * received.
+ *
+ * `source` defaults to `'user'`, which is what PATCH /transactions writes by
+ * passing none. `'rule'` is for the agent accept route only (prd-04 Ruling 7,
+ * decision 3cb449c6 on #51): an accepted proposal is marked as the rule's
+ * category, not the user's, in both columns.
  *
  * The correction's `from_category` is the row's `category` before the write:
  * the effective category, which is the user's if one was set and Akahu's
@@ -52,6 +59,7 @@ export async function setUserCategory(
   id: number,
   category: string,
   db = connection,
+  source: Extract<CorrectionSource, 'user' | 'rule'> = 'user',
 ): Promise<Transaction | 'pending' | undefined> {
   return db.transaction(async (trx) => {
     const before: Pick<Transaction, 'category'> | undefined = await trx(
@@ -63,7 +71,7 @@ export async function setUserCategory(
 
     const updated = await trx('transactions')
       .where({ id, status: 'settled' satisfies TransactionStatus })
-      .update({ category, category_source: 'user' })
+      .update({ category, category_source: source })
     if (updated === 0) return 'pending'
 
     const correction: Omit<CategoryCorrection, 'id'> = {
@@ -71,7 +79,7 @@ export async function setUserCategory(
       from_category: before.category ?? null,
       to_category: category,
       corrected_at: new Date().toISOString(),
-      source: 'user',
+      source,
     }
     await trx('category_corrections').insert(correction)
 
