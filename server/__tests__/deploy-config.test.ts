@@ -5,6 +5,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -339,25 +340,47 @@ if (!mode('no-socket') && socket) {
 setTimeout(() => process.exit(0), 30000)
 `
 
-// Each subcommand exits with its own FAKE_*_EXIT (default 0). tailscale is
-// not run under \`env -i\`, so the environment reaches it.
-const FAKE_TAILSCALE = `#!/bin/sh
-echo "tailscale $*" >> "$FAKE_DIR/calls.log"
+// The tailscale and timeout fakes, like the tailscaled wrapper, take their
+// directory from their own path and their failure modes from files in it,
+// never from the environment, so they behave the same whatever environment
+// start.sh hands them. $0 is absolute because start.sh finds them through
+// PATH, whose fakeDir entry is absolute; a relative $0 stops the fake rather
+// than letting it write somewhere else. Every call dumps the environment it
+// was started with to its own call-env.<name>.<pid> file, the call itself on
+// the first line, so the call inside start.sh's $(…) and the ones under
+// timeout can each be inspected. The dump names /usr/bin/env by absolute
+// path, so a fake env in fakeDir cannot change it. The fake timeout execs
+// tailscale, so the two dumps of one bounded call share a pid.
+const FAKE_CALL_PREAMBLE = (name: string): string => `#!/bin/sh
+case "$0" in
+  /*) ;;
+  *) echo "fake ${name}: \\$0 is not an absolute path: $0" >&2; exit 97 ;;
+esac
+dir="\${0%/*}"
+echo "${name} $*" >>"$dir/calls.log"
+{ echo "${name} $*"; /usr/bin/env; } >"$dir/call-env.${name}.$$"
+`
+
+// Each subcommand exits with the code in fakeDir/tailscale.<step>.exit
+// (default 0), written by runStart's tailscaleExit option.
+const FAKE_TAILSCALE = `${FAKE_CALL_PREAMBLE('tailscale')}exit_for() {
+  code=0
+  [ ! -e "$dir/tailscale.$1.exit" ] || read -r code <"$dir/tailscale.$1.exit"
+  exit "$code"
+}
 case " $* " in
-  *" up "*) exit "\${FAKE_UP_EXIT:-0}" ;;
-  *" serve reset "*) exit "\${FAKE_RESET_EXIT:-0}" ;;
-  *" serve --bg "*) exit "\${FAKE_SERVE_EXIT:-0}" ;;
+  *" up "*) exit_for up ;;
+  *" serve reset "*) exit_for reset ;;
+  *" serve --bg "*) exit_for serve ;;
   *" serve status "*)
-    cat "$FAKE_DIR/serve-status"
-    exit "\${FAKE_STATUS_EXIT:-0}" ;;
+    cat "$dir/serve-status"
+    exit_for status ;;
 esac
 exit 0
 `
 
 // macOS has no timeout(1); the container's coreutils does.
-const FAKE_TIMEOUT = `#!/bin/sh
-echo "timeout $*" >> "$FAKE_DIR/calls.log"
-shift
+const FAKE_TIMEOUT = `${FAKE_CALL_PREAMBLE('timeout')}shift
 exec "$@"
 `
 
@@ -495,6 +518,9 @@ interface RunOptions {
   env?: Record<string, string>
   serveStatus?: string
   tailscaled?: 'fail' | 'no-socket'
+  // The exit code of one fake tailscale step (FAKE_TAILSCALE); unset steps
+  // exit 0.
+  tailscaleExit?: Partial<Record<'up' | 'reset' | 'serve' | 'status', number>>
   // The shell that runs start.sh itself; `sh` (bash on macOS, dash in the
   // image) unless a test names another.
   shell?: string
@@ -507,12 +533,15 @@ function runStart({
   env = {},
   serveStatus,
   tailscaled,
+  tailscaleExit = {},
   shell = 'sh',
 }: RunOptions = {}): Run {
   if (serveStatus !== undefined)
     writeFileSync(join(fakeDir, 'serve-status'), serveStatus)
   if (tailscaled !== undefined)
     writeFileSync(join(fakeDir, `tailscaled.${tailscaled}`), '')
+  for (const [step, code] of Object.entries(tailscaleExit))
+    writeFileSync(join(fakeDir, `tailscale.${step}.exit`), `${code}\n`)
   const base: Record<string, string> = {
     PATH: `${fakeDir}:${process.env.PATH ?? '/usr/bin:/bin'}`,
     FAKE_DIR: fakeDir,
@@ -550,6 +579,18 @@ const dump = (name: string): string => {
   const path = join(fakeDir, `${name}.env`)
   return existsSync(path) ? readFileSync(path, 'utf8') : ''
 }
+// Every dump one of the tailscale or timeout fakes wrote (FAKE_CALL_PREAMBLE):
+// the call, and the environment it was started with.
+const callEnvs = (
+  name: 'tailscale' | 'timeout',
+): { call: string; env: string }[] =>
+  readdirSync(fakeDir)
+    .filter((file) => file.startsWith(`call-env.${name}.`))
+    .map((file) => {
+      const text = readFileSync(join(fakeDir, file), 'utf8')
+      const end = text.indexOf('\n')
+      return { call: text.slice(0, end), env: text.slice(end + 1) }
+    })
 
 describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () => {
   it.each([
@@ -714,7 +755,7 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
   it.each<[string, RunOptions, string, string]>([
     [
       'tailscale up fails',
-      { env: { FAKE_UP_EXIT: '1' } },
+      { tailscaleExit: { up: 1 } },
       'serve',
       'tailscale up failed',
     ],
@@ -735,19 +776,19 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
     ],
     [
       'tailscale serve reset fails',
-      { env: { FAKE_RESET_EXIT: '1' } },
+      { tailscaleExit: { reset: 1 } },
       'serve --bg',
       'tailscale serve reset failed',
     ],
     [
       'tailscale serve --bg times out',
-      { env: { FAKE_SERVE_EXIT: '124' } },
+      { tailscaleExit: { serve: 124 } },
       'serve status',
       'tailscale serve failed or timed out',
     ],
     [
       'tailscale serve status fails',
-      { env: { FAKE_STATUS_EXIT: '1' } },
+      { tailscaleExit: { status: 1 } },
       MIGRATE,
       'tailscale serve status failed',
     ],
@@ -1006,7 +1047,7 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
         join(fakeDir, 'tailscale'),
         FAKE_TAILSCALE.replace(
           '#!/bin/sh\n',
-          '#!/bin/sh\nps -o comm= -p "$PPID" >>"$FAKE_DIR/start-sh.comm"\n',
+          '#!/bin/sh\nps -o comm= -p "$PPID" >>"${0%/*}/start-sh.comm"\n',
         ),
       )
       writeExecutable(
@@ -1165,5 +1206,54 @@ esac
     }
     expect(nodeEnv).toMatch(new RegExp(`^AKAHU_USER_TOKEN=${appSecret}$`, 'm'))
     expect(nodeEnv).toMatch(new RegExp(`^XERO_CLIENT_SECRET=${appSecret}$`, 'm'))
+  })
+
+  // Pins what start.sh does today (#319): the short-lived tailscale calls, and
+  // the timeout that bounds two of them, inherit start.sh's whole environment.
+  // Every call is listed by subcommand, so a dump that never happens fails here
+  // rather than leaving nothing to check. One run covers both branches: every
+  // tailscale call comes before start.sh looks for the Litestream config.
+  it('today: the tailscale and timeout fakes see the app and backup secrets', () => {
+    const secret = 'not-a-real-secret-sentinel-6'
+    const secrets = {
+      AKAHU_USER_TOKEN: secret,
+      XERO_CLIENT_SECRET: secret,
+      LITESTREAM_ACCESS_KEY_ID: secret,
+      LITESTREAM_SECRET_ACCESS_KEY: secret,
+      LITESTREAM_REPLICA_URL: secret,
+    }
+    const run = runStart({ env: secrets })
+    const socket = join(tmp, 's', 'ts.sock')
+    const steps: [string, RegExp][] = [
+      ['up', / up /],
+      ['serve reset', / serve reset$/],
+      ['serve --bg', / serve --bg /],
+      ['serve status', / serve status$/],
+    ]
+    // A call no step matches is kept whole, so it shows in the failure.
+    const step = (call: string): string =>
+      steps.find(([, pattern]) => pattern.test(call))?.[0] ?? call
+    const tailscale = callEnvs('tailscale')
+    const timeout = callEnvs('timeout')
+
+    expect(run.status).toBe(0)
+    expect(tailscale.map(({ call }) => step(call)).sort()).toEqual(
+      ['up', 'serve reset', 'serve --bg', 'serve status'].sort(),
+    )
+    expect(timeout.map(({ call }) => step(call)).sort()).toEqual(
+      ['serve reset', 'serve --bg'].sort(),
+    )
+    for (const { call } of [...tailscale, ...timeout]) {
+      expect(call).toMatch(
+        new RegExp(`^(timeout \\d+ )?tailscale --socket=${socket} `),
+      )
+    }
+    for (const { call, env } of [...tailscale, ...timeout]) {
+      for (const [name, value] of Object.entries(secrets)) {
+        expect(env, `${name} in the environment of: ${step(call)}`).toMatch(
+          new RegExp(`^${name}=${value}$`, 'm'),
+        )
+      }
+    }
   })
 })
