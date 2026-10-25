@@ -51,20 +51,25 @@ server.get('*', (req, res, next) => {
 // What is logged, never the error object, its message or its fields (a
 // body-parser error holds the raw request text in `err.body`; a Knex error's
 // message holds the SQL and its bound values, #204):
-// - A 4xx that body-parser or the router raised about the request itself (a
-//   malformed, oversize or undecodable body, an unsupported charset or
-//   Content-Encoding, a bad percent-encoded path): nothing. It is the
-//   client's fault.
+// - A 4xx carrying a `type` that body-parser or raw-body sets on the request
+//   itself (a malformed or oversize body, an unsupported charset or
+//   Content-Encoding), or the router's URIError for a bad percent-encoded
+//   path: nothing. It is the client's fault.
 // - Any other 4xx, such as an upstream 401 or 429 carried on an AkahuError or
 //   XeroClientError (#203): one fixed line with the status and the
 //   constructor name. An expired token or a rate limit is not the caller's
-//   mistake and must leave a trace.
+//   mistake and must leave a trace. A gzip or deflate body that does not
+//   inflate is body-parser's 400 with no `type`, so it logs this line too.
 // - A 500 from an Error: `err.name` and the stack frames, without the stack's
-//   first line, which is `name: message`. When the frames cannot be told
-//   apart from the message for certain, only `err.name` is logged. An error
-//   raised from native code (node-sqlite3, under Knex) has no frames, so it
-//   logs as its name alone.
+//   first line, which is `name: message`. When the stack does not start with
+//   that line, or a line after it is not a frame, only `err.name` is logged.
+//   A message shortened after its stack was formatted is not caught: any
+//   frame-shaped lines it lost are logged as frames. An error raised from
+//   native code (node-sqlite3, under Knex) has no frames, so it logs as its
+//   name alone.
 // - A 500 from anything that is not an Error: its `typeof`.
+// - An error after the response started: the same as a 500, on its own line,
+//   whatever its status; the socket is destroyed.
 const CLIENT_ERROR_TEXT: Partial<Record<number, string>> = {
   400: 'Bad request',
   413: 'Payload too large',
@@ -136,7 +141,9 @@ const FRAME = /^ {4}at \S/
  * that contains a line shaped like a frame goes with it. If the stack does not
  * start with that header (it was formatted before the message changed, or it
  * was replaced), or anything after it is not a frame line, the frames are
- * dropped and only the name is logged.
+ * dropped and only the name is logged. A message cut down to a prefix of
+ * itself after formatting still matches, and its lost lines that look like
+ * frames pass as frames.
  */
 function nameAndFrames(err: Error): string {
   const name = typeof err.name === 'string' ? err.name : 'Error'
@@ -159,8 +166,20 @@ function nameAndFrames(err: Error): string {
 
 server.use(
   '/api',
+  // Express tells an error handler from a route by its four parameters.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   (err: unknown, req: Request, res: Response, next: NextFunction) => {
-    if (res.headersSent) return next(err)
+    // A response already under way cannot be answered. Express's default
+    // handler would destroy the socket, as here, but would also log
+    // `err.stack`, message included, outside tests.
+    if (res.headersSent) {
+      console.error(
+        'Unhandled /api error after the response started:',
+        err instanceof Error ? nameAndFrames(err) : typeof err,
+      )
+      req.socket.destroy()
+      return
+    }
     const client = clientStatus(err)
     if (client !== undefined) {
       // clientStatus is only defined for a non-null object.

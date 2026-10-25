@@ -1,4 +1,5 @@
 import { inspect } from 'node:util'
+import type { Express } from 'express'
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -124,6 +125,11 @@ vi.mock('../routes/index.ts', async (importOriginal) => {
     err.stack = `Error: replaced\n${SECRET}\n    at nothing (/x.ts:1:1)`
     throw err
   })
+  // An error once the response has started, as a Knex error would carry it.
+  router.get('/__test/after-headers', (req, res, next) => {
+    res.status(200).write('partial')
+    next(new Error(`insert into t (a) values ('${BOUND_VALUE}')`))
+  })
   router.get('/__test/knex-insert', async (req, res, next) => {
     try {
       await connection('nonexistent_table').insert({ a: BOUND_VALUE })
@@ -138,9 +144,11 @@ vi.mock('../routes/index.ts', async (importOriginal) => {
 
 let served: LoopbackApi | undefined
 let api: LoopbackApi['api']
+let app: Express
 
 beforeEach(async () => {
-  served = await serveOnLoopback(await freshApp())
+  app = await freshApp()
+  served = await serveOnLoopback(app)
   api = served.api
 })
 
@@ -297,6 +305,20 @@ describe('a client error on /api answers its own status with fixed text; only on
           .set('X-Divvy-Test', HEADER_SECRET)
           .send('{}'),
       [],
+    ],
+    [
+      // body-parser wraps the zlib error in a 400 with no `type`.
+      'a gzip body that does not inflate',
+      400,
+      'Bad request',
+      () =>
+        api
+          .post('/api/v1/nothing')
+          .set('Content-Type', 'application/json')
+          .set('Content-Encoding', 'gzip')
+          .set('X-Divvy-Test', HEADER_SECRET)
+          .send(MALFORMED),
+      [[UNKNOWN_4XX_LOG, 400, 'Error']],
     ],
     [
       'a percent-encoding that does not decode',
@@ -527,6 +549,30 @@ describe('#204: a 500 on /api logs the error name and stack frames, never the me
     expect(res.body).toStrictEqual({ error: 'Internal server error' })
     expect(the500Log(errorLog.mock.calls)).toMatch(/^AkahuError\n {4}at \S/)
     expectNoLogLeak(errorLog.mock.calls)
+  })
+
+  // Express's default handler logs `err.stack` only outside env `test`, so the
+  // app runs as production here: handing the error on would log the bound
+  // value.
+  it('an error after the response started resets the connection and logs no message', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+    app.set('env', 'production')
+    try {
+      await expect(
+        api.get('/api/v1/__test/after-headers').set('X-Divvy-Test', HEADER_SECRET),
+      ).rejects.toMatchObject({ code: 'ECONNRESET' })
+      // Express's default handler logs on the next turn.
+      await new Promise((resolve) => setImmediate(resolve))
+    } finally {
+      app.set('env', 'test')
+    }
+
+    expectNoLogLeak(errorLog.mock.calls)
+    expect(errorLog.mock.calls).toHaveLength(1)
+    const [call] = errorLog.mock.calls
+    expect(call).toHaveLength(2)
+    expect(call[0]).toBe('Unhandled /api error after the response started:')
+    expect(call[1]).toMatch(/^Error\n {4}at \S/)
   })
 
   it('a value that is not an Error logs its typeof only', async () => {
