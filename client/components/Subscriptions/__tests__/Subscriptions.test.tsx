@@ -317,6 +317,31 @@ describe('a cancelled row', () => {
     expect(button.textContent).toBe('Cancelled')
   })
 
+  it('does not say what a cancelled weekly row counts as a month', async () => {
+    // The route leaves a cancelled row out of the totals, so the meta line
+    // must not claim a monthly figure for it.
+    setup(
+      response({
+        subscriptions: [
+          row({
+            status: 'cancelled',
+            cancelledOn: '2026-10-03',
+            cadence: 'weekly',
+            perMonthCents: 4333,
+            perYearCents: 51996,
+          }),
+        ],
+      }),
+    )
+    await loaded()
+
+    const stream = item('personal', STREAM)
+    expect(meta(stream)).toBe(
+      'Weekly · Last charged 1 Oct · 3 charges · Found automatically · Cancelled 3 Oct',
+    )
+    expect(stream.textContent).not.toContain('counts as')
+  })
+
   it('an active row is neither dimmed nor struck through', async () => {
     setup(response())
     await loaded()
@@ -566,6 +591,32 @@ describe('taking a row out of the list', () => {
     ])
   })
 
+  it('a row both detected and marked still offers Not a subscription, never Unmark', async () => {
+    const { fx } = setup(
+      response({
+        subscriptions: [row({ detected: true, marked: true })],
+      }),
+    )
+    await loaded()
+
+    const stream = item('personal', STREAM)
+    expect(within(stream).queryByRole('button', { name: /^Unmark/ })).toBeNull()
+    const button = within(stream).getByRole('button', {
+      name: 'Not a subscription: Example Stream',
+    })
+    expect(button.textContent).toBe('Not a subscription')
+    fireEvent.click(button)
+
+    await waitFor(() => expect(fx.callsTo('PUT', MARK)).toHaveLength(1))
+    const [body] = fx.bodiesTo('PUT', MARK)
+    expect(Object.keys(body).sort()).toEqual(MARK_KEYS)
+    expect(body).toEqual({
+      scope: 'personal',
+      merchantKey: STREAM,
+      answer: 'not_subscription',
+    })
+  })
+
   it('a row listed only because she marked it is unmarked with null', async () => {
     const { fx } = setup(
       response({
@@ -668,6 +719,86 @@ describe('a refused write', () => {
     ).not.toBeNull()
     expect(fx.callsTo('GET', LIST)).toHaveLength(1)
     await settled()
+  })
+})
+
+describe('a refused write across a scope switch', () => {
+  it("drops the alert when the scope changes, and shows the new scope's list", async () => {
+    // Personal is read first so it is cached: switching back to it shows its
+    // list at once, without the loading card unmounting the screen body. Only
+    // the body's key can then drop the failed write's message.
+    const { fx } = setup((call) => ({
+      body: response({
+        subscriptions: [
+          row({
+            scope: call.url.searchParams.get('scope') === 'strawb' ? 'strawb' : 'personal',
+            name:
+              call.url.searchParams.get('scope') === 'strawb'
+                ? 'Strawb Only Invented'
+                : 'Personal Only Invented',
+          }),
+        ],
+      }),
+    }), 'personal')
+    await loaded()
+    expect(listNames()).toEqual(['Personal Only Invented'])
+    fireEvent.click(scopeToggle('Strawb'))
+    await waitFor(() => expect(listNames()).toEqual(['Strawb Only Invented']))
+    fx.handlers.cancel = () => ({ status: 404, body: { error: 'Merchant not found' } })
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Cancel Strawb Only Invented' }),
+    )
+
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toBe('Merchant not found')
+    await settled()
+
+    fireEvent.click(scopeToggle('Personal'))
+
+    await waitFor(() => expect(listNames()).toEqual(['Personal Only Invented']))
+    expect(screen.queryByText('Merchant not found')).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+})
+
+describe('while a write is pending', () => {
+  const NOTES = 'm:merchant_invented_notes'
+  const asking = response({
+    subscriptions: [
+      row(),
+      row({ merchantKey: NOTES, name: 'Marked Notes', detected: false, marked: true }),
+    ],
+    questions: [merchant()],
+    notSubscriptions: [
+      merchant({
+        merchantKey: 'd:invented demo notes',
+        scope: 'strawb',
+        name: 'Demo Notes',
+      }),
+    ],
+  })
+
+  it.each([
+    ['Unmark', 'Unmark Marked Notes'],
+    ['Yes', 'Yes, Sample Cloud is a subscription'],
+    ['No', 'No, Sample Cloud is not a subscription'],
+    ['Undo', 'Undo: Demo Notes is not a subscription'],
+  ])('%s is disabled until the write and its refetch land', async (_label, name) => {
+    const { fx } = setup(asking)
+    await loaded()
+    expect((screen.getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(
+      false,
+    )
+    // The refetch after the write never settles, so the write stays pending.
+    fx.handlers.list = () => undefined
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel Example Stream' }))
+
+    await waitFor(() => expect(fx.callsTo('GET', LIST)).toHaveLength(2))
+    expect((screen.getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(
+      true,
+    )
   })
 })
 
