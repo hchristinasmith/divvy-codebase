@@ -437,6 +437,17 @@ export interface GoalResponse {
   targetCents: Cents
   savedCents: Cents
   targetDate: IsoDate | null
+  /**
+   * Cents per month needed to reach the target by `targetDate`, rounded up
+   * once (`goalPace` in shared/goals.ts). 0 when funded; null with no
+   * `targetDate`.
+   */
+  paceCents: Cents | null
+  /**
+   * Whole months to `targetDate` (`monthsUntil` in shared/goals.ts): at
+   * least 1 while unfunded, 0 when funded, null with no `targetDate`.
+   */
+  monthsToGo: number | null
 }
 
 /** GET /api/v1/goals */
@@ -454,11 +465,22 @@ export interface CreateGoalRequest {
 /** PATCH /api/v1/goals/:id */
 export type UpdateGoalRequest = Partial<CreateGoalRequest>
 
-/** POST /api/v1/goals/:id/contributions: the +$50 / +$200 buttons. */
+/**
+ * POST /api/v1/goals/:id/contributions: the +$50 / +$200 buttons. The
+ * amount comes from the request; the server holds no button amounts.
+ *
+ * A contribution is a record, not a transfer: it never moves money and
+ * never changes safe-to-spend (prd-02 Ruling 5).
+ */
 export interface AddGoalContributionRequest {
   amountCents: Cents
 }
 
+/**
+ * The goal after the contribution was recorded. A contribution is a record,
+ * not a transfer: it never moves money and never changes safe-to-spend
+ * (prd-02 Ruling 5).
+ */
 export interface AddGoalContributionResponse {
   goal: GoalResponse
 }
