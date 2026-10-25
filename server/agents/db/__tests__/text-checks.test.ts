@@ -9,6 +9,10 @@ describe('notBlank', () => {
   const REFUSED: [name: string, value: unknown][] = [
     ['an empty string', ''],
     ['whitespace alone', '  \t\n'],
+    ['a no-break space (non-ASCII whitespace)', '\u00A0'],
+    ['an em space (non-ASCII whitespace)', '\u2003'],
+    ['an ideographic space (non-ASCII whitespace)', '\u3000'],
+    ['a line separator (non-ASCII whitespace)', '\u2028'],
     ['a Hangul filler (default-ignorable)', '\u3164'],
     ['a zero-width space (default-ignorable)', '\u200B'],
     ['a variation selector (default-ignorable)', '\uFE0F'],
@@ -34,6 +38,7 @@ describe('notBlank', () => {
     ['a single visible character', 'x'],
     ['a visible character inside spaces', ' x '],
     ['a visible character inside zero-width spaces', '\u200Bx\u200B'],
+    ['a visible character inside non-ASCII spaces', '\u00A0x\u3000'],
     ['a control character between visible ones', 'a\u0001b'],
     ['visible text with newlines and a tab', 'Line\n\nx\tz'],
   ]
