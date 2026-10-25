@@ -57,14 +57,15 @@ server.get('*', (req, res, next) => {
 //   path: nothing. It is the client's fault.
 // - Any other 4xx, such as an upstream 401 or 429 carried on an AkahuError or
 //   XeroClientError (#203): one fixed line with the status and the
-//   constructor name, or `unknown` if reading the error to decide or to name
-//   it throws; the answer is the same either way. An expired token or a rate
-//   limit is not the caller's mistake and must leave a trace. A gzip or
-//   deflate body that does not inflate is body-parser's 400 with no `type`,
-//   so it logs this line too.
-// - A 500 from an Error: `err.name` and the stack frames, without the stack's
-//   first line, which is `name: message`. When the stack does not start with
-//   that line, or a line after it is not a frame, no frames are logged.
+//   constructor name, or `unknown` if reading the error to tell whether
+//   body-parser or the router raised it, or to name it, throws; the answer is
+//   the same either way. An expired token or a rate limit is not the caller's
+//   mistake and must leave a trace. A gzip or deflate body that does not
+//   inflate is body-parser's 400 with no `type`, so it logs this line too.
+// - A 500 from an Error: `err.name`, or `Error` if it cannot be read or is not
+//   a string, and the stack frames, without the stack's first line, which is
+//   `name: message`. When the stack does not start with that line, or a line
+//   after it is not a frame, no frames are logged.
 //   A message shortened after its stack was formatted is not caught: any
 //   frame-shaped lines it lost are logged as frames. An error raised from
 //   native code (node-sqlite3, under Knex) has no frames, so it would log as
@@ -77,6 +78,13 @@ server.get('*', (req, res, next) => {
 // - A 500 from anything that is not an Error: its `typeof`.
 // - An error after the response started: the same as a 500, on its own line,
 //   whatever its status; the socket is destroyed.
+//
+// What a read of the error throws (a getter, or a Proxy trap) never reaches the
+// response or the log. Each read that decides or names the error falls back to
+// a fixed value (#363): a status that cannot be read is no client status, so
+// the error is a 500; a name that cannot be read is `Error`; an
+// `instanceof Error` that throws means the error cannot be shown to be one, so
+// it logs its `typeof`, as any non-Error does.
 const CLIENT_ERROR_TEXT: Partial<Record<number, string>> = {
   400: 'Bad request',
   413: 'Payload too large',
@@ -98,15 +106,24 @@ const REQUEST_ERROR_TYPES: ReadonlySet<string> = new Set([
   'request.size.invalid',
 ])
 
-/** The 4xx status an error carries, or undefined for anything else. */
+/**
+ * The 4xx status an error carries, or undefined for anything else. A status
+ * that cannot be read (a getter or Proxy trap that throws) is no client status,
+ * so the error is answered as a 500 (#363).
+ */
 function clientStatus(err: unknown): number | undefined {
   if (typeof err !== 'object' || err === null) return undefined
-  const status =
-    'status' in err && Number.isInteger(err.status)
-      ? err.status
-      : 'statusCode' in err
-        ? err.statusCode
-        : undefined
+  let status: unknown
+  try {
+    status =
+      'status' in err && Number.isInteger(err.status)
+        ? err.status
+        : 'statusCode' in err
+          ? err.statusCode
+          : undefined
+  } catch {
+    return undefined
+  }
   return typeof status === 'number' &&
     Number.isInteger(status) &&
     status >= 400 &&
@@ -136,6 +153,18 @@ function constructorName(err: object): string {
   const ctor: unknown = Object.getOwnPropertyDescriptor(proto, 'constructor')
     ?.value
   return typeof ctor === 'function' && ctor.name !== '' ? ctor.name : 'unknown'
+}
+
+/**
+ * Whether err is an Error. Reading its prototype may run a Proxy trap that
+ * throws; an error that cannot be shown to be one is not treated as one (#363).
+ */
+function isError(err: unknown): err is Error {
+  try {
+    return err instanceof Error
+  } catch {
+    return false
+  }
 }
 
 const FRAME = /^ {4}at \S/
@@ -174,9 +203,16 @@ function constantCode(err: Error): string | undefined {
  */
 function nameAndFrames(err: Error): string {
   const code = constantCode(err)
+  // A name that cannot be read, or is not a string, is `Error` (#363).
+  let name: unknown
+  try {
+    name = err.name
+  } catch {
+    name = undefined
+  }
   // The first line logged: the name, then the code if there is one.
   const head =
-    (typeof err.name === 'string' ? err.name : 'Error') +
+    (typeof name === 'string' ? name : 'Error') +
     (code === undefined ? '' : ` ${code}`)
   let stack: unknown
   let header: string
@@ -206,7 +242,7 @@ server.use(
     if (res.headersSent) {
       console.error(
         'Unhandled /api error after the response started:',
-        err instanceof Error ? nameAndFrames(err) : typeof err,
+        isError(err) ? nameAndFrames(err) : typeof err,
       )
       req.socket.destroy()
       return
@@ -239,7 +275,7 @@ server.use(
     }
     console.error(
       'Unhandled /api error:',
-      err instanceof Error ? nameAndFrames(err) : typeof err,
+      isError(err) ? nameAndFrames(err) : typeof err,
     )
     res.status(500).json({ error: 'Internal server error' })
   },
