@@ -3,6 +3,7 @@ import connection from '../connection.ts'
 import { assertInMemory } from '../../test-utils/app.ts'
 import { setUserCategory } from '../transactions.ts'
 import { TRANSACTION_COLUMNS } from './transactionColumns.ts'
+import type { Transaction } from '../../../models/transactions.ts'
 
 // Direct tests of the db layer, with the connection passed explicitly. The
 // connection is the in-memory `test` config under vitest (NODE_ENV=test);
@@ -41,6 +42,34 @@ async function rowFor(akahuId: string) {
 async function allRows() {
   return connection('transactions').select().orderBy('id')
 }
+
+async function allCorrections() {
+  return connection('category_corrections').select().orderBy('id')
+}
+
+// Narrows setUserCategory's result to the updated row, failing the test if
+// it was either refusal instead.
+function updatedRow(
+  result: Awaited<ReturnType<typeof setUserCategory>>,
+): Transaction {
+  if (result === undefined || result === 'pending') {
+    throw new Error(`expected the updated row, got ${String(result)}`)
+  }
+  return result
+}
+
+// Every column of `category_corrections`.
+const CORRECTION_COLUMNS = [
+  'id',
+  'transaction_id',
+  'from_category',
+  'to_category',
+  'corrected_at',
+  'source',
+]
+
+// The exact form `new Date().toISOString()` produces: UTC, milliseconds, Z.
+const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
 
 describe('setUserCategory', () => {
   it('returns the updated row with every transactions column', async () => {
@@ -107,7 +136,7 @@ describe('setUserCategory', () => {
     const row = await setUserCategory(id, 'Convenience stores', connection)
 
     for (const column of [...LEGACY_AKAHU_CATEGORY, ...AKAHU_CATEGORY]) {
-      expect(row![column]).toBe(before[column])
+      expect(updatedRow(row)[column]).toBe(before[column])
     }
     const stored = await connection('transactions').where({ id }).first()
     for (const column of [...LEGACY_AKAHU_CATEGORY, ...AKAHU_CATEGORY]) {
@@ -133,7 +162,7 @@ describe('setUserCategory', () => {
     const row = await setUserCategory(before.id, 'Bakeries', connection)
 
     expect(row).toMatchObject({ category: 'Bakeries', category_source: 'user' })
-    expect(row!.category_name).toBeNull()
+    expect(updatedRow(row).category_name).toBeNull()
   })
 
   it('works again on a row that is already category_source = user', async () => {
@@ -160,5 +189,94 @@ describe('setUserCategory', () => {
       category: before.category,
       category_source: 'user',
     })
+  })
+})
+
+// prd-01 Rulings 1 and 4, #129: every category change appends a correction
+// in the same database transaction, and a pending row is refused.
+describe('setUserCategory corrections and pending rows', () => {
+  it('appends exactly one correction from the previous effective category', async () => {
+    const before = await rowFor('trans_fixture_002')
+    expect(before.category_source).toBe('akahu')
+    const startedAt = new Date().toISOString()
+
+    updatedRow(await setUserCategory(before.id, 'Bakeries', connection))
+
+    const corrections = await allCorrections()
+    expect(corrections).toHaveLength(1)
+    const [correction] = corrections
+    expect(Object.keys(correction).sort()).toEqual([...CORRECTION_COLUMNS].sort())
+    expect(correction).toMatchObject({
+      transaction_id: before.id,
+      from_category: before.category,
+      to_category: 'Bakeries',
+      source: 'user',
+    })
+    expect(correction.corrected_at).toMatch(ISO_UTC)
+    expect(correction.corrected_at >= startedAt).toBe(true)
+    expect(correction.corrected_at <= new Date().toISOString()).toBe(true)
+  })
+
+  it('writes no correction for an id no transaction has', async () => {
+    expect(await setUserCategory(999_999, 'Bakeries', connection)).toBeUndefined()
+
+    expect(await allCorrections()).toEqual([])
+  })
+
+  it("returns 'pending' for a pending row and writes neither the category nor a correction", async () => {
+    const { id } = await rowFor('trans_fixture_002')
+    await connection('transactions').where({ id }).update({ status: 'pending' })
+    const before = await allRows()
+
+    const result = await setUserCategory(id, 'Bakeries', connection)
+
+    expect(result).toBe('pending')
+    expect(await allRows()).toEqual(before)
+    expect(await allCorrections()).toEqual([])
+  })
+
+  it('rolls the category write back when the correction cannot be written', async () => {
+    const { id } = await rowFor('trans_fixture_002')
+    const before = await allRows()
+    // Dropped with the table by the next beforeEach's rollback; no migration
+    // is involved.
+    await connection.raw(`
+      CREATE TRIGGER refuse_corrections BEFORE INSERT ON category_corrections
+      BEGIN SELECT RAISE(ABORT, 'invented correction failure'); END
+    `)
+
+    await expect(setUserCategory(id, 'Bakeries', connection)).rejects.toThrow(
+      'invented correction failure',
+    )
+
+    expect(await allRows()).toEqual(before)
+    expect(await allCorrections()).toEqual([])
+  })
+
+  it("runs inside a caller's transaction, and that transaction's rollback undoes both writes", async () => {
+    const { id } = await rowFor('trans_fixture_002')
+    const before = await allRows()
+
+    await expect(
+      connection.transaction(async (trx) => {
+        updatedRow(await setUserCategory(id, 'Bakeries', trx))
+        expect(await trx('category_corrections').count({ n: '*' })).toEqual([{ n: 1 }])
+        throw new Error('invented caller failure')
+      }),
+    ).rejects.toThrow('invented caller failure')
+
+    expect(await allRows()).toEqual(before)
+    expect(await allCorrections()).toEqual([])
+  })
+
+  it("commits with the caller's transaction", async () => {
+    const { id } = await rowFor('trans_fixture_002')
+
+    await connection.transaction(async (trx) => {
+      updatedRow(await setUserCategory(id, 'Bakeries', trx))
+    })
+
+    expect((await rowFor('trans_fixture_002')).category).toBe('Bakeries')
+    expect(await allCorrections()).toHaveLength(1)
   })
 })

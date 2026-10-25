@@ -1,4 +1,8 @@
 import type { Transaction } from '../../models/transactions.ts'
+import type {
+  CategoryCorrection,
+  TransactionStatus,
+} from '../../models/sync.ts'
 import connection from './connection.ts'
 
 export async function getTxns(db = connection): Promise<Transaction[]> {
@@ -20,18 +24,57 @@ export async function searchTxns(
 
 /**
  * Sets the user's category on a transaction (prd-01 Ruling 4): writes the
- * effective `category` and marks it `category_source = 'user'` so sync never
- * overwrites it. Akahu's own category_* columns are left as received.
- * Returns the updated row, or undefined when no transaction has that id.
+ * effective `category`, marks it `category_source = 'user'` so sync never
+ * overwrites it, and appends a `category_corrections` row recording the
+ * change. Akahu's own category_* columns are left as received.
+ *
+ * The correction's `from_category` is the row's `category` before the write:
+ * the effective category, which is the user's if one was set and Akahu's
+ * otherwise, or null when there was none. Every call writes a correction,
+ * including one that sets the category the row already has.
+ *
+ * Only a `status = 'settled'` row can be recategorised (#129). Sync deletes
+ * and re-inserts pending rows on every run (prd-01 Ruling 1), and the
+ * correction's ON DELETE CASCADE would delete it with them, so a correction
+ * on a pending row would be silently lost. The status check is part of the
+ * UPDATE's WHERE, so it cannot be separated from the write.
+ *
+ * The category write and the correction share one database transaction: if
+ * the correction cannot be written, the category is not changed either. A
+ * caller may pass its own transaction as `db`; the work then runs in a
+ * savepoint inside it.
+ *
+ * Returns the updated row; `'pending'` when the row exists but is not
+ * settled, in which case nothing is written; or undefined when no
+ * transaction has that id.
  */
 export async function setUserCategory(
   id: number,
   category: string,
   db = connection,
-): Promise<Transaction | undefined> {
-  const updated = await db('transactions')
-    .where({ id })
-    .update({ category, category_source: 'user' })
-  if (updated === 0) return undefined
-  return db('transactions').where({ id }).first()
+): Promise<Transaction | 'pending' | undefined> {
+  return db.transaction(async (trx) => {
+    const before: Pick<Transaction, 'category'> | undefined = await trx(
+      'transactions',
+    )
+      .where({ id })
+      .first('category')
+    if (!before) return undefined
+
+    const updated = await trx('transactions')
+      .where({ id, status: 'settled' satisfies TransactionStatus })
+      .update({ category, category_source: 'user' })
+    if (updated === 0) return 'pending'
+
+    const correction: Omit<CategoryCorrection, 'id'> = {
+      transaction_id: id,
+      from_category: before.category ?? null,
+      to_category: category,
+      corrected_at: new Date().toISOString(),
+      source: 'user',
+    }
+    await trx('category_corrections').insert(correction)
+
+    return trx('transactions').where({ id }).first()
+  })
 }

@@ -19,7 +19,10 @@ router.get('/', async (req, res) => {
 
 // PATCH /api/v1/transactions/:id  body: UpdateTransactionCategory
 // The one category-edit route (M1 #9). Sets the user's category; never
-// Akahu's (prd-01 Ruling 4).
+// Akahu's, and records the change in `category_corrections` (prd-01
+// Ruling 4). A pending row is refused with 409 (#129): sync replaces pending
+// rows on every run (prd-01 Ruling 1), which would delete the correction
+// with it, so a category can only be changed once the row has settled.
 router.patch('/:id', async (req, res) => {
   // Digits only: Number() would also accept '1e3', '0x10' and ' 7'.
   const id = Number(req.params.id)
@@ -36,8 +39,14 @@ router.patch('/:id', async (req, res) => {
 
   try {
     const transaction = await db.setUserCategory(id, category)
-    if (!transaction) {
+    if (transaction === undefined) {
       return res.status(404).json({ error: 'Transaction not found' })
+    }
+    if (transaction === 'pending') {
+      return res.status(409).json({
+        error:
+          'Transaction is still pending; its category can be changed once it settles',
+      })
     }
     const body: UpdateTransactionCategoryResponse = { transaction }
     res.json(body)
