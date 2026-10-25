@@ -605,6 +605,15 @@ describe('listBills', () => {
     expect(await snapshot()).toStrictEqual(before)
   })
 
+  // #321: bills takes `nzCalendarDate` from shared/nz-dates.ts, whose
+  // RangeError its guard turns into this fixed text. The overview's wrapper
+  // would throw OverviewDataError instead.
+  it('turns an invalid now into BillsDataError, not the overview’s OverviewDataError', async () => {
+    const read = listBills('all', new Date('not a date'))
+    await expect(read).rejects.toBeInstanceOf(BillsDataError)
+    await expect(read).rejects.toThrow('bills input invalid')
+  })
+
   describe('dueBeforePaydayCents', () => {
     it('counts every unpaid occurrence of an overdue weekly bill; a payment removes exactly one', async () => {
       // 10-07, 10-14, 10-21 and 10-28; 11-04 is after the next payday.
