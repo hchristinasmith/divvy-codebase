@@ -61,8 +61,10 @@ chmod 700 "$state_dir"
 #    Every tailscale and timeout call below starts the same way, with PATH
 #    alone (#319), so none of them holds those secrets either. They need
 #    nothing more: the socket goes by flag, the auth key by argv, and each
-#    call only talks to tailscaled over the socket; tailscaled, not the CLI,
-#    reaches the control plane. env execs, so each call's exit status is the
+#    call talks only to tailscaled over the socket. With the auth key
+#    docs/deploy.md section 3 makes, tailscaled, not the CLI, reaches the
+#    control plane; an OAuth client secret as the key would have the CLI call
+#    Tailscale's API itself. env execs, so each call's exit status is the
 #    command's own and `|| die` sees it unchanged.
 env -i PATH="$PATH" tailscaled --tun=userspace-networking --statedir="$state_dir" --socket="$socket" &
 tsd_pid=$!
