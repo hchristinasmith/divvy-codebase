@@ -24,15 +24,21 @@ import { assertInMemory, closeDb } from '../../test-utils/app.ts'
 //      a value;
 //   2. a knex write (`insert`, `update`, `del`, ...) whose chain does not
 //      start at a call naming an inbox table as a literal, or that starts at
-//      the knex instance itself (`trx.insert(row).into(...)`);
-//   3. raw SQL, a computed member access that could reach a write or raw SQL,
-//      and every way of loading a module the import rule cannot see.
+//      the knex instance itself (`trx.insert(row).into(...)`). A name is
+//      followed to what it was declared as, and a parameter typed
+//      `Knex…` or of a `.transaction(...)` callback is a handle, so
+//      `const q = db('t'); q.update()` and `(tx) => tx.insert(r).into('t')`
+//      are writes to `t`;
+//   3. raw SQL, knex's schema, migrate and seed APIs, a computed member access
+//      that could reach a write or raw SQL, and every way of loading a module
+//      the import rule cannot see.
 // A table name built at run time is out of reach of any source check, this
 // one included.
 //
 // The one exemption is the accept route. It may import exactly the names in
 // `EXEMPTION.names` from `EXEMPTION.module`, must pass the literal `'rule'`
-// as setUserCategory's source, and may name no table outside the inbox. It
+// as setUserCategory's source, may use it only by direct, unaliased call,
+// and may name no table outside the inbox. It
 // is asserted to be used, so it cannot outlive the route.
 
 const REPO = new URL('../../../', import.meta.url)
@@ -55,6 +61,7 @@ const WRITER_DIRS = ['server/sync/', 'server/xero/', 'server/routes/']
 const DRIVERS = new Set(['sqlite3', 'better-sqlite3'])
 const NAMED = /\b(transactions|category_corrections|budgets|bills|goals|settings)\b/
 const RAW = /\.raw\b|[a-z]Raw\b/
+const ADMIN = new Set(['schema', 'migrate', 'seed'])
 
 const EXEMPTION = {
   file: 'server/agents/routes/proposals.ts',
@@ -133,9 +140,74 @@ function chainRoot(start: ts.Expression): ts.Expression {
   }
 }
 
+// Names that hold a knex handle or builder without being called one: a
+// parameter typed `Knex…` or of a `.transaction(...)` callback is a handle,
+// and each variable is what it was initialised to, so `const q = db('t')`
+// then `q.update()` is judged as `db('t').update()`.
+interface Names {
+  handles: Set<string>
+  declared: Map<string, ts.Expression[]>
+}
+
+function namesIn(source: ts.SourceFile): Names {
+  const handles = new Set(DB_HANDLES)
+  const declared = new Map<string, ts.Expression[]>()
+  const declare = (name: string, init: ts.Expression) =>
+    declared.set(name, [...(declared.get(name) ?? []), init])
+  const visit = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+      declare(node.name.text, node.initializer)
+    }
+    if (ts.isParameter(node) && ts.isIdentifier(node.name)) {
+      const fn = node.parent
+      const call = fn.parent
+      const inTransaction =
+        (ts.isArrowFunction(fn) || ts.isFunctionExpression(fn)) &&
+        ts.isCallExpression(call) &&
+        ts.isPropertyAccessExpression(call.expression) &&
+        call.expression.name.text === 'transaction'
+      if (inTransaction || (node.type !== undefined && /\bKnex\b/.test(node.type.getText()))) {
+        handles.add(node.name.text)
+      }
+      if (node.initializer) declare(node.name.text, node.initializer)
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(source)
+  return { handles, declared }
+}
+
+// A write's chain root, judged. Through a declaration, a call counts only
+// when a handle makes it, so `const m = index(rows); m.delete(k)` passes.
+function judge(
+  method: string,
+  root: ts.Expression,
+  names: Names,
+  seen = new Set<string>(),
+): string | undefined {
+  if (ts.isCallExpression(root)) {
+    if (seen.size > 0 && !(ts.isIdentifier(root.expression) && names.handles.has(root.expression.text))) {
+      return undefined
+    }
+    const table = literalText(root.arguments[0])
+    if (table === undefined) return `${method} on a table not named by a literal`
+    return INBOX.includes(table) ? undefined : `${method} on ${table}`
+  }
+  if (!ts.isIdentifier(root)) return undefined
+  if (names.handles.has(root.text)) return `${method} through ${root.text}`
+  if (seen.has(root.text)) return undefined
+  seen.add(root.text)
+  for (const init of names.declared.get(root.text) ?? []) {
+    const problem = judge(method, chainRoot(init), names, seen)
+    if (problem !== undefined) return problem
+  }
+  return undefined
+}
+
 // Every knex write in the module that is not to an inbox table.
 function writeProblems(source: ts.SourceFile): string[] {
   const found: string[] = []
+  const names = namesIn(source)
   const visit = (node: ts.Node): void => {
     if (
       ts.isCallExpression(node) &&
@@ -143,14 +215,8 @@ function writeProblems(source: ts.SourceFile): string[] {
       WRITES.has(node.expression.name.text)
     ) {
       const method = node.expression.name.text
-      const root = chainRoot(node.expression.expression)
-      if (ts.isCallExpression(root)) {
-        const table = literalText(root.arguments[0])
-        if (table === undefined) found.push(`${method} on a table not named by a literal`)
-        else if (!INBOX.includes(table)) found.push(`${method} on ${table}`)
-      } else if (ts.isIdentifier(root) && DB_HANDLES.has(root.text)) {
-        found.push(`${method} through ${root.text}`)
-      }
+      const problem = judge(method, chainRoot(node.expression.expression), names)
+      if (problem !== undefined) found.push(problem)
     }
     ts.forEachChild(node, visit)
   }
@@ -265,6 +331,9 @@ function reachProblems(source: ts.SourceFile): string[] {
       } else if (!ts.isNumericLiteral(key)) {
         found.push(`computed member access [${key.getText()}]`)
       }
+    } else if (ts.isPropertyAccessExpression(node) && ADMIN.has(node.name.text)) {
+      // `db.schema.dropTable(...)`, `db.migrate.rollback()`: DDL, not a query.
+      found.push(`knex admin access .${node.name.text}`)
     }
     ts.forEachChild(node, visit)
   }
@@ -293,6 +362,14 @@ function exemptionProblems(source: ts.SourceFile, ctx: Context): string[] {
       if (literalText(node.arguments[3]) !== 'rule') {
         found.push("setUserCategory without the literal source 'rule'")
       }
+    } else if (ts.isIdentifier(node) && node.text === 'setUserCategory') {
+      // Only a direct call is checked for 'rule', so an alias
+      // (`import { setUserCategory as w }`, `const f = setUserCategory`)
+      // would call it unchecked.
+      const p = node.parent
+      const callee = ts.isCallExpression(p) && p.expression === node
+      const plainImport = ts.isImportSpecifier(p) && p.propertyName === undefined
+      if (!callee && !plainImport) found.push('setUserCategory used other than by a direct call')
     }
     ts.forEachChild(node, visit)
   }
@@ -477,6 +554,17 @@ describe('planted violations', () => {
       )
     })
 
+    it.each([
+      ['an aliased import', "import { setUserCategory as write } from '../../db/transactions.ts'"],
+      [
+        'a second, aliased binding',
+        "import { setUserCategory, setUserCategory as write } from '../../db/transactions.ts'",
+      ],
+      ['a reference held in a const', allowed + '\nconst f = setUserCategory'],
+    ])('%s is flagged', (_why, lines) => {
+      expect(accept([lines])).toContain('setUserCategory used other than by a direct call')
+    })
+
     it('a route that never calls setUserCategory is flagged', () => {
       expect(problemsFor(EXEMPTION.file, allowed, ctx)).toContain('setUserCategory is never called')
     })
@@ -509,6 +597,24 @@ describe('planted violations', () => {
     ["db['raw']", "db['raw']('select 1')", "computed member access ['raw']"],
     ["db['insert']", "db('transactions')['insert']({})", "computed member access ['insert']"],
     ['a computed key', 'db[method]()', 'computed member access [method]'],
+    [
+      'a builder held in a const',
+      "const q = connection('transactions').where({ id: 1 })\nawait q.update({})",
+      'update on transactions',
+    ],
+    ['an aliased handle', "const q = connection\nawait q.insert(row).into('transactions')", 'insert through connection'],
+    [
+      'a transaction callback’s handle',
+      "await connection.transaction(async (tx) => { await tx.insert(row).into('transactions') })",
+      'insert through tx',
+    ],
+    [
+      'a parameter typed Knex',
+      "async function f(t: Knex.Transaction) { await t.table('transactions').del() }",
+      'del through t',
+    ],
+    ['knex.schema', "await connection.schema.dropTable('budgets')", 'knex admin access .schema'],
+    ['knex.migrate', 'await connection.migrate.rollback()', 'knex admin access .migrate'],
     ['a value import of knex', "import knex from 'knex'", 'imports knex as a value'],
     ['a named value import of knex', "import { knex } from 'knex'", 'imports knex as a value'],
     ['sqlite3', "import sqlite3 from 'sqlite3'", 'imports driver sqlite3'],
@@ -525,6 +631,9 @@ describe('planted violations', () => {
     ['a read of a money table', "await db('transactions').where({ id: 1 }).first()"],
     ['a write to the inbox', "await db('category_proposals').insert(row)"],
     ['a write to the inbox in a template', 'await trx(`agent_runs`).where({ id: 1 }).update({})'],
+    ['a builder for the inbox held in a const', "const q = db('insights').where({ id: 1 })\nawait q.update({})"],
+    ['a Map held in a const', 'const seen = new Map()\nseen.delete(k)'],
+    ['a Map from a helper', 'const index = buildIndex(rows)\nindex.delete(k)'],
     ['a Map delete', 'cache.delete(k)'],
     ['a Set delete on a member', 'this.seen.delete(k)'],
     ['a header read', "const site = req.headers['sec-fetch-site']"],

@@ -267,6 +267,18 @@ describe('POST /api/v1/agents/proposals/:id/accept', () => {
     expect(await snapshotTables()).toEqual(afterFirst)
   })
 
+  it('a concurrent double-submit accepts once: one 200, the rest 409, one correction', async () => {
+    const { target, targetProposal } = await seedMain()
+    const corrections = (await snapshotTables()).category_corrections.length
+
+    const results = await Promise.all([1, 2, 3].map(() => accept(targetProposal)))
+
+    expect(results.map((r) => r.status).sort()).toEqual([200, 409, 409])
+    const after = await connection('category_corrections').where({ transaction_id: target })
+    expect(after).toHaveLength(1)
+    expect((await snapshotTables()).category_corrections).toHaveLength(corrections + 1)
+  })
+
   it('accept after reject is 409 and the rejection stands', async () => {
     const { target, targetProposal } = await seedMain()
     expect((await reject(targetProposal)).status).toBe(200)
