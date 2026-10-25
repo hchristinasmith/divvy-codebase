@@ -87,6 +87,10 @@ Items 1, 3, 4 are tests (the code does what is written). Items 2, 5 need a real-
 Why: the handoff's formula (`handoff.md:25`) only works once each term is pinned. Netting the tax pot balance stops money already set aside from being held twice, since the pot is outside liquid. This is a money judgement for you to confirm at blessing.
 
 > Amended 2026-10-25 by Rulings 9, 10 and 11.
+>
+> Amended 2026-10-25 (#35): bills repeat none/weekly/monthly/yearly; Hannah chose option C on #35. Each bill has its own repeat (none is a one-off), anchored on `first_due_date`, and every occurrence is computed from that anchor. A monthly bill keeps its day of month, clamped to the month's end; a yearly bill dated 29 Feb falls on 28 Feb outside leap years. "Mark paid" records a `bill_payments` row for that occurrence and the bill comes back next cycle; a one-off is done once paid. A bill's "unpaid" occurrences are those with no payment row. Open, not ruled: when several occurrences of one bill are unpaid on or before the next payday (a weekly bill overdue), whether each one counts toward "unpaid bills".
+>
+> Roles are stored as `current`, `savings`, `tax_pot` and `credit_card`; the text above writes "tax pot" and "credit card".
 
 ## Ruling 3 — A negative result is shown as $0 plus how short you are
 The function returns the signed value; the hero shows `$0` and a "short by $X" line when it is negative. The design clamps silently (`Divvy.dc.html:426`), which would hide an overspend and contradicts "never flattering" (`handoff.md:42`).
