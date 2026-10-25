@@ -80,8 +80,9 @@ Conclusions, and what the schema does about each:
   one. A pending row is identified only as a member of the set
   (`account_id`, `status = 'pending'`), indexed by
   `transactions_account_status_idx`.
-- That set is **replaced wholesale per account**, delete then insert,
-  inside the same database transaction as the settled upsert (prd-01
+- That set is **replaced wholesale** (every Akahu-sourced pending row, across
+  accounts), delete then insert, inside the same database transaction as the
+  settled upsert (prd-01
   Ruling 1). Akahu's own advice is the same: "completely rebuild your local
   copy of this data".
 - Two identical pending items become **two rows**; the test
@@ -137,7 +138,8 @@ From [Accessing transactional data][guide], read on 2026-10-25:
   returned beside `access_granted_at`, in Divvy's own database or Hannah's
   private notes, never in this repository. Both are real personal dates,
   and this repository is public. (`sync_runs` has no column for either
-  today; adding one is the sync lane's call.)
+  and the sync lane (#21) added none, so nothing records them yet. Capturing
+  them is a separate issue if wanted.)
 
 The answer, then: up to 730 days before consent, subject to an undocumented
 BNZ limit that the first run will show. prd-01 still lists Open question 3

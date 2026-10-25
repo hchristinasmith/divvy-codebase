@@ -7,9 +7,10 @@
 // Ruling 6, one sync at a time).
 //
 // Consequence for sync: a process that dies mid-run leaves its row
-// `running`, and the index then refuses every later run. At boot, sync must
-// close any stale `running` row as `failed`, with a `finished_at` and error
-// text saying it was interrupted, before it starts a new one.
+// `running`, and the index then refuses every later run. The claim step of
+// each run (prd-01 Ruling 6 implementation note, #21) closes a stale
+// `running` row as `failed`, with a `finished_at` and a fixed error message,
+// before it starts its own; a younger `running` row makes the run skip.
 //
 // `error_message` is shown to Hannah and kept indefinitely. It must never
 // contain a token, a request header or a raw Akahu response body.

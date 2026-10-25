@@ -65,10 +65,11 @@ export interface Account {
   updated_at: IsoTimestamp
 }
 
-// A row of `sync_runs`. Only one row may be 'running' at a time, so at boot
-// sync must close any stale 'running' row (left by a crash) as 'failed',
-// with `finished_at` and an error message, before starting a run.
-// `error_message` must never contain a token.
+// A row of `sync_runs`. Only one row may be 'running' at a time, so every
+// run, at claim time, closes a 'running' row older than STALE_RUN_AFTER_MS
+// (left by a crash) as 'failed', with `finished_at` and a fixed error
+// message, before starting its own. A younger 'running' row makes the run
+// skip. `error_message` must never contain a token.
 export interface SyncRun {
   id: number
   started_at: IsoTimestamp
