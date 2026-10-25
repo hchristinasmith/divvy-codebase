@@ -1,12 +1,26 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import TxnItem from '../TxnItem.tsx'
 import type { Transaction } from '../../../../models/transactions.ts'
 import { categories } from '../../../../data/cats.js'
+import { updateTransactionCategory } from '../../../apis/apiClient.ts'
 
-afterEach(cleanup)
+vi.mock('../../../apis/apiClient.ts', () => ({
+  updateTransactionCategory: vi.fn().mockResolvedValue({}),
+}))
+
+afterEach(() => {
+  cleanup()
+  vi.mocked(updateTransactionCategory).mockClear()
+})
 
 function txn(overrides: Partial<Transaction>): Transaction {
   return {
@@ -96,8 +110,14 @@ describe('TxnItem', () => {
   })
 
   it('shows no category and no group when the effective category is null', () => {
-    // The fixture's legacy category_group_name is 'Food'; it must not leak in.
-    renderRow(txn({ category: null, category_source: 'akahu' }))
+    // Legacy category_name and category_group_name are set; neither may leak in.
+    renderRow(
+      txn({
+        category: null,
+        category_source: 'akahu',
+        category_name: 'Bakeries',
+      }),
+    )
     // Cells follow the page header: Date, Description, Amount, Category, Actions.
     expect(document.querySelectorAll('td')[3]?.textContent).toBe('')
     for (const group of Object.keys(categories)) {
@@ -116,5 +136,14 @@ describe('TxnItem', () => {
     for (const group of Object.keys(categories)) {
       expect(screen.queryByText(group)).toBeNull()
     }
+  })
+
+  it('saves the effective category, not the legacy group', async () => {
+    renderRow(txn({ category: 'Bakeries', category_group_name: 'Food' }))
+    fireEvent.click(screen.getByRole('button'))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(updateTransactionCategory).toHaveBeenCalledWith('1', 'Bakeries'),
+    )
   })
 })
