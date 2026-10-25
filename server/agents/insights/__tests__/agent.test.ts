@@ -85,6 +85,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   errors.mockRestore()
+  vi.useRealTimers()
 })
 
 afterAll(async () => {
@@ -108,6 +109,15 @@ const steppingClock = (first: Date, then: Date) => {
     calls += 1
     return calls === 1 ? first : then
   })
+}
+
+// The wall clock a year after NOW, so a finish that reads it, or takes the
+// later of it and the clock (the max(Date.now(), …) #305 removed), differs
+// from the clock's reading whatever today's date is. Only Date is faked, so
+// knex and SQLite keep their real timers.
+function wallClockAfterNow(): void {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(NOW.getTime() + 365 * 86_400_000)
 }
 
 const INSIGHT_KEYS = ['body_md', 'chart_spec_json', 'created_at', 'dismissed_at', 'id', 'kind', 'period', 'scope', 'title']
@@ -271,6 +281,7 @@ describe('a run', () => {
   it('reads the clock twice, and finishes at the second reading', async () => {
     await seedLedger()
     const later = new Date(NOW.getTime() + 3_600_000)
+    wallClockAfterNow()
     const clock = steppingClock(NOW, later)
     const result = await runInsightsAgent('personal', {}, clock)
 
@@ -287,6 +298,7 @@ describe('a run', () => {
     await seedLedger()
     hooks.failQuery = true
     const later = new Date(NOW.getTime() + 3_600_000)
+    wallClockAfterNow()
     const clock = steppingClock(NOW, later)
     const result = await runInsightsAgent('personal', {}, clock)
 
@@ -298,6 +310,21 @@ describe('a run', () => {
       started_at: NOW.toISOString(),
       finished_at: later.toISOString(),
     })
+  })
+
+  // finished_at is the finish reading exactly, even one before the start
+  // reading: no max() with the start reading or the wall clock.
+  it('finishes at the second reading even when it is before the first', async () => {
+    await seedLedger()
+    const earlier = new Date(NOW.getTime() - 3_600_000)
+    wallClockAfterNow()
+    const clock = steppingClock(NOW, earlier)
+    const result = await runInsightsAgent('personal', {}, clock)
+
+    expect(result).toMatchObject({ outcome: 'success', written: 3 })
+    expect(clock).toHaveBeenCalledTimes(2)
+    const [run] = await runRows()
+    expect(run).toMatchObject({ started_at: NOW.toISOString(), finished_at: earlier.toISOString() })
   })
 
   it('takes a weekly trigger and an explicit period', async () => {
