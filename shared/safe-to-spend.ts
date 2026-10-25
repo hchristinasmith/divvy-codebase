@@ -6,21 +6,26 @@
 //   safe = liquid − unpaid bills − remaining budget − tax hold − card debt
 //
 // Each term is exactly as prd-02 Ruling 2 rules it, as amended by Rulings 9,
-// 10 and 11:
+// 10, 11 and 12:
 //
 // - liquid: balances of in-scope accounts whose role is `current`. Savings,
 //   tax pots, credit cards and accounts with no role are not liquid.
 // - unpaid bills: in-scope bills not paid and due on or before the next
-//   payday, overdue ones included.
+//   payday, overdue ones included, less the Strawb bills buffer (Ruling 12).
+//   Strawb's bills are paid from the Strawb tax pot first, so the buffer is
+//   `max(0, min(Strawb tax pots, Strawb's unpaid bills))` and only Strawb's
+//   unpaid bills beyond it come out of liquid. Personal bills always come
+//   out in full. The clamp at 0 keeps an overdrawn pot from adding bills.
 // - remaining budget: over in-scope budgets, `max(0, limit − spent)`; spent
 //   is effective-category outflow, settled and pending, since the last
 //   payday (`budgetSpentCents`). Payday is weekly (Ruling 9), so a limit is
 //   a weekly amount. Spend on a credit card counts like any other.
 // - tax hold: each scope holds its own, against its own pot (Ruling 11).
-//   - Strawb: `max(0, taxRate × profit − Strawb tax pots)`. Profit is
-//     Strawb's year-to-date accrual profit; until Xero is connected it is
-//     the typed setting and is 0 by default, so this hold is 0 (prd-02 open
-//     question, answered 2026-10-23; prd-05 Ruling 4).
+//   - Strawb: `max(0, taxRate × profit − (Strawb tax pots − buffer))`: the
+//     money the pot keeps for Strawb's bills is not tax set aside (Ruling
+//     12). Profit is Strawb's year-to-date accrual profit; until Xero is
+//     connected it is the typed setting and is 0 by default, so this hold is
+//     0 (prd-02 open question, answered 2026-10-23; prd-05 Ruling 4).
 //   - Personal: `max(0, personalTaxOwed − personal tax pots)`, the owed
 //     amount typed in, with no rate.
 //   Strawb scope holds the Strawb hold, Personal the personal one, All the
@@ -375,12 +380,9 @@ export function safeToSpend(input: SafeToSpendInput): SafeToSpendResult {
     accounts.filter((a) => a.role === 'current').map((a) => a.balanceCents),
   )
 
-  const unpaidBillsCents = sumCents(
-    input.bills
-      .filter((b) => inScope(scope, b.scope))
-      .filter((b) => !b.paid && b.dueDate <= next)
-      .map((b) => b.amountCents),
-  )
+  const dueBills = input.bills
+    .filter((b) => inScope(scope, b.scope))
+    .filter((b) => !b.paid && b.dueDate <= next)
 
   const budgets: BudgetLine[] = input.budgets
     .filter((b) => inScope(scope, b.scope))
@@ -419,7 +421,30 @@ export function safeToSpend(input: SafeToSpendInput): SafeToSpendResult {
 
   const strawbTaxOwedCents = strawbInView ? strawbOwed : 0
   const strawbTaxPotCents = strawbInView ? potsOf('strawb') : 0
-  const strawbTaxHoldCents = Math.max(0, strawbTaxOwedCents - strawbTaxPotCents)
+
+  // Strawb's bills are paid from its tax pot first (Ruling 12): the part of
+  // the pot that covers them is not tax set aside, and those bills are not
+  // taken from liquid as well. Clamped at 0, so an overdrawn pot adds no
+  // bills and its overdraft stays in the hold. `dueBills` is already scoped,
+  // so out of Strawb's view there are no Strawb bills and the buffer is 0.
+  const strawbBillsCents = sumCents(
+    dueBills.filter((b) => b.scope === 'strawb').map((b) => b.amountCents),
+  )
+  const strawbBillsBufferCents = Math.max(
+    0,
+    Math.min(strawbTaxPotCents, strawbBillsCents),
+  )
+  const strawbTaxHoldCents = Math.max(
+    0,
+    strawbTaxOwedCents - (strawbTaxPotCents - strawbBillsBufferCents),
+  )
+
+  // What comes out of liquid: every due bill in view, less what the Strawb
+  // pot pays. Personal bills always come out in full.
+  const unpaidBillsCents = sumCents([
+    ...dueBills.map((b) => b.amountCents),
+    -strawbBillsBufferCents,
+  ])
 
   // `!== 0` also turns a typed −0 into 0, so the reported figure is never −0.
   const personalTaxOwedCents =
@@ -460,6 +485,7 @@ export function safeToSpend(input: SafeToSpendInput): SafeToSpendResult {
     remainingBudgetCents,
     strawbTaxOwedCents,
     strawbTaxPotCents,
+    strawbBillsBufferCents,
     strawbTaxHoldCents,
     personalTaxOwedCents,
     personalTaxPotCents,

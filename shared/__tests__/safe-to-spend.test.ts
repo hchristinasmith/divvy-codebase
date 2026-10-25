@@ -6,12 +6,17 @@
 // not against the code under test.
 //
 //   safe = liquid − unpaid bills − remaining budget − tax hold − card debt
-//   (prd-02 Ruling 2, amended by Rulings 9, 10 and 11; shared/safe-to-spend.ts)
+//   (prd-02 Ruling 2, amended by Rulings 9, 10, 11 and 12;
+//   shared/safe-to-spend.ts)
 //
 // Payday is weekly (Ruling 9). Each scope holds its own tax against its own
-// pot, and All holds the sum of both (Ruling 11). Card debt is what is owed
-// on a credit card, `max(0, −balance)` (Ruling 10): Akahu reports owed as a
-// negative balance, a convention confirmed against live data on 2026-10-25.
+// pot, and All holds the sum of both (Ruling 11). Strawb's bills are paid
+// from the Strawb pot first: buffer = max(0, min(Strawb pot, Strawb unpaid
+// bills)), the Strawb hold nets only `pot − buffer`, and only Strawb's bills
+// beyond the buffer come out of liquid (Ruling 12). Card debt is what is
+// owed on a credit card, `max(0, −balance)` (Ruling 10): Akahu reports owed
+// as a negative balance, a convention confirmed against live data on
+// 2026-10-25.
 
 import { describe, expect, it } from 'vitest'
 import {
@@ -40,6 +45,9 @@ import {
 //   last payday Tue 2026-10-20, next payday Tue 2026-10-27, 4 days to go.
 // Strawb tax: 28% (2800 bp) of $10,000.00 profit = 1000000 × 2800 / 10000
 //   = 280000. Personal tax owed: 0 unless a case sets it.
+// Strawb bills buffer: the supplier bill 40000 is Strawb's only bill due by
+//   payday; the Strawb pot s-tax is 30000, so buffer = min(30000, 40000)
+//   = 30000 and the pot counts as 0 against tax.
 // ---------------------------------------------------------------------------
 
 const ACCOUNTS: SafeToSpendAccount[] = [
@@ -163,6 +171,7 @@ const PAYDAY_WEEK = { today: '2026-10-23', lastPayday: '2026-10-20', nextPayday:
 const NO_TAX = {
   strawbTaxOwedCents: 0,
   strawbTaxPotCents: 0,
+  strawbBillsBufferCents: 0,
   strawbTaxHoldCents: 0,
   personalTaxOwedCents: 0,
   personalTaxPotCents: 0,
@@ -175,28 +184,30 @@ const NO_TAX = {
 
 // liquid  = p-cur 300000 + s-cur 200000 = 500000
 //           (savings 500000, no-role 7000 and the tax pot 30000 are not liquid)
-// bills   = rent 100000 + supplier 40000 + power 12000 = 152000
-//           (gym due 10-28 is after payday; phone is paid)
+// bills   = rent 100000 + supplier 40000 + power 12000 = 152000 due
+//           (gym due 10-28 is after payday; phone is paid), less the
+//           Strawb buffer 30000 the pot pays = 122000
 // budgets = groceries 14000 + software 0 = 14000
-// tax     = Strawb: owed 280000 − pot 30000 = hold 250000
+// tax     = Strawb: owed 280000 − (pot 30000 − buffer 30000) = hold 280000
 //           Personal: owed 0 − pot 0 = hold 0
-//           hold = 250000 + 0 = 250000
+//           hold = 280000 + 0 = 280000
 // card    = 0 (no credit card)
-// safe    = 500000 − 152000 − 14000 − 250000 − 0 = 84000
+// safe    = 500000 − 122000 − 14000 − 280000 − 0 = 84000
 // per day = 84000 ÷ 4 = 21000
 const EXPECT_ALL: SafeToSpendResult = {
   scope: 'all',
   ...PAYDAY_WEEK,
   liquidCents: 500000,
-  unpaidBillsCents: 152000,
+  unpaidBillsCents: 122000,
   remainingBudgetCents: 14000,
   strawbTaxOwedCents: 280000,
   strawbTaxPotCents: 30000,
-  strawbTaxHoldCents: 250000,
+  strawbBillsBufferCents: 30000,
+  strawbTaxHoldCents: 280000,
   personalTaxOwedCents: 0,
   personalTaxPotCents: 0,
   personalTaxHoldCents: 0,
-  taxHoldCents: 250000,
+  taxHoldCents: 280000,
   cardDebtCents: 0,
   safeCents: 84000,
   shortByCents: 0,
@@ -207,8 +218,8 @@ const EXPECT_ALL: SafeToSpendResult = {
 // liquid  = p-cur 300000
 // bills   = rent 100000 + power 12000 = 112000
 // budgets = groceries 14000
-// tax     = Personal: owed 0 − pot 0 = hold 0. Strawb parts are 0 in
-//           Personal, though profit is set.
+// tax     = Personal: owed 0 − pot 0 = hold 0. Strawb parts, the buffer
+//           among them, are 0 in Personal, though profit is set.
 // card    = 0
 // safe    = 300000 − 112000 − 14000 − 0 − 0 = 174000
 // per day = 174000 ÷ 4 = 43500
@@ -227,24 +238,26 @@ const EXPECT_PERSONAL: SafeToSpendResult = {
 }
 
 // liquid  = s-cur 200000
-// bills   = supplier 40000 (due on payday counts)
+// bills   = supplier 40000 (due on payday counts) − buffer 30000 = 10000
 // budgets = software 0 (over its limit; adds nothing, takes nothing extra)
-// tax     = Strawb: owed 280000 − pot 30000 = hold 250000. Personal parts 0.
+// tax     = Strawb: owed 280000 − (pot 30000 − buffer 30000) = hold 280000.
+//           Personal parts 0.
 // card    = 0
-// safe    = 200000 − 40000 − 0 − 250000 − 0 = −90000   (negative, not clamped)
+// safe    = 200000 − 10000 − 0 − 280000 − 0 = −90000   (negative, not clamped)
 // short   = 90000
 // per day = −90000 ÷ 4 = −22500
 const EXPECT_STRAWB: SafeToSpendResult = {
   scope: 'strawb',
   ...PAYDAY_WEEK,
   liquidCents: 200000,
-  unpaidBillsCents: 40000,
+  unpaidBillsCents: 10000,
   remainingBudgetCents: 0,
   ...NO_TAX,
   strawbTaxOwedCents: 280000,
   strawbTaxPotCents: 30000,
-  strawbTaxHoldCents: 250000,
-  taxHoldCents: 250000,
+  strawbBillsBufferCents: 30000,
+  strawbTaxHoldCents: 280000,
+  taxHoldCents: 280000,
   cardDebtCents: 0,
   safeCents: -90000,
   shortByCents: 90000,
@@ -281,9 +294,11 @@ const CASES: Case[] = [
   // --- Strawb tax hold (Ruling 11) ----------------------------------------
   {
     // Profit 0 (Xero not connected): owed = 2800 × 0 / 10000 = 0;
-    //   hold = max(0, 0 − 30000) = 0. The pot just sits outside liquid.
-    // safe    = 200000 − 40000 − 0 − 0 − 0 = 160000
-    // per day = 160000 ÷ 4 = 40000
+    //   buffer = min(pot 30000, bills 40000) = 30000;
+    //   hold = max(0, 0 − (30000 − 30000)) = 0. The pot pays 30000 of the
+    //   supplier bill, so only 10000 of it comes out of liquid.
+    // safe    = 200000 − 10000 − 0 − 0 − 0 = 190000
+    // per day = 190000 ÷ 4 = 47500
     name: 'strawb, profit 0 with money in the tax pot: hold is 0',
     input: base({ scope: 'strawb', profitCents: 0 }),
     expected: {
@@ -291,39 +306,47 @@ const CASES: Case[] = [
       strawbTaxOwedCents: 0,
       strawbTaxHoldCents: 0,
       taxHoldCents: 0,
-      safeCents: 160000,
+      safeCents: 190000,
       shortByCents: 0,
-      perDayCents: 40000,
+      perDayCents: 47500,
     },
   },
   {
-    // Profit 100000: owed = 2800 × 100000 / 10000 = 28000;
-    //   hold = max(0, 28000 − 30000) = 0, not −2000 (the pot covers it and is
-    //   not liquid).
-    // safe    = 200000 − 40000 − 0 − 0 − 0 = 160000
-    // per day = 160000 ÷ 4 = 40000
+    // Profit 100000: owed = 2800 × 100000 / 10000 = 28000. The pot is
+    //   70000, so after the bills buffer min(70000, 40000) = 40000 it still
+    //   counts 30000 against tax (the pot of this row before Ruling 12):
+    //   hold = max(0, 28000 − (70000 − 40000)) = 0, not −2000 (the pot covers
+    //   it and is not liquid). bills = 40000 − 40000 = 0.
+    // safe    = 200000 − 0 − 0 − 0 − 0 = 200000
+    // per day = 200000 ÷ 4 = 50000
     name: 'strawb, tax pot above the tax owed: hold is 0, not negative',
-    input: base({ scope: 'strawb', profitCents: 100000 }),
+    input: base({ scope: 'strawb', profitCents: 100000, accounts: [...ACCOUNTS_NO_S_TAX, S_TAX(70000)] }),
     expected: {
       ...EXPECT_STRAWB,
+      unpaidBillsCents: 0,
       strawbTaxOwedCents: 28000,
+      strawbTaxPotCents: 70000,
+      strawbBillsBufferCents: 40000,
       strawbTaxHoldCents: 0,
       taxHoldCents: 0,
-      safeCents: 160000,
+      safeCents: 200000,
       shortByCents: 0,
-      perDayCents: 40000,
+      perDayCents: 50000,
     },
   },
   {
-    // No Strawb tax pot at all: hold = max(0, 280000 − 0) = 280000, the full
-    //   owed amount.
+    // No Strawb tax pot at all: buffer = min(0, 40000) = 0, so the whole
+    //   supplier bill 40000 comes out of liquid;
+    //   hold = max(0, 280000 − 0) = 280000, the full owed amount.
     // safe    = 200000 − 40000 − 0 − 280000 − 0 = −120000; short 120000
     // per day = −120000 ÷ 4 = −30000
     name: 'strawb, no tax pot: the whole tax owed is held',
     input: base({ scope: 'strawb', accounts: ACCOUNTS_NO_S_TAX }),
     expected: {
       ...EXPECT_STRAWB,
+      unpaidBillsCents: 40000,
       strawbTaxPotCents: 0,
+      strawbBillsBufferCents: 0,
       strawbTaxHoldCents: 280000,
       taxHoldCents: 280000,
       safeCents: -120000,
@@ -332,8 +355,9 @@ const CASES: Case[] = [
     },
   },
   {
-    // A loss: profit −500000 owes nothing; hold 0.
-    // safe = 200000 − 40000 − 0 − 0 − 0 = 160000; per day 160000 ÷ 4 = 40000
+    // A loss: profit −500000 owes nothing; hold 0. The buffer is 30000 as in
+    //   the base row, so bills = 40000 − 30000 = 10000.
+    // safe = 200000 − 10000 − 0 − 0 − 0 = 190000; per day 190000 ÷ 4 = 47500
     name: 'strawb, negative profit: nothing owed',
     input: base({ scope: 'strawb', profitCents: -500000 }),
     expected: {
@@ -341,16 +365,17 @@ const CASES: Case[] = [
       strawbTaxOwedCents: 0,
       strawbTaxHoldCents: 0,
       taxHoldCents: 0,
-      safeCents: 160000,
+      safeCents: 190000,
       shortByCents: 0,
-      perDayCents: 40000,
+      perDayCents: 47500,
     },
   },
   {
     // A personal tax pot seen from Strawb: it is not Strawb's.
-    // tax = Strawb owed 280000 − pot 30000 (s-tax only; p-tax 50000 is
-    //       personal and out of view) = hold 250000. Personal parts 0.
-    // safe = 200000 − 40000 − 0 − 250000 − 0 = −90000; short 90000
+    // tax = Strawb owed 280000 − (pot 30000 − buffer 30000) = hold 280000;
+    //       the pot is s-tax only (p-tax 50000 is personal and out of view,
+    //       and pays no Strawb bill). Personal parts 0.
+    // safe = 200000 − 10000 − 0 − 280000 − 0 = −90000; short 90000
     // per day = −90000 ÷ 4 = −22500
     name: 'strawb scope with a personal tax pot: only the Strawb pot nets',
     input: base({ scope: 'strawb', accounts: [...ACCOUNTS, P_TAX(50000)] }),
@@ -359,23 +384,23 @@ const CASES: Case[] = [
   {
     // Personal tax owed 100000 is set, but Strawb holds only its own tax:
     //   every personal part is 0 in Strawb, so the result is the base one.
-    // safe = 200000 − 40000 − 0 − 250000 − 0 = −90000; per day −22500
+    // safe = 200000 − 10000 − 0 − 280000 − 0 = −90000; per day −22500
     name: 'strawb scope ignores personal tax owed',
     input: base({ scope: 'strawb', personalTaxOwedCents: 100000 }),
     expected: EXPECT_STRAWB,
   },
   {
     // A 100% tax rate is allowed: owed = 10000 × 1000000 / 10000 = 1000000.
-    // hold = 1000000 − 30000 = 970000
-    // safe = 200000 − 40000 − 0 − 970000 − 0 = −810000; short 810000
+    // hold = 1000000 − (30000 − buffer 30000) = 1000000; bills 10000
+    // safe = 200000 − 10000 − 0 − 1000000 − 0 = −810000; short 810000
     // per day = −810000 ÷ 4 = −202500
     name: 'strawb, tax rate 10000 bp (100%) is the upper bound, accepted',
     input: base({ scope: 'strawb', taxRateBasisPoints: 10000 }),
     expected: {
       ...EXPECT_STRAWB,
       strawbTaxOwedCents: 1000000,
-      strawbTaxHoldCents: 970000,
-      taxHoldCents: 970000,
+      strawbTaxHoldCents: 1000000,
+      taxHoldCents: 1000000,
       safeCents: -810000,
       shortByCents: 810000,
       perDayCents: -202500,
@@ -449,11 +474,12 @@ const CASES: Case[] = [
 
   // --- All: the sum of both holds, never cross-netted (Ruling 11) ---------
   {
-    // Strawb: owed 280000 − pot 30000 = hold 250000
-    // Personal: owed 100000 − pot 30000 = hold 70000
-    // hold = 250000 + 70000 = 320000
-    // liquid 500000; bills 152000; budgets 14000
-    // safe = 500000 − 152000 − 14000 − 320000 − 0 = 14000
+    // Strawb: owed 280000 − (pot 30000 − buffer 30000) = hold 280000
+    // Personal: owed 100000 − pot 30000 = hold 70000 (the personal pot pays
+    //   no bill)
+    // hold = 280000 + 70000 = 350000
+    // liquid 500000; bills 152000 − buffer 30000 = 122000; budgets 14000
+    // safe = 500000 − 122000 − 14000 − 350000 − 0 = 14000
     // per day = 14000 ÷ 4 = 3500
     name: 'all scope: the tax hold is the Strawb hold plus the personal hold',
     input: base({ scope: 'all', personalTaxOwedCents: 100000, accounts: [...ACCOUNTS, P_TAX(30000)] }),
@@ -462,41 +488,194 @@ const CASES: Case[] = [
       personalTaxOwedCents: 100000,
       personalTaxPotCents: 30000,
       personalTaxHoldCents: 70000,
-      taxHoldCents: 320000,
+      taxHoldCents: 350000,
       safeCents: 14000,
       perDayCents: 3500,
     },
   },
   {
     // A Strawb pot bigger than Strawb's tax does not cover personal tax.
-    // Strawb: owed 280000 − pot 300000 → hold max(0, −20000) = 0
+    //   The pot is 340000: after the bills buffer min(340000, 40000) = 40000
+    //   it counts 300000 against tax (the pot of this row before Ruling 12).
+    // Strawb: owed 280000 − (340000 − 40000) → hold max(0, −20000) = 0
     // Personal: owed 100000 − no pot → hold 100000
     // hold = 0 + 100000 = 100000, not (280000 + 100000) − 300000 = 80000
-    // safe = 500000 − 152000 − 14000 − 100000 − 0 = 234000
-    // per day = 234000 ÷ 4 = 58500
+    // bills = 152000 − 40000 = 112000 (the personal 112000 in full)
+    // safe = 500000 − 112000 − 14000 − 100000 − 0 = 274000
+    // per day = 274000 ÷ 4 = 68500
     name: 'all scope: a Strawb surplus pot never reduces the personal hold',
-    input: base({ scope: 'all', personalTaxOwedCents: 100000, accounts: [...ACCOUNTS_NO_S_TAX, S_TAX(300000)] }),
+    input: base({ scope: 'all', personalTaxOwedCents: 100000, accounts: [...ACCOUNTS_NO_S_TAX, S_TAX(340000)] }),
     expected: {
       ...EXPECT_ALL,
-      strawbTaxPotCents: 300000,
+      unpaidBillsCents: 112000,
+      strawbTaxPotCents: 340000,
+      strawbBillsBufferCents: 40000,
       strawbTaxHoldCents: 0,
       personalTaxOwedCents: 100000,
       personalTaxHoldCents: 100000,
       taxHoldCents: 100000,
-      safeCents: 234000,
-      perDayCents: 58500,
+      safeCents: 274000,
+      perDayCents: 68500,
     },
   },
   {
     // The mirror: a personal pot bigger than personal tax does not cover
     //   Strawb's.
-    // Strawb: owed 280000 − pot 30000 → hold 250000
+    // Strawb: owed 280000 − (pot 30000 − buffer 30000) → hold 280000
     // Personal: owed 100000 − pot 120000 → hold max(0, −20000) = 0
-    // hold = 250000 + 0 = 250000, not (280000 + 100000) − 150000 = 230000
-    // safe = 500000 − 152000 − 14000 − 250000 − 0 = 84000; per day 21000
+    // hold = 280000 + 0 = 280000, not (280000 + 100000) − (0 + 120000)
+    //   = 260000
+    // safe = 500000 − 122000 − 14000 − 280000 − 0 = 84000; per day 21000
     name: 'all scope: a personal surplus pot never reduces the Strawb hold',
     input: base({ scope: 'all', personalTaxOwedCents: 100000, accounts: [...ACCOUNTS, P_TAX(120000)] }),
     expected: { ...EXPECT_ALL, personalTaxOwedCents: 100000, personalTaxPotCents: 120000 },
+  },
+
+  // --- The Strawb bills buffer (Ruling 12) --------------------------------
+  // The base rows have the pot partly covering the bills (30000 of 40000).
+  {
+    // Pot 100000 covers the supplier bill 40000. Two more Strawb bills do
+    //   not size the buffer: 'ads' 50000 is due 10-28, after payday, and
+    //   'hosting' 20000 is paid.
+    // buffer = min(100000, 40000) = 40000; bills = 40000 − 40000 = 0, so the
+    //   bill is not taken from liquid as well as from the pot.
+    // hold = 280000 − (100000 − 40000) = 220000: the pot counted against tax
+    //   is 60000, not 100000.
+    // safe = 200000 − 0 − 0 − 220000 − 0 = −20000; short 20000
+    // per day = −20000 ÷ 4 = −5000
+    name: 'strawb, the pot covers the bills: no bill subtracted twice, hold on pot − bills',
+    input: base({
+      scope: 'strawb',
+      accounts: [...ACCOUNTS_NO_S_TAX, S_TAX(100000)],
+      bills: [
+        ...BILLS,
+        { id: 'ads', scope: 'strawb', amountCents: 50000, dueDate: '2026-10-28', paid: false },
+        { id: 'hosting', scope: 'strawb', amountCents: 20000, dueDate: '2026-10-22', paid: true },
+      ],
+    }),
+    expected: {
+      ...EXPECT_STRAWB,
+      unpaidBillsCents: 0,
+      strawbTaxPotCents: 100000,
+      strawbBillsBufferCents: 40000,
+      strawbTaxHoldCents: 220000,
+      taxHoldCents: 220000,
+      safeCents: -20000,
+      shortByCents: 20000,
+      perDayCents: -5000,
+    },
+  },
+  {
+    // Pot 10000 covers part of the supplier bill 40000.
+    // buffer = min(10000, 40000) = 10000; bills = 40000 − 10000 = 30000
+    // hold = 280000 − (10000 − 10000) = 280000
+    // safe = 200000 − 30000 − 0 − 280000 − 0 = −110000; short 110000
+    // per day = −110000 ÷ 4 = −27500
+    name: 'strawb, the pot partly covers the bills: the pot is all buffer, the rest is subtracted',
+    input: base({ scope: 'strawb', accounts: [...ACCOUNTS_NO_S_TAX, S_TAX(10000)] }),
+    expected: {
+      ...EXPECT_STRAWB,
+      unpaidBillsCents: 30000,
+      strawbTaxPotCents: 10000,
+      strawbBillsBufferCents: 10000,
+      safeCents: -110000,
+      shortByCents: 110000,
+      perDayCents: -27500,
+    },
+  },
+  {
+    // Pot 0: buffer = min(0, 40000) = 0, so behaviour is as before Ruling 12.
+    // bills = 40000; hold = 280000 − 0 = 280000
+    // safe = 200000 − 40000 − 0 − 280000 − 0 = −120000; short 120000
+    // per day = −120000 ÷ 4 = −30000
+    name: 'strawb, a pot of 0: no buffer, the bills are subtracted in full',
+    input: base({ scope: 'strawb', accounts: [...ACCOUNTS_NO_S_TAX, S_TAX(0)] }),
+    expected: {
+      ...EXPECT_STRAWB,
+      unpaidBillsCents: 40000,
+      strawbTaxPotCents: 0,
+      strawbBillsBufferCents: 0,
+      safeCents: -120000,
+      shortByCents: 120000,
+      perDayCents: -30000,
+    },
+  },
+  {
+    // No Strawb bills (only the personal ones, out of view): buffer =
+    //   min(30000, 0) = 0, so the whole pot counts against tax.
+    // bills = 0; hold = 280000 − (30000 − 0) = 250000
+    // safe = 200000 − 0 − 0 − 250000 − 0 = −50000; short 50000
+    // per day = −50000 ÷ 4 = −12500
+    name: 'strawb, no Strawb bills: no buffer, the whole pot nets the tax',
+    input: base({ scope: 'strawb', bills: BILLS.filter((b) => b.scope === 'personal') }),
+    expected: {
+      ...EXPECT_STRAWB,
+      unpaidBillsCents: 0,
+      strawbBillsBufferCents: 0,
+      strawbTaxHoldCents: 250000,
+      taxHoldCents: 250000,
+      safeCents: -50000,
+      shortByCents: 50000,
+      perDayCents: -12500,
+    },
+  },
+  {
+    // An overdrawn pot, −5000: buffer = max(0, min(−5000, 40000)) = 0, not
+    //   −5000, so it adds no bills; the overdraft stays in the hold.
+    // bills = 40000; hold = 280000 − (−5000 − 0) = 285000
+    // safe = 200000 − 40000 − 0 − 285000 − 0 = −125000; short 125000
+    // per day = −125000 ÷ 4 = −31250
+    name: 'strawb, an overdrawn pot: no buffer, never a negative one',
+    input: base({ scope: 'strawb', accounts: [...ACCOUNTS_NO_S_TAX, S_TAX(-5000)] }),
+    expected: {
+      ...EXPECT_STRAWB,
+      unpaidBillsCents: 40000,
+      strawbTaxPotCents: -5000,
+      strawbBillsBufferCents: 0,
+      strawbTaxHoldCents: 285000,
+      taxHoldCents: 285000,
+      safeCents: -125000,
+      shortByCents: 125000,
+      perDayCents: -31250,
+    },
+  },
+  {
+    // All, with personal and Strawb bills and a pot on each side. Strawb pot
+    //   100000 covers the supplier bill 40000; the personal pot 30000 pays
+    //   no bill.
+    // Strawb buffer = min(100000, 40000) = 40000 (personal bills never size
+    //   it); Strawb hold = 280000 − (100000 − 40000) = 220000
+    // Personal hold = 100000 − 30000 = 70000, as without Ruling 12
+    // bills = rent 100000 + power 12000 (personal, in full) + supplier
+    //   40000 − 40000 = 112000
+    // hold = 220000 + 70000 = 290000
+    // safe = 500000 − 112000 − 14000 − 290000 − 0 = 84000
+    // per day = 84000 ÷ 4 = 21000
+    name: 'all scope: personal bills and the personal pot are untouched by the Strawb buffer',
+    input: base({
+      scope: 'all',
+      personalTaxOwedCents: 100000,
+      accounts: [...ACCOUNTS_NO_S_TAX, S_TAX(100000), P_TAX(30000)],
+    }),
+    expected: {
+      ...EXPECT_ALL,
+      unpaidBillsCents: 112000,
+      strawbTaxPotCents: 100000,
+      strawbBillsBufferCents: 40000,
+      strawbTaxHoldCents: 220000,
+      personalTaxOwedCents: 100000,
+      personalTaxPotCents: 30000,
+      personalTaxHoldCents: 70000,
+      taxHoldCents: 290000,
+    },
+  },
+  {
+    // Personal: Strawb is not in view, so the Strawb pot 100000 and the
+    //   supplier bill are not seen and the buffer is 0. Personal bills
+    //   112000 come out in full, as in the base Personal row.
+    name: 'personal scope: no Strawb buffer, though Strawb has a pot and a bill',
+    input: base({ scope: 'personal', accounts: [...ACCOUNTS_NO_S_TAX, S_TAX(100000)] }),
+    expected: EXPECT_PERSONAL,
   },
 
   // --- Card debt (Ruling 10) ----------------------------------------------
@@ -538,7 +717,7 @@ const CASES: Case[] = [
   },
   {
     // The personal card in All: debt 40000.
-    // safe = 500000 − 152000 − 14000 − 250000 − 40000 = 44000
+    // safe = 500000 − 122000 − 14000 − 280000 − 40000 = 44000
     // per day = 44000 ÷ 4 = 11000
     name: 'all scope: a personal card debt is subtracted',
     input: base({ scope: 'all', accounts: [...ACCOUNTS, P_CARD(-40000)] }),
@@ -546,14 +725,15 @@ const CASES: Case[] = [
   },
   {
     // The personal card seen from Strawb: not Strawb's, debt 0.
-    // safe = 200000 − 40000 − 0 − 250000 − 0 = −90000; per day −22500
+    // safe = 200000 − 10000 − 0 − 280000 − 0 = −90000; per day −22500
     name: 'strawb scope: a personal card debt is not Strawb’s',
     input: base({ scope: 'strawb', accounts: [...ACCOUNTS, P_CARD(-40000)] }),
     expected: EXPECT_STRAWB,
   },
   {
-    // s-card balance −60000 in Strawb: debt 60000.
-    // safe = 200000 − 40000 − 0 − 250000 − 60000 = −150000; short 150000
+    // s-card balance −60000 in Strawb: debt 60000. The card is not a tax pot
+    //   and pays no bill: the buffer stays 30000.
+    // safe = 200000 − 10000 − 0 − 280000 − 60000 = −150000; short 150000
     // per day = −150000 ÷ 4 = −37500
     name: 'strawb scope: a Strawb card debt is subtracted',
     input: base({ scope: 'strawb', accounts: [...ACCOUNTS, S_CARD(-60000)] }),
@@ -561,7 +741,7 @@ const CASES: Case[] = [
   },
   {
     // The Strawb card in All: debt 60000.
-    // safe = 500000 − 152000 − 14000 − 250000 − 60000 = 24000
+    // safe = 500000 − 122000 − 14000 − 280000 − 60000 = 24000
     // per day = 24000 ÷ 4 = 6000
     name: 'all scope: a Strawb card debt is subtracted',
     input: base({ scope: 'all', accounts: [...ACCOUNTS, S_CARD(-60000)] }),
@@ -734,9 +914,10 @@ const CASES: Case[] = [
     //   so groceries remaining 60000, software remaining 20000 = 80000.
     // bills = rent 100000 (10-25, now overdue) + supplier 40000 (10-27)
     //       + gym 5000 (10-28, now before the next payday) + power 12000
-    //       = 157000; phone still paid.
-    // liquid 500000; hold 250000; card 0
-    // safe = 500000 − 157000 − 80000 − 250000 − 0 = 13000
+    //       = 157000 due; phone still paid. Less the Strawb buffer
+    //       min(30000, 40000) = 30000: 127000.
+    // liquid 500000; hold 280000; card 0
+    // safe = 500000 − 127000 − 80000 − 280000 − 0 = 13000
     // per day = 13000 ÷ 7 = 1857.14… → 1857
     name: 'on payday: the week resets and the next payday is seven days out',
     input: base({ today: '2026-10-27' }),
@@ -746,7 +927,7 @@ const CASES: Case[] = [
       lastPayday: '2026-10-27',
       nextPayday: '2026-11-03',
       daysToPayday: 7,
-      unpaidBillsCents: 157000,
+      unpaidBillsCents: 127000,
       remainingBudgetCents: 80000,
       safeCents: 13000,
       perDayCents: 1857,
@@ -763,8 +944,8 @@ const CASES: Case[] = [
     //   is dated before 10-27 and is last week's.
     // Groceries spent 2000, remaining 60000 − 2000 = 58000; software 20000
     //   budgets = 58000 + 20000 = 78000
-    // bills 157000 (as on payday); liquid 500000; hold 250000; card 0
-    // safe = 500000 − 157000 − 78000 − 250000 − 0 = 15000
+    // bills 127000 (as on payday); liquid 500000; hold 280000; card 0
+    // safe = 500000 − 127000 − 78000 − 280000 − 0 = 15000
     // per day = 15000 ÷ 6 = 2500
     name: 'the day after payday: spend counts from payday, not the day before',
     input: base({
@@ -781,7 +962,7 @@ const CASES: Case[] = [
       lastPayday: '2026-10-27',
       nextPayday: '2026-11-03',
       daysToPayday: 6,
-      unpaidBillsCents: 157000,
+      unpaidBillsCents: 127000,
       remainingBudgetCents: 78000,
       safeCents: 15000,
       perDayCents: 2500,
@@ -844,6 +1025,7 @@ const RESULT_KEYS = [
   'remainingBudgetCents',
   'strawbTaxOwedCents',
   'strawbTaxPotCents',
+  'strawbBillsBufferCents',
   'strawbTaxHoldCents',
   'personalTaxOwedCents',
   'personalTaxPotCents',
@@ -885,6 +1067,7 @@ describe('safeToSpend: the fixed table', () => {
       result.remainingBudgetCents,
       result.strawbTaxOwedCents,
       result.strawbTaxPotCents,
+      result.strawbBillsBufferCents,
       result.strawbTaxHoldCents,
       result.personalTaxOwedCents,
       result.personalTaxPotCents,
@@ -915,23 +1098,25 @@ describe('safeToSpend: the fixed table', () => {
   })
 
   it('All is Personal plus Strawb with a surplus pot on one side and a card', () => {
-    // Strawb pot 300000 (surplus over owed 280000), personal owed 100000 with
-    //   no personal pot, a personal card owing 40000.
+    // Strawb pot 340000: after the bills buffer min(340000, 40000) = 40000
+    //   it counts 300000, a surplus over owed 280000. Personal owed 100000
+    //   with no personal pot, a personal card owing 40000.
     // Personal: 300000 − 112000 − 14000 − hold 100000 − card 40000 = 34000
-    // Strawb:   200000 − 40000 − 0 − hold max(0, 280000 − 300000) = 0
-    //           − card 0 = 160000
-    // All:      500000 − 152000 − 14000 − (0 + 100000) − 40000 = 194000
-    //           = 34000 + 160000. Cross-netting would make All 214000.
+    // Strawb:   200000 − (40000 − 40000) − 0
+    //           − hold max(0, 280000 − 300000) = 0 − card 0 = 200000
+    // All:      500000 − (152000 − 40000) − 14000 − (0 + 100000) − 40000
+    //           = 234000 = 34000 + 200000. Cross-netting would hold
+    //           (280000 + 100000) − 300000 = 80000 and make All 254000.
     const overrides: Partial<SafeToSpendInput> = {
       personalTaxOwedCents: 100000,
-      accounts: [...ACCOUNTS_NO_S_TAX, S_TAX(300000), P_CARD(-40000)],
+      accounts: [...ACCOUNTS_NO_S_TAX, S_TAX(340000), P_CARD(-40000)],
     }
     const all = safeToSpend(base({ ...overrides, scope: 'all' })).safeCents
     const personal = safeToSpend(base({ ...overrides, scope: 'personal' })).safeCents
     const strawb = safeToSpend(base({ ...overrides, scope: 'strawb' })).safeCents
     expect(personal).toBe(34000)
-    expect(strawb).toBe(160000)
-    expect(all).toBe(194000)
+    expect(strawb).toBe(200000)
+    expect(all).toBe(234000)
     expect(personal + strawb).toBe(all)
   })
 
