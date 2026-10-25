@@ -39,9 +39,8 @@ export async function searchTxns(
 }
 
 /**
- * PATCH's answer: the row as it is stored now, read after `setUserCategory`
- * has committed, or undefined when no transaction has that id. No source
- * filter: PATCH works on any row, Xero included.
+ * The row as it is stored now, with the TransactionRow columns, or undefined
+ * when no transaction has that id. No source filter: any row, Xero included.
  */
 export async function getTransactionRow(
   id: number,
