@@ -224,6 +224,28 @@ describe('dollars to integer cents (prd-01 Ruling 3)', () => {
   )
 
   it.each([
+    // Without the string guard, `["5"]` coerces to "5", passes the pattern
+    // and comes out as "out of range". `true` coerces to "true", which the
+    // pattern refuses with this same message, so it pins wording, not the guard.
+    ['a one-item list of text', '["5"]'],
+    ['a boolean', 'true'],
+  ])(
+    'refuses an amount that is %s as bad_response, naming the field',
+    async (_label, amount) => {
+      const { client } = clientWith([
+        page([settledItem('trans_fixture_type', amount)]),
+      ])
+
+      const error = await rejection(client.listTransactions(WINDOW))
+
+      expect(error).toMatchObject({
+        code: 'bad_response',
+        message: 'transaction.amount is missing or not an amount',
+      })
+    },
+  )
+
+  it.each([
     ['a leading zero', '01'],
     ['a trailing point', '1.'],
     ['a bare point', '.5'],
@@ -344,21 +366,31 @@ describe('reading the body exactly', () => {
     expect(error.status).toBe(200)
   })
 
-  it('rejects an unterminated string of escaped quotes in one pass', async () => {
-    // The tokenizer this replaced, whose escape was `\\.`, could not end a
-    // string on the backslash before a quote, so it rescanned the rest of
-    // this 200 kB body from every quote in it: measured at about eight
-    // seconds, against well under a millisecond now. The limit is far from
-    // both so a slow CI machine cannot flip it.
-    const body = `{"success":true,"items":["${'\\"'.repeat(100_000)}`
-    const { client } = clientWith([body])
+  it.each([
+    ['ends in a quote', `{"success":true,"items":["${'\\"'.repeat(100_000)}`],
+    // A lone trailing `\`: an escape that needs a character after the
+    // backslash (`\\[\s\S]`) rescans this body from every quote too.
+    [
+      'ends in a lone backslash',
+      `{"success":true,"items":["${'\\"'.repeat(100_000)}\\`,
+    ],
+  ])(
+    'rejects an unterminated string of escaped quotes in one pass (%s)',
+    async (_label, body) => {
+      // The tokenizer this replaced, whose escape was `\\.`, could not end a
+      // string on the backslash before a quote, so it rescanned the rest of
+      // this 200 kB body from every quote in it: measured at about eight
+      // seconds, against well under a millisecond now. The limit is far from
+      // both so a slow CI machine cannot flip it.
+      const { client } = clientWith([body])
 
-    const started = performance.now()
-    const error = await rejection(client.listAccounts())
+      const started = performance.now()
+      const error = await rejection(client.listAccounts())
 
-    expect(error.code).toBe('bad_response')
-    expect(performance.now() - started).toBeLessThan(1_000)
-  })
+      expect(error.code).toBe('bad_response')
+      expect(performance.now() - started).toBeLessThan(1_000)
+    },
+  )
 
   it.each([
     ['success is false', '{"success":false,"items":[]}'],

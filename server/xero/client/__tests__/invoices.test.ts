@@ -82,6 +82,21 @@ describe('getReceivableInvoices', () => {
     })
   })
 
+  it('keeps an amount a double cannot hold exact to the cent', async () => {
+    // Read as a float and printed back, 85541708717991.35 is
+    // 85541708717991.34: a body reader that let numbers become doubles would
+    // land this a cent out while every shape check still passed.
+    const page = fixture('invoices-accrec-page1.json').replace(
+      '"AmountDue": 1150.00',
+      '"AmountDue": 85541708717991.35',
+    )
+    const { client } = clientWith([page, fixture('invoices-empty.json')])
+
+    const [first] = await client.getReceivableInvoices()
+
+    expect(first.amountDueCents).toBe(8554170871799135)
+  })
+
   it('keeps an invoice with no number or due date, and an escaped contact name', async () => {
     const { client } = clientWith(receivablePages())
 
@@ -143,6 +158,24 @@ describe('getReceivableInvoices', () => {
     const page = fixture('invoices-accrec-page1.json').replace(
       '"AmountDue": 1150.00',
       '"AmountDue": 1150.005',
+    )
+    const { client } = clientWith([page, fixture('invoices-empty.json')])
+
+    const error = await client.getReceivableInvoices().catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(XeroClientError)
+    expect(error).toMatchObject({
+      code: 'bad_response',
+      message: 'AmountDue is not an amount in cents',
+    })
+  })
+
+  it('rejects an amount too large for integer cents, rather than zeroing it', async () => {
+    // Bare number literal in the body: the reader must keep its text, so the
+    // out-of-range amount reaches the conversion and is refused.
+    const page = fixture('invoices-accrec-page1.json').replace(
+      '"AmountDue": 1150.00',
+      '"AmountDue": 123456789012345678.99',
     )
     const { client } = clientWith([page, fixture('invoices-empty.json')])
 

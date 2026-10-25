@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest'
 import { xeroAmountToCents } from '../money.ts'
 
 // Issue #34 done-when 1: the conversion table, and refusal of every shape
-// Xero does not send. The inputs are strings because `parseXeroJson` never
-// lets an amount become a number (see json.test.ts).
+// Xero does not send. The inputs are strings because `parseExactJson` never
+// lets an amount become a number (see shared/__tests__/exact-json.test.ts).
 
 describe('xeroAmountToCents', () => {
   it.each([
@@ -38,10 +38,28 @@ describe('xeroAmountToCents', () => {
 
   // "$5" and "1,000" are accepted by shared parseDollars (what a person
   // types); only this guard refuses them, so these rows go red without it.
-  it.each(['1e2', '$5', '1,000', '19.999', '', 'abc', '1.', '.5', '+5', ' 5'])(
-    'refuses %j, which is not an amount Xero sends',
-    (raw) => {
-      expect(() => xeroAmountToCents(raw)).toThrow(/is not a Xero amount/)
-    },
-  )
+  // Leading zeros: the old loose pattern let these through to parseDollars.
+  it.each([
+    '1e2',
+    '$5',
+    '1,000',
+    '19.999',
+    '',
+    'abc',
+    '1.',
+    '.5',
+    '+5',
+    ' 5',
+    '007.50',
+    '0019.99',
+  ])('refuses %j, which is not an amount Xero sends', (raw) => {
+    expect(() => xeroAmountToCents(raw)).toThrow(/is not a Xero amount/)
+  })
+
+  // Out of range is not a shape: the shared reader throws a TypeError from
+  // parseDollars (the class shared's own test pins; the wording is shared's),
+  // not this file's shape RangeError, and nothing rounds or zeroes it.
+  it('throws for an amount too large to be exact in cents, rather than zeroing it', () => {
+    expect(() => xeroAmountToCents('123456789012345678.99')).toThrow(TypeError)
+  })
 })

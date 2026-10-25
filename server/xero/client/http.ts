@@ -1,5 +1,6 @@
+import { parseExactJson } from '../../../shared/exact-json.ts'
 import { XeroClientError } from './errors.ts'
-import { parseXeroJson, readCount, readRecord } from './json.ts'
+import { readCount, readRecord } from './json.ts'
 import type { JsonRecord } from './json.ts'
 
 // The only place the Xero client touches the network (prd-05 done-when 5).
@@ -13,6 +14,10 @@ import type { JsonRecord } from './json.ts'
 // The bearer token is fetched from the injected `getAccessToken` on every
 // request and never cached here (the vault owns refresh, prd-05 Ruling 3).
 // Nothing in this module logs.
+//
+// Every body is read by the shared exact-text reader (`parseExactJson`,
+// shared/exact-json.ts, called from `xeroGet` below), so no amount becomes a
+// binary float on the way in. The readers in json.ts take it from there.
 
 const XERO_ORIGIN = 'https://api.xero.com'
 
@@ -107,7 +112,7 @@ export async function xeroGet(
   if (!response.ok) throw errorFor(response)
   const text = await response.text()
   try {
-    return parseXeroJson(text)
+    return parseExactJson(text)
   } catch {
     throw new XeroClientError(
       'bad_response',
