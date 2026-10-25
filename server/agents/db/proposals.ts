@@ -15,7 +15,8 @@
 // A refused input throws an error naming the field, never its value: a
 // reason carries merchant text. So does a refused write: knex puts the SQL,
 // bound values and all, in its error message, and `scrubbed` rethrows it as
-// SQLite's own words alone.
+// SQLite's own words alone. A reason past its length cap is a refused input
+// too, as a title or body_md is in insights.ts.
 import {
   PROPOSAL_ORIGINS,
   parseProposedCategory,
@@ -38,6 +39,16 @@ export interface NewProposal {
 export type InsertProposalResult =
   | { inserted: true; id: number }
   | { inserted: false; reason: 'unknown_category' | 'duplicate' }
+
+// Length cap, counted in code points, not UTF-16 units: a non-BMP character
+// is one code point and two units.
+const REASON_MAX_LENGTH = 2_000
+
+function atMostLength(value: string, field: string, max: number): void {
+  if (Array.from(value).length > max) {
+    throw new Error(`${field} must be at most ${max} characters`)
+  }
+}
 
 /**
  * Stores a `pending` proposal. A proposed category outside data/cats.js is
@@ -63,6 +74,7 @@ export async function insertProposal(
   if (typeof proposal.reason !== 'string' || proposal.reason.trim() === '') {
     throw new Error('reason must not be blank')
   }
+  atMostLength(proposal.reason, 'reason', REASON_MAX_LENGTH)
   if (!(PROPOSAL_ORIGINS as readonly unknown[]).includes(proposal.origin)) {
     throw new Error('origin is not a known proposal origin')
   }

@@ -224,6 +224,86 @@ describe('insertProposal', () => {
     )
     await expect(attempt).rejects.not.toThrow(SENTINEL)
   })
+
+  // The reason cap (#313) is counted in code points. The constant is not
+  // exported, so the cap is pinned here as a literal. Non-BMP characters are
+  // two UTF-16 units each, so these strings are over the cap by `.length`.
+  it('accepts a reason of exactly 2000 code points, and stores it whole', async () => {
+    const txId = await transaction('a')
+    const reason = '\u{20000}'.repeat(2_000)
+    expect(Array.from(reason)).toHaveLength(2_000)
+    expect(reason.length).toBeGreaterThan(2_000)
+
+    const result = await insertProposal(proposal(txId, { reason }), NOW)
+    expect(result).toStrictEqual({ inserted: true, id: expect.any(Number) })
+
+    const stored = await rows()
+    expect(stored).toHaveLength(1)
+    expect(Object.keys(stored[0]).sort()).toEqual([...PROPOSAL_COLUMNS].sort())
+    expect(stored[0].reason).toBe(reason)
+  })
+
+  it('counts a reason in code points, not UTF-16 units: 1,001 non-BMP code points (2,002 units) is accepted', async () => {
+    const txId = await transaction('a')
+    const reason = '\u{20000}'.repeat(1_001)
+    expect(Array.from(reason)).toHaveLength(1_001)
+    expect(reason.length).toBe(2_002)
+
+    const result = await insertProposal(proposal(txId, { reason }), NOW)
+    expect(result).toStrictEqual({ inserted: true, id: expect.any(Number) })
+    expect((await rows())[0].reason).toBe(reason)
+  })
+
+  // The refusal names the field and the cap, never the value. The value here
+  // holds a sentinel, so the not.toContain assertion has something to find.
+  it('refuses a reason one code point over the cap, naming the field and the cap but not the value, and writes nothing', async () => {
+    const txId = await transaction('a')
+    const reason = SENTINEL + '\u{20000}'.repeat(2_001 - Array.from(SENTINEL).length)
+    expect(Array.from(reason)).toHaveLength(2_001)
+
+    const error = await insertProposal(proposal(txId, { reason }), NOW).then(
+      () => new Error('expected a refusal'),
+      (e: unknown) => e,
+    )
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toBe('reason must be at most 2000 characters')
+    expect((error as Error).message).not.toContain(SENTINEL)
+    expect(await rows()).toEqual([])
+  })
+
+  // The cap counts the reason as given: a space is a code point, so the reason
+  // is not trimmed before it is counted (#313).
+  it.each([
+    ['a trailing space', 'a'.repeat(2_000) + ' '],
+    ['a leading space', ' ' + 'a'.repeat(2_000)],
+  ])(
+    'refuses 2,000 non-space code points with %s, counting the space, and writes nothing',
+    async (_, reason) => {
+      const txId = await transaction('a')
+      expect(Array.from(reason)).toHaveLength(2_001)
+
+      const error = await insertProposal(proposal(txId, { reason }), NOW).then(
+        () => new Error('expected a refusal'),
+        (e: unknown) => e,
+      )
+      expect((error as Error).message).toBe('reason must be at most 2000 characters')
+      expect(await rows()).toEqual([])
+    },
+  )
+
+  // The cap counts the reason as given, in raw code points, not after NFKC, and
+  // the stored reason is not normalised either (#313). U+FDFA is one code point
+  // that NFKC expands to 18, so 200 of them are 200 raw and 3,600 after NFKC.
+  it('counts the cap on the raw code points as given, not after NFKC: 200 U+FDFA is accepted and stored unchanged', async () => {
+    const txId = await transaction('a')
+    const reason = 'ﷺ'.repeat(200)
+    expect(Array.from(reason)).toHaveLength(200)
+    expect(Array.from(reason.normalize('NFKC'))).toHaveLength(3_600)
+
+    const result = await insertProposal(proposal(txId, { reason }), NOW)
+    expect(result).toStrictEqual({ inserted: true, id: expect.any(Number) })
+    expect((await rows())[0].reason).toBe(reason)
+  })
 })
 
 describe('setStatus', () => {
