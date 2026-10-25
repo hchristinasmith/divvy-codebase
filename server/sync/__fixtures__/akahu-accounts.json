@@ -1,0 +1,93 @@
+{
+  "success": true,
+  "items": [
+    {
+      "_id": "acc_fixture0001everyday",
+      "_authorisation": "auth_fixture0001",
+      "_credentials": "creds_fixture0001",
+      "_migrated": "acc_fixture0001legacy",
+      "attributes": [
+        "PAYMENT_FROM",
+        "PAYMENT_TO",
+        "TRANSACTIONS",
+        "TRANSFER_FROM",
+        "TRANSFER_TO"
+      ],
+      "balance": {
+        "available": 1184.56,
+        "currency": "NZD",
+        "current": 1234.56
+      },
+      "connection": {
+        "_id": "conn_fixture0001",
+        "connection_type": "classic",
+        "logo": "https://example.com/fixture-bank-logo.png",
+        "name": "Example Bank"
+      },
+      "formatted_account": "XX-XXXX-XXXXXXX-XX",
+      "name": "Fixture Everyday",
+      "refreshed": {
+        "balance": "2026-10-24T20:15:00.000Z",
+        "meta": "2026-10-24T20:15:01.000Z",
+        "transactions": "2026-10-24T20:15:02.000Z"
+      },
+      "status": "ACTIVE",
+      "type": "CHECKING"
+    },
+    {
+      "_id": "acc_fixture0002savings",
+      "_authorisation": "auth_fixture0001",
+      "_credentials": "creds_fixture0001",
+      "_migrated": "acc_fixture0002legacy",
+      "attributes": ["TRANSACTIONS", "TRANSFER_FROM", "TRANSFER_TO"],
+      "balance": {
+        "available": 1500,
+        "currency": "NZD",
+        "current": 1500
+      },
+      "connection": {
+        "_id": "conn_fixture0001",
+        "connection_type": "classic",
+        "logo": "https://example.com/fixture-bank-logo.png",
+        "name": "Example Bank"
+      },
+      "formatted_account": "XX-XXXX-XXXXXXX-XX",
+      "name": "Fixture Savings",
+      "refreshed": {
+        "balance": "2026-10-24T20:15:00.000Z",
+        "meta": "2026-10-24T20:15:01.000Z",
+        "transactions": "2026-10-24T20:15:02.000Z"
+      },
+      "status": "ACTIVE",
+      "type": "SAVINGS"
+    },
+    {
+      "_id": "acc_fixture0003credit",
+      "_authorisation": "auth_fixture0001",
+      "_credentials": "creds_fixture0001",
+      "_migrated": "acc_fixture0003legacy",
+      "attributes": ["PAYMENT_TO", "TRANSACTIONS", "TRANSFER_TO"],
+      "balance": {
+        "available": 4567.83,
+        "currency": "NZD",
+        "current": -432.17,
+        "limit": 5000
+      },
+      "connection": {
+        "_id": "conn_fixture0001",
+        "connection_type": "classic",
+        "logo": "https://example.com/fixture-bank-logo.png",
+        "name": "Example Bank"
+      },
+      "formatted_account": "XXXX-XXXX-XXXX-XXXX",
+      "name": "Fixture Credit Card",
+      "refreshed": {
+        "balance": "2026-10-24T20:15:00.000Z",
+        "meta": "2026-10-24T20:15:01.000Z",
+        "transactions": "2026-10-24T20:15:02.000Z"
+      },
+      "status": "ACTIVE",
+      "type": "CREDITCARD"
+    }
+  ]
+}

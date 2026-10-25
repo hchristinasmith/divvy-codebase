@@ -1,0 +1,290 @@
+{
+  "success": true,
+  "items": [
+    {
+      "_account": "acc_fixture0001everyday",
+      "_connection": "conn_fixture0001",
+      "_id": "trans_fixture0001",
+      "_migrated": "trans_fixture0001legacy",
+      "_migrated_account": "acc_fixture0001legacy",
+      "_user": "user_fixture0001",
+      "amount": -19.99,
+      "balance": 1214.57,
+      "category": {
+        "_id": "nzfcc_fixture0001",
+        "name": "Cafes and restaurants",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_fixture0001",
+            "name": "Lifestyle"
+          }
+        }
+      },
+      "created_at": "2026-10-20T03:00:00.000Z",
+      "date": "2026-10-20T00:00:00.000Z",
+      "description": "EXAMPLE CAFE 12 HIGH ST",
+      "hash": "hash_fixture0001",
+      "merchant": {
+        "_id": "merchant_fixture0001",
+        "name": "Example Cafe",
+        "nzbn": "fixture-nzbn-0001",
+        "website": "https://example.com/cafe"
+      },
+      "meta": {
+        "code": "FIXTURE",
+        "logo": "https://example.com/fixture-cafe-logo.png",
+        "other_account": "XX-XXXX-XXXXXXX-XX",
+        "particulars": "Example",
+        "reference": "fixture-ref-0001"
+      },
+      "posted_date": "2026-10-21T00:00:00.000Z",
+      "type": "EFTPOS",
+      "updated_at": "2026-10-21T03:00:00.000Z"
+    },
+    {
+      "_account": "acc_fixture0001everyday",
+      "_connection": "conn_fixture0001",
+      "_id": "trans_fixture0002",
+      "_migrated": "trans_fixture0002legacy",
+      "_migrated_account": "acc_fixture0001legacy",
+      "_user": "user_fixture0001",
+      "amount": 2500,
+      "balance": 3714.57,
+      "category": {
+        "_id": "nzfcc_fixture0002",
+        "name": "Salary",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_fixture0002",
+            "name": "Income"
+          }
+        }
+      },
+      "created_at": "2026-10-20T04:00:00.000Z",
+      "date": "2026-10-20T00:00:00.000Z",
+      "description": "Pay \"Example\" 12.50",
+      "hash": "hash_fixture0002",
+      "meta": {
+        "code": "SALARY",
+        "logo": "https://example.com/fixture-employer-logo.png",
+        "other_account": "XX-XXXX-XXXXXXX-XX",
+        "particulars": "Example Employer",
+        "reference": "fixture-ref-0002"
+      },
+      "posted_date": "2026-10-20T00:00:00.000Z",
+      "type": "CREDIT",
+      "updated_at": "2026-10-20T04:00:00.000Z"
+    },
+    {
+      "_account": "acc_fixture0001everyday",
+      "_connection": "conn_fixture0001",
+      "_id": "trans_fixture0003",
+      "_migrated": "trans_fixture0003legacy",
+      "_migrated_account": "acc_fixture0001legacy",
+      "_user": "user_fixture0001",
+      "amount": -2.3,
+      "balance": 3712.27,
+      "created_at": "2026-10-21T05:00:00.000Z",
+      "date": "2026-10-21T00:00:00.000Z",
+      "description": "EXAMPLE POWER CO DD",
+      "hash": "hash_fixture0003",
+      "merchant": {
+        "_id": "merchant_fixture0002",
+        "name": "Example Power",
+        "nzbn": "fixture-nzbn-0002",
+        "website": "https://example.com/power"
+      },
+      "meta": {
+        "code": "FIXTURE",
+        "logo": "https://example.com/fixture-power-logo.png",
+        "other_account": "XX-XXXX-XXXXXXX-XX",
+        "particulars": "Example",
+        "reference": "fixture-ref-0003"
+      },
+      "posted_date": "2026-10-21T00:00:00.000Z",
+      "type": "DIRECT DEBIT",
+      "updated_at": "2026-10-21T05:00:00.000Z"
+    },
+    {
+      "_account": "acc_fixture0001everyday",
+      "_connection": "conn_fixture0001",
+      "_id": "trans_fixture0004",
+      "_migrated": "trans_fixture0004legacy",
+      "_migrated_account": "acc_fixture0001legacy",
+      "_user": "user_fixture0001",
+      "amount": -0.07,
+      "balance": 3712.2,
+      "category": {
+        "_id": "nzfcc_fixture0003",
+        "name": "Bank fees",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_fixture0004",
+            "name": "Professional services"
+          }
+        }
+      },
+      "created_at": "2026-10-21T06:00:00.000Z",
+      "date": "2026-10-21T00:00:00.000Z",
+      "description": "EXAMPLE FEE",
+      "hash": "hash_fixture0004",
+      "merchant": {
+        "_id": "merchant_fixture0003",
+        "name": "Example Bank Fees",
+        "nzbn": "fixture-nzbn-0003",
+        "website": "https://example.com/bank"
+      },
+      "posted_date": "2026-10-21T00:00:00.000Z",
+      "type": "PAYMENT",
+      "updated_at": "2026-10-21T06:00:00.000Z"
+    },
+    {
+      "_account": "acc_fixture0001everyday",
+      "_connection": "conn_fixture0001",
+      "_id": "trans_fixture0005",
+      "_migrated": "trans_fixture0005legacy",
+      "_migrated_account": "acc_fixture0001legacy",
+      "_user": "user_fixture0001",
+      "amount": -150,
+      "category": {
+        "_id": "nzfcc_fixture0005",
+        "name": "Rent",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_fixture0005",
+            "name": "Housing"
+          }
+        }
+      },
+      "created_at": "2026-10-22T01:00:00.000Z",
+      "date": "2026-10-22T00:00:00.000Z",
+      "description": "EXAMPLE LANDLORD RENT",
+      "hash": "hash_fixture0005",
+      "merchant": {
+        "_id": "merchant_fixture0005",
+        "name": "Example Lettings",
+        "nzbn": "fixture-nzbn-0005",
+        "website": "https://example.com/lettings"
+      },
+      "meta": {
+        "code": "RENT",
+        "logo": "https://example.com/fixture-lettings-logo.png",
+        "other_account": "XX-XXXX-XXXXXXX-XX",
+        "particulars": "Example",
+        "reference": "fixture-ref-0005"
+      },
+      "posted_date": "2026-10-22T00:00:00.000Z",
+      "type": "STANDING ORDER",
+      "updated_at": "2026-10-22T01:00:00.000Z"
+    },
+    {
+      "_account": "acc_fixture0001everyday",
+      "_connection": "conn_fixture0001",
+      "_id": "trans_fixture0006",
+      "_migrated": "trans_fixture0006legacy",
+      "_migrated_account": "acc_fixture0001legacy",
+      "_user": "user_fixture0001",
+      "amount": 0,
+      "balance": 3562.2,
+      "category": {
+        "_id": "nzfcc_fixture0006",
+        "name": "Transfers",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_fixture0006",
+            "name": "Transfers"
+          }
+        }
+      },
+      "created_at": "2026-10-22T02:00:00.000Z",
+      "date": "2026-10-22T00:00:00.000Z",
+      "description": "TRANSFER TO FIXTURE SAVINGS",
+      "hash": "hash_fixture0006",
+      "meta": {
+        "code": "TFR",
+        "logo": "https://example.com/fixture-bank-logo.png",
+        "other_account": "XX-XXXX-XXXXXXX-XX",
+        "particulars": "Savings",
+        "reference": "fixture-ref-0006"
+      },
+      "posted_date": "2026-10-22T00:00:00.000Z",
+      "type": "TRANSFER",
+      "updated_at": "2026-10-22T02:00:00.000Z"
+    },
+    {
+      "_account": "acc_fixture0003credit",
+      "_connection": "conn_fixture0001",
+      "_id": "trans_fixture0007",
+      "_migrated": "trans_fixture0007legacy",
+      "_migrated_account": "acc_fixture0003legacy",
+      "_user": "user_fixture0001",
+      "amount": 1.15,
+      "balance": -432.17,
+      "category": {
+        "_id": "nzfcc_fixture0001",
+        "name": "Cafes and restaurants",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_fixture0001",
+            "name": "Lifestyle"
+          }
+        }
+      },
+      "created_at": "2026-10-23T01:00:00.000Z",
+      "date": "2026-10-23T00:00:00.000Z",
+      "description": "EXAMPLE BAKERY REFUND",
+      "hash": "hash_fixture0007",
+      "merchant": {
+        "_id": "merchant_fixture0006",
+        "name": "Example Bakery"
+      },
+      "meta": {
+        "code": "FIXTURE",
+        "logo": "https://example.com/fixture-bakery-logo.png",
+        "other_account": "XX-XXXX-XXXXXXX-XX",
+        "particulars": "Example",
+        "reference": "fixture-ref-0007"
+      },
+      "posted_date": "2026-10-23T00:00:00.000Z",
+      "type": "EFTPOS",
+      "updated_at": "2026-10-23T01:00:00.000Z"
+    },
+    {
+      "_account": "acc_fixture0003credit",
+      "_connection": "conn_fixture0001",
+      "_id": "trans_fixture0008",
+      "_migrated": "trans_fixture0008legacy",
+      "_migrated_account": "acc_fixture0003legacy",
+      "_user": "user_fixture0001",
+      "amount": -45.67,
+      "balance": -433.32,
+      "category": {
+        "_id": "nzfcc_fixture0007",
+        "name": "Supermarkets and grocery stores"
+      },
+      "created_at": "2026-10-23T02:00:00.000Z",
+      "date": "2026-10-23T00:00:00.000Z",
+      "description": "EXAMPLE GROCER 7",
+      "hash": "hash_fixture0008",
+      "merchant": {
+        "_id": "merchant_fixture0007",
+        "name": "Example Grocer",
+        "nzbn": "fixture-nzbn-0007",
+        "website": "https://example.com/grocer"
+      },
+      "meta": {
+        "code": "FIXTURE",
+        "logo": "https://example.com/fixture-grocer-logo.png",
+        "other_account": "XX-XXXX-XXXXXXX-XX",
+        "particulars": "Example",
+        "reference": "fixture-ref-0008"
+      },
+      "posted_date": "2026-10-23T00:00:00.000Z",
+      "type": "PAYMENT",
+      "updated_at": "2026-10-23T02:00:00.000Z"
+    }
+  ],
+  "cursor": {
+    "next": "cursor_fixture_page2"
+  }
+}
