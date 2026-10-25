@@ -980,6 +980,54 @@ describe('readOverview: alerts', () => {
     }
   })
 
+  it('alerts of one kind on one date sort by subject, not by id', async () => {
+    // Each pair's subjects sort opposite to its ids as text (10 < 9).
+    await connection('accounts').insert(
+      account({
+        id: 1,
+        akahu_id: 'acc_a',
+        scope: 'personal',
+        balance_cents: 100,
+      }),
+    )
+    const budget = (id: number, category: string) => ({
+      id,
+      scope: 'personal',
+      category,
+      limit_cents: 100,
+      created_at: STAMP,
+      updated_at: STAMP,
+    })
+    await connection('budgets').insert([
+      budget(9, 'Bakeries'),
+      budget(10, 'Takeaways'),
+    ])
+    await connection('transactions').insert([
+      tx('acc_a', '2026-10-27T03:00:00.000Z', -300, { category: 'Bakeries' }),
+      tx('acc_a', '2026-10-27T04:00:00.000Z', -200, { category: 'Takeaways' }),
+    ])
+    const oneOff = (id: number, name: string) => ({
+      id,
+      scope: 'personal',
+      name,
+      repeat: 'none',
+      amount_cents: 100,
+      first_due_date: '2026-10-30',
+      created_at: STAMP,
+      updated_at: STAMP,
+    })
+    await connection('bills').insert([oneOff(9, 'Power'), oneOff(10, 'Water')])
+
+    const body = await readOverview('personal', NOW, connection)
+
+    expect(body.alerts.map((a) => [a.id, a.subject])).toStrictEqual([
+      ['over_budget:9:2026-10-27', 'Bakeries'],
+      ['over_budget:10:2026-10-27', 'Takeaways'],
+      ['bill_due_soon:9:2026-10-30', 'Power'],
+      ['bill_due_soon:10:2026-10-30', 'Water'],
+    ])
+  })
+
   it('a budget spent exactly to its limit is not over', async () => {
     await seedMain()
     await connection('budgets').where({ id: 2 }).update({ limit_cents: 7000 })

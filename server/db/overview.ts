@@ -512,11 +512,18 @@ function compareText(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0
 }
 
+// Subjects are names a person reads, so they sort as words in a fixed
+// locale ("power" beside "Power", not after every capital), never by the
+// server's default locale.
+const SUBJECT_ORDER = new Intl.Collator('en')
+
 /**
  * The alerts for a safe-to-spend result, before dismissals: a budget line
  * the result says is over, and every unpaid bill occurrence in the result's
  * scope that is overdue or due by the next payday. Ordered by kind, then
- * due date, then id.
+ * due date, then subject (the bill's name or the budget's category), then
+ * id, so the order is fixed. The id is never the visible tie-break: as text
+ * it would put bill 10 before bill 9.
  */
 function deriveAlerts(
   result: SafeToSpendResult,
@@ -554,6 +561,7 @@ function deriveAlerts(
     (a, b) =>
       KIND_ORDER[a.kind] - KIND_ORDER[b.kind] ||
       compareText(a.dueDate ?? '', b.dueDate ?? '') ||
+      SUBJECT_ORDER.compare(a.subject, b.subject) ||
       compareText(a.id, b.id),
   )
 }
