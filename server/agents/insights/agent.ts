@@ -17,7 +17,7 @@
 // error's message; never a label, an amount or a row.
 import type { ChartSpecRejection, InsightKind, InsightScope } from '../../../models/insights.ts'
 import connection from '../../db/connection.ts'
-import { finishRun, startRun, type AgentTrigger } from '../db/agent-runs.ts'
+import { finishRun, startRun, type StartRun } from '../db/agent-runs.ts'
 import { insertInsight, listInsights } from '../db/insights.ts'
 import { buildDrafts } from './prompt.ts'
 import { collectAggregates, lastCompleteWeek, weekRange } from './queries.ts'
@@ -26,7 +26,7 @@ export interface InsightsRunOptions {
   // An ISO week label; the last complete NZ week before `now` when absent.
   period?: string
   // Default `manual`. The insights agent is never sync-triggered.
-  trigger?: Exclude<AgentTrigger, 'sync'>
+  trigger?: Exclude<StartRun['trigger'], 'sync'>
 }
 
 export interface InsightsRunResult {

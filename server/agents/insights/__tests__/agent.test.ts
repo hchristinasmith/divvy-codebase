@@ -497,6 +497,24 @@ describe('failure and repeat', () => {
     expect(rows.filter((r) => r.kind === first.kind)).toEqual([{ ...first, dismissed_at: NOW.toISOString() }])
   })
 
+  it('the next week in the same scope is not a repeat', async () => {
+    await seedLedger()
+    const earlier = await runInsightsAgent('personal', { period: '2026-W42' }, NOW)
+    const later = await runInsightsAgent('personal', { period: WEEK }, NOW)
+    expect([earlier, later].map((r) => [r.written, r.skipped])).toEqual([
+      [3, 0],
+      [3, 0],
+    ])
+    expect((await insightRows()).map((r) => r.period)).toEqual([
+      '2026-W42',
+      '2026-W42',
+      '2026-W42',
+      WEEK,
+      WEEK,
+      WEEK,
+    ])
+  })
+
   it('the same period in the other scope is not a repeat', async () => {
     await seedLedger()
     await runInsightsAgent('personal', {}, NOW)

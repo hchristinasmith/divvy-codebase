@@ -289,7 +289,8 @@ export async function loadLedger(
       compareText(a.date, b.date) ||
       compareText(a.accountId, b.accountId) ||
       a.amountCents - b.amountCents ||
-      compareText(a.merchant, b.merchant),
+      compareText(a.merchant, b.merchant) ||
+      compareText(a.category, b.category),
   )
 }
 
@@ -345,7 +346,8 @@ export function excludeTransfers(rows: readonly LedgerRow[]): LedgerRow[] {
         compareText(a.date, b.date) ||
         a.amountCents - b.amountCents ||
         compareText(a.merchant, b.merchant) ||
-        compareText(a.accountId, b.accountId),
+        compareText(a.accountId, b.accountId) ||
+        compareText(a.category, b.category),
     )
 
   const paired = new Set<LedgerRow>()

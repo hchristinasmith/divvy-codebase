@@ -430,6 +430,14 @@ describe('excludeTransfers', () => {
     expect(excludeTransfers([after, before, nearest, out])).toEqual([after, before])
     expect(excludeTransfers([after, before, out])).toEqual([after])
   })
+
+  it('pairs the same outflow whatever order the rows arrive in, when two differ only by category', () => {
+    const first = row('2026-10-20', 'acc_p1', -5000, 'M', 'B')
+    const second = row('2026-10-20', 'acc_p1', -5000, 'M', 'A')
+    const back = row('2026-10-20', 'acc_p2', 5000, 'M', 'Transfers')
+    expect(excludeTransfers([first, second, back])).toEqual([first])
+    expect(excludeTransfers([second, first, back])).toEqual([first])
+  })
 })
 
 describe('the folds', () => {
