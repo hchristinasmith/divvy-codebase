@@ -931,6 +931,45 @@ describe('PATCH /api/v1/budgets/:id', () => {
     expect((await budgetRows())[1].note).toBeNull()
   })
 
+  // Red if a limit of 0 is read as "no limit sent", in the validator or the
+  // write: the budget would keep its old limit.
+  it('sets the limit to 0: nothing remaining, all spend over', async () => {
+    const res = await patchBudget(1, { limitCents: 0 })
+
+    expect(res.status).toBe(200)
+    expect(res.body).toStrictEqual({
+      ...EXPECTED['1'],
+      limitCents: 0,
+      remainingCents: 0,
+      overCents: 9500,
+    })
+    expect((await budgetRows())[0]).toMatchObject({
+      limit_cents: 0,
+      note: PERSONAL_NOTE,
+      updated_at: NOW_ISO,
+    })
+  })
+
+  it('changes the limit and the note in one request', async () => {
+    const res = await patchBudget(2, {
+      limitCents: 6000,
+      note: 'Invented both',
+    })
+
+    expect(res.status).toBe(200)
+    expect(res.body).toStrictEqual({
+      ...EXPECTED['2'],
+      limitCents: 6000,
+      remainingCents: 3000,
+      note: 'Invented both',
+    })
+    expect((await budgetRows())[1]).toMatchObject({
+      limit_cents: 6000,
+      note: 'Invented both',
+      updated_at: NOW_ISO,
+    })
+  })
+
   it('a change sets updated_at and leaves created_at', async () => {
     const res = await patchBudget(1, { limitCents: 25000 })
 
@@ -1171,6 +1210,34 @@ describe('a stored note that is not text', () => {
     expect(strawb.status).toBe(200)
     expect(strawb.body.items.map((i: BudgetResponse) => i.id)).toEqual(['2'])
     expect((await getBudgets('personal')).status).toBe(500)
+  })
+
+  // Red if the read after a write covers every scope: the other scope's bad
+  // note would fail, and roll back, a write that has nothing to do with it.
+  it('does not fail a write in the other scope', async () => {
+    await seedAccounts()
+    await seedTransactions()
+    await connection('budgets').insert(
+      budget(1, 'personal', BAKERIES, 100, Buffer.from('zz-sentinel-blob')),
+    )
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const res = await postBudget({
+      scope: 'strawb',
+      category: SOFTWARE,
+      limitCents: 10000,
+    })
+
+    expect(res.status).toBe(201)
+    expect(res.body).toStrictEqual({
+      ...EXPECTED['3'],
+      id: res.body.id,
+      note: null,
+    })
+    expect((await budgetRows()).map((r) => r.scope)).toEqual([
+      'personal',
+      'strawb',
+    ])
   })
 })
 
