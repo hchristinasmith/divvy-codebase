@@ -188,12 +188,12 @@ describe('insertInsight', () => {
     ['blank title', { title: '  ' }, /^title must not be blank$/],
     ['blank body_md', { body_md: '' }, /^body_md must not be blank$/],
     ['blank period', { period: '\t' }, /^period must not be blank$/],
-    ['title U+3164 only', { title: 'ㅤ' }, /^title must not be blank$/],
-    ['body_md U+200B only', { body_md: '​' }, /^body_md must not be blank$/],
-    ['period U+3164 and spaces', { period: 'ㅤ ㅤ' }, /^period must not be blank$/],
+    ['title U+3164 only', { title: '\u3164' }, /^title must not be blank$/],
+    ['body_md U+200B only', { body_md: '\u200b' }, /^body_md must not be blank$/],
+    ['period U+3164 and spaces', { period: '\u3164 \u3164' }, /^period must not be blank$/],
     ['title tag characters (non-BMP)', { title: '\u{E0041}\u{E0042}' }, /^title must not be blank$/],
-    ['body_md a variation selector', { body_md: '️' }, /^body_md must not be blank$/],
-    ['period U+200B, space, U+3164 and tab', { period: '​ ㅤ\t' }, /^period must not be blank$/],
+    ['body_md a variation selector', { body_md: '\ufe0f' }, /^body_md must not be blank$/],
+    ['period U+200B, space, U+3164 and tab', { period: '\u200b \u3164\t' }, /^period must not be blank$/],
   ]
 
   it.each(BAD)('throws on a bad %s, and writes nothing', async (_, fields, message) => {

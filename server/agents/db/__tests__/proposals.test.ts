@@ -192,12 +192,12 @@ describe('insertProposal', () => {
     ],
     ['reason empty', { reason: '' }, /^reason must not be blank$/],
     ['reason spaces', { reason: '   ' }, /^reason must not be blank$/],
-    ['reason U+3164 only', { reason: 'ㅤ' }, /^reason must not be blank$/],
-    ['reason U+200B only', { reason: '​' }, /^reason must not be blank$/],
-    ['reason U+3164 and spaces', { reason: 'ㅤ ㅤ' }, /^reason must not be blank$/],
+    ['reason U+3164 only', { reason: '\u3164' }, /^reason must not be blank$/],
+    ['reason U+200B only', { reason: '\u200b' }, /^reason must not be blank$/],
+    ['reason U+3164 and spaces', { reason: '\u3164 \u3164' }, /^reason must not be blank$/],
     ['reason tag characters (non-BMP)', { reason: '\u{E0041}\u{E0042}' }, /^reason must not be blank$/],
-    ['reason a variation selector', { reason: '️' }, /^reason must not be blank$/],
-    ['reason U+200B, space, U+3164 and tab', { reason: '​ ㅤ\t' }, /^reason must not be blank$/],
+    ['reason a variation selector', { reason: '\ufe0f' }, /^reason must not be blank$/],
+    ['reason U+200B, space, U+3164 and tab', { reason: '\u200b \u3164\t' }, /^reason must not be blank$/],
     [
       'origin claude',
       { origin: 'claude' as unknown as NewProposal['origin'] },
@@ -395,7 +395,7 @@ describe('insertProposal', () => {
   // Raw: leading and trailing spaces and an invisible character are kept as given.
   it('stores a current_category with spaces and U+3164 byte-for-byte unchanged', async () => {
     const txId = await transaction('a')
-    const current = '  ㅤ Bakeries ㅤ  '
+    const current = '  \u3164 Bakeries \u3164  '
     await inserted(proposal(txId, { current_category: current }))
     expect((await rows())[0].current_category).toBe(current)
   })

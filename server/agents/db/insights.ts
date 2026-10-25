@@ -13,9 +13,9 @@
 // ignored, and a read row has no `mermaid` key.
 //
 // A refused input throws an error naming the field, never its value, and a
-// title or body_md past its length cap is a refused input. So is a title,
-// body_md or period with nothing visible in it. A refused write
-// throws SQLite's words without the row (`scrubbed`, in ./scrubbed.ts).
+// title or body_md past its length cap is a refused input, and so is a
+// title, body_md or period with nothing visible in it. A refused write throws
+// SQLite's words without the row (`scrubbed`, in ./scrubbed.ts).
 import {
   INSIGHT_KINDS,
   parseChartSpecJson,

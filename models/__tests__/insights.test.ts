@@ -388,8 +388,8 @@ describe('invisible characters inside a scheme (every input refused today is sti
 // before the URL check. Stripping is only for that check: a label holding no
 // URL once the character is gone is accepted and returned as given.
 describe('default-ignorable characters are stripped before the URL check', () => {
-  const HANGUL_FILLER = 'ㅤ'
-  const VS16 = '️'
+  const HANGUL_FILLER = '\u3164'
+  const VS16 = '\ufe0f'
   const TAG_A = '\u{E0041}'
   const isDefaultIgnorable = /\p{DI}/u
 
@@ -400,7 +400,7 @@ describe('default-ignorable characters are stripped before the URL check', () =>
     ['a Hangul filler splitting a leading //', `/${HANGUL_FILLER}/${CANARY}.example`],
     // NFKC runs before the strip; U+FFA0 folds to U+1160, itself
     // default-ignorable, so the fold does not let it through.
-    ['a halfwidth Hangul filler (U+FFA0) splitting javascript', `javaﾠscript:${CANARY}`],
+    ['a halfwidth Hangul filler (U+FFA0) splitting javascript', `java\uffa0script:${CANARY}`],
   ])('refuses a title with %s', (_name, title) => {
     const spec = base()
     spec.title = title

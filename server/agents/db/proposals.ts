@@ -17,10 +17,11 @@
 // bound values and all, in its error message, and `scrubbed` rethrows it as
 // SQLite's own words alone. A reason past its length cap is a refused input
 // too, as a title or body_md is in insights.ts, and so is a reason with
-// nothing visible in it. current_category is capped at
-// the column's 255 code points and kept raw, never trimmed or normalised,
-// because the accept route's stale check compares it with transactions.category
-// as stored.
+// nothing visible in it.
+//
+// current_category is capped at the column's width, in code points, and kept
+// raw, never trimmed or normalised: the accept route's stale check compares
+// it with transactions.category as stored.
 import {
   PROPOSAL_ORIGINS,
   parseProposedCategory,
