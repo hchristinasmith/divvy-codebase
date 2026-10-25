@@ -21,7 +21,7 @@ Tailscale runs inside the app machine. `scripts/start.sh` step 2 starts
 `tailscaled` in userspace networking mode, and step 3 runs `tailscale up`
 without `--ssh`, so Tailscale SSH is off. Until a separate change enables
 `--ssh` (docs/deploy.md section 9), run path B only and record path A as
-**"not testable yet, Tailscale SSH off (no `--ssh`)"**.
+**"not testable yet, Tailscale SSH off"**.
 
 ```bash
 fly status -a <app>
@@ -193,7 +193,7 @@ Expect `hello from the divvy-mcp spike`. Launcher logs:
 |---|---|---|
 | Tailscale SSH works as `divvy-mcp` in the mode prd-01 runs Tailscale (userspace networking, `scripts/start.sh` step 2; `--ssh` once enabled) | yes / no / not testable yet, Tailscale SSH off | |
 | Claude desktop's launcher works through `ssh` (path A) | yes / no / not testable yet | |
-| If not, which fallback: path B (needs flyctl on the Mac), or Streamable HTTP on loopback, which tailscaled forwards tailnet connections to (`fly.toml` lines 25-27; needs a new ruling) | B / HTTP / none needed | |
+| If not, which fallback: path B (needs flyctl on the Mac), or Streamable HTTP on loopback, which tailscaled forwards tailnet connections to on the same port (docs/deploy.md section 1; needs a new ruling and a tailnet policy rule that lets only your devices reach that port, since section 2 allows only 443) | B / HTTP / none needed | |
 
 ### Extra observation for wave 2
 
