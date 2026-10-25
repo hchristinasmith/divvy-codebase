@@ -1231,12 +1231,17 @@ describe('cleanLabel', () => {
   })
 
   // The sweep's digit-escape check, held to what it must see and must not.
-  it('visibleDigitRun sees eight digits through what draws nothing, marks, spaces and hyphens, and not through a dot or a comma', () => {
+  // U+FFF9 is a format character that is not default-ignorable, and the
+  // Arabic-Indic digits are decimal digits outside ASCII, so each case pins a
+  // part of the helper no other case reaches.
+  it('visibleDigitRun sees eight digits in any script through what draws nothing, marks, spaces and hyphens, and not through a dot or a comma', () => {
     for (const label of [
       '55500123',
+      '\u0665\u0665\u0665\u0660\u0660\u0661\u0662\u0663',
       '5550\u11600123\u11604567\u11608901',
       '5550\u31640123',
       '5550\u200B0123',
+      '5550\uFFF90123',
       '5550 0123 4567 8901',
       '5550-0123-4567-8901',
       '5\u03015\u03015\u03010\u03010\u03011\u03012\u03013\u0301',
