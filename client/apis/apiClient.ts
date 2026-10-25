@@ -5,6 +5,8 @@ import type {
   UpdateTransactionCategory,
   UpdateTransactionCategoryResponse,
 } from '../../models/transactions.ts'
+// Type only: erased from the client bundle, so nothing of the server ships.
+import type { SyncStatus } from '../../server/routes/sync.ts'
 
 const rootURL = new URL(`/api/v1`, document.baseURI)
 
@@ -47,4 +49,11 @@ export async function updateTransactionCategory(
     .patch(`${rootURL}/transactions/${transactionId}`)
     .send(body)
   return response.body as UpdateTransactionCategoryResponse
+}
+
+// What the last sync did and when one last succeeded (prd-01 Ruling 6,
+// #27). The Dashboard's "last synced" line reads it.
+export async function grabSyncStatus(): Promise<SyncStatus> {
+  const response = await request.get(`${rootURL}/sync/status`)
+  return response.body as SyncStatus
 }

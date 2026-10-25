@@ -17,19 +17,7 @@ let app: Express
 let served: LoopbackApi | undefined
 let api: LoopbackApi['api']
 
-// The accounts router proxies Akahu over the network. `server.ts` loads
-// `dotenv/config`, so a developer's `.env` could make these tests call the
-// real API; with the credentials absent the router refuses before any
-// request leaves the process.
-const AKAHU_ENV = ['AKAHU_USER_TOKEN', 'AKAHU_APP_ID'] as const
-let savedEnv: Partial<Record<(typeof AKAHU_ENV)[number], string>> = {}
-
 beforeEach(async () => {
-  savedEnv = {}
-  for (const name of AKAHU_ENV) {
-    savedEnv[name] = process.env[name]
-    delete process.env[name]
-  }
   app = await freshApp()
   served = await serveOnLoopback(app)
   api = served.api
@@ -39,26 +27,28 @@ beforeEach(async () => {
 afterEach(async () => {
   await served?.close()
   served = undefined
-  for (const name of AKAHU_ENV) {
-    const value = savedEnv[name]
-    if (value === undefined) delete process.env[name]
-    else process.env[name] = value
-  }
 })
 
 afterAll(closeDb)
 
 describe('existing routes answer as before', () => {
-  it.each(['/api/v1/accounts', '/api/v1/accounts/transactions', '/api/v1/accounts/acc_1/transactions'])(
+  it.each(['/api/v1/accounts', '/api/v1/accounts/transactions'])(
     'GET %s reaches the accounts router',
     async (path) => {
       const res = await api.get(path)
 
-      // The router's own refusal, not Express's 404: the mount reached it.
-      expect(res.status).toBe(500)
-      expect(res.text).toBe('Missing Akahu credentials')
+      // The router's own envelope, not Express's 404: the mount reached it.
+      expect(res.status).toBe(200)
+      expect(res.body).toStrictEqual({ success: true, items: [] })
     },
   )
+
+  it('GET /api/v1/accounts/acc_1/transactions, the deleted proxy path, is a JSON 404', async () => {
+    const res = await api.get('/api/v1/accounts/acc_1/transactions')
+
+    expect(res.status).toBe(404)
+    expect(res.body).toStrictEqual({ error: 'Not found' })
+  })
 
   it('GET /api/v1/categories lists category groups', async () => {
     const res = await api.get('/api/v1/categories')

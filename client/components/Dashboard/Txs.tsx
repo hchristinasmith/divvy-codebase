@@ -37,6 +37,7 @@ export default function Transactions({ transactions }: TransactionsProps) {
                 <span className="transaction-title">{tx.description}</span>
                 <span className="transaction-date">{formatDate(tx.date.toString())}</span>
                 <span className="transaction-category">{tx.category?.name || 'Uncategorized'}</span>
+                {tx.pending && <span className="text-ink-muted text-body-12"> Pending</span>}
               </div>
               <div className="transaction-amount">
                 {tx.amount >= 0 ? '+' : ''}{tx.amount.toFixed(2)}

@@ -1,6 +1,6 @@
 import express from 'express'
 
-import akahu from './akahu.ts'
+import accounts from './accounts.ts'
 import bills from './bills.ts'
 import budgets from './budgets.ts'
 import categories from './categories.ts'
@@ -19,7 +19,7 @@ import transactions from './transactions.ts'
 // No catch-all: an unknown /api/v1 path falls through to Express's 404.
 const router = express.Router()
 
-router.use('/accounts', akahu)
+router.use('/accounts', accounts)
 router.use('/categories', categories)
 router.use('/transactions', transactions)
 router.use('/sync', sync)

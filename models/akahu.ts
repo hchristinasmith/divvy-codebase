@@ -1,3 +1,5 @@
+import type { CategorySource } from './transactions.ts'
+
 export interface Accounts {
     success: boolean
     items: Item[]
@@ -59,8 +61,9 @@ export interface Accounts {
  * `server/sync/akahu-client.ts` reads Akahu's amounts as exact text, converts
  * them with `parseDollars` and returns its own cents types
  * (`server/sync/types.ts`, prd-01 Ruling 3).
- * The Dashboard still renders this shape, in dollars, from the live proxy
- * (`server/routes/akahu.ts`).
+ * The Dashboard renders this shape, in dollars, from the database through
+ * `GET /api/v1/accounts/transactions` (`server/routes/accounts.ts`, #32),
+ * which adds `pending` and `category_source`.
  */
 export interface AkahuTransaction {
   _id: string
@@ -78,6 +81,10 @@ export interface AkahuTransaction {
   category?: AkahuCategory
   merchant?: AkahuMerchant
   meta?: AkahuTransactionMeta
+  // Divvy's additions (#32): whether the row is in the pending mirror
+  // (prd-01 Ruling 1), and who set its effective category (Ruling 4).
+  pending?: boolean
+  category_source?: CategorySource
 }
 
 export interface AkahuCategory {

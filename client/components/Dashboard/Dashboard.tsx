@@ -4,6 +4,7 @@ import { useState } from 'react'
 import ActualVTarget from './ActualVTarget.tsx'
 import TimeFilter from './TimeFilter.tsx'
 import SpendingBreakdown from './SpendingBreakdown.tsx'
+import LastSynced from './LastSynced.tsx'
 import LayoutWrapper from '../LayoutWrapper.tsx'
 
 import { Button } from '@/components/ui/button'
@@ -52,11 +53,14 @@ function Dashboard() {
     )
   if (!accountsData?.items?.length)
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>No accounts found</CardTitle>
-        </CardHeader>
-      </Card>
+      <>
+        <LastSynced />
+        <Card>
+          <CardHeader>
+            <CardTitle>No accounts found</CardTitle>
+          </CardHeader>
+        </Card>
+      </>
     )
 
   return (
@@ -64,6 +68,7 @@ function Dashboard() {
       <div className="flex justify-center items-center">
         <h1 className="text-3xl font-bold">Dashboard</h1>
       </div>
+      <LastSynced />
       <Card className="border-0 shadow-none bg-transparent">
         <CardContent>
           <div className="flex items-center justify-between mb-3">
