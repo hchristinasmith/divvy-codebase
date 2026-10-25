@@ -69,20 +69,22 @@ const MAX_TOOL_LENGTH = 64
 const BUSY_TIMEOUT_MS = 5000
 
 /**
- * The largest the audit file may be, as `page_count * page_size`: 50 MiB
- * (Hannah, 2026-10-25, recorded under prd-03 Ruling 4). A rejected call
- * stores at most about 1.4 KB, so this is tens of thousands of rows, and a
- * small share of the 1 GB volume the file may sit on.
+ * The largest the audit file may be, as `page_count * page_size`: Hannah's
+ * 50 MB (2026-10-25, recorded under prd-03 Ruling 4), taken as 50 MiB so it
+ * is a whole number of 4 KiB pages. A rejected call's row takes about 1.4 KB,
+ * or about one 4 KiB page when its parameters are not ASCII, so this is over
+ * ten thousand rows, and a small share of the 1 GB volume the file may sit on.
  */
 const DEFAULT_MAX_FILE_BYTES = 50 * 1024 * 1024
 
 /**
  * How long a record may take to settle, from the `record` call: 10 s. It is
- * twice `BUSY_TIMEOUT_MS`, so a write that waits the whole busy timeout for
- * another connection's lock still fails or lands on its own terms before the
- * deadline, and the deadline only cuts off a write that is stalled for some
- * other reason. It is well inside the MCP SDK's 60 s default request
- * timeout, so the client hears `audit_unavailable` rather than timing out.
+ * twice `BUSY_TIMEOUT_MS`, so a write that waits the whole busy timeout once
+ * for another connection's lock still fails or lands on its own terms before
+ * the deadline. A write can wait on a lock at each step that takes one, so
+ * ordinary contention past 10 s in total is cut off too; that fails closed.
+ * It is well inside the MCP SDK's 60 s default request timeout, so the
+ * client hears `audit_unavailable` rather than timing out.
  */
 const DEFAULT_DEADLINE_MS = 10_000
 
@@ -431,12 +433,10 @@ export const createAuditSink = (({ path, maxFileBytes, deadlineMs }: AuditSinkOp
         if (attempt.aborted) throw new Error('the audit write was abandoned at its deadline')
         return writeRow(path, row, ceiling, attempt)
       })
-      // Once the deadline wins, nothing awaits the write; this keeps its
-      // later rejection, which is expected, from going unhandled.
-      written.catch(() => undefined)
 
       // The queue moves on when this record settles or its deadline passes,
-      // whichever is first. The abandoned write may still be running then,
+      // whichever is first. The abandoned write may still be running then;
+      // its later rejection is handled, because the race subscribed to it,
       // and it cannot land out of order:
       //   - if the deadline passed before it reached COMMIT, it sees
       //     `aborted` and rolls back, so it never lands at all;

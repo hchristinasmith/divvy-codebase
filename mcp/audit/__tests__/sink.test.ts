@@ -793,6 +793,7 @@ describe('the bounds are checked when the sink is made', () => {
     ['NaN', Number.NaN],
     ['Infinity', Number.POSITIVE_INFINITY],
     ['2^53', Number.MAX_SAFE_INTEGER + 1],
+    ['null', null],
     ["the string '1024'", '1024'],
   ])('refuses maxFileBytes %s', (_label, maxFileBytes) => {
     const path = join(scratch(), 'audit.sqlite3')
@@ -809,6 +810,7 @@ describe('the bounds are checked when the sink is made', () => {
     ['1.5', 1.5],
     ['NaN', Number.NaN],
     ['2^31', 2 ** 31],
+    ['null', null],
     ["the string '10'", '10'],
   ])('refuses deadlineMs %s', (_label, deadlineMs) => {
     const path = join(scratch(), 'audit.sqlite3')
@@ -816,6 +818,13 @@ describe('the bounds are checked when the sink is made', () => {
       new TypeError('the audit deadline must be a positive whole number of milliseconds that setTimeout can wait'),
     )
     expect(existsSync(path)).toBe(false)
+  })
+
+  it('accepts the largest of each: maxFileBytes 2^53 - 1 and deadlineMs 2^31 - 1, and a record lands', async () => {
+    const path = join(scratch(), 'audit.sqlite3')
+    const sink = createAuditSink({ path, maxFileBytes: Number.MAX_SAFE_INTEGER, deadlineMs: 2 ** 31 - 1 })
+    await sink.record(validRecord({ tool: 'largest' }))
+    expect((await readRows(path)).map((row) => row.tool)).toEqual(['largest'])
   })
 })
 
@@ -921,12 +930,70 @@ describe('the audit file has a size ceiling and fails closed at it', () => {
   })
 })
 
+/**
+ * Watches the sink's own connections, told apart from the test's by the
+ * `PRAGMA synchronous = FULL` that only the sink issues, so a test can wait
+ * until an abandoned write has closed its connection instead of sleeping
+ * and hoping it got there. With `hold`, the first statement of that text
+ * reaches SQLite only once `release()` is called.
+ */
+function watchSinkConnections(hold?: string) {
+  const proto = sqlite3.Database.prototype
+  const realExec = proto.exec
+  const realClose = proto.close
+  const open = new Set<sqlite3.Database>()
+  let opened = 0
+  let held = false
+  let release: () => void = () => undefined
+  const released = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const execSpy = vi.spyOn(proto, 'exec').mockImplementation(function (
+    this: sqlite3.Database,
+    sql: string,
+    callback?: (this: sqlite3.Statement, err: Error | null) => void,
+  ) {
+    if (sql === 'PRAGMA synchronous = FULL') {
+      open.add(this)
+      opened++
+    }
+    if (sql === hold && !held) {
+      held = true
+      void released.then(() => realExec.call(this, sql, callback))
+      return this
+    }
+    return realExec.call(this, sql, callback)
+  })
+  const closeSpy = vi.spyOn(proto, 'close').mockImplementation(function (
+    this: sqlite3.Database,
+    callback?: (err: Error | null) => void,
+  ) {
+    realClose.call(this, (error: Error | null) => {
+      open.delete(this)
+      callback?.(error)
+    })
+  })
+  return {
+    held: () => held,
+    release: () => release(),
+    /** Resolves once at least `count` sink connections have opened and every one has closed. */
+    allClosed: (count: number) =>
+      vi.waitFor(
+        () => {
+          expect(opened).toBeGreaterThanOrEqual(count)
+          expect(open.size).toBe(0)
+        },
+        { timeout: 3000, interval: 10 },
+      ),
+    restore: () => {
+      release()
+      execSpy.mockRestore()
+      closeSpy.mockRestore()
+    },
+  }
+}
+
 describe('a record has a deadline', () => {
-  // Another connection holds the write lock for HOLD_MS. The sink's busy
-  // timeout would outwait it, so only the deadline can end the wait early.
-  const DEADLINE_MS = 300
-  const SLACK_MS = 200
-  const HOLD_MS = 800
   const DEADLINE_MESSAGE = 'the audit record did not settle within its deadline'
 
   let stderr: ReturnType<typeof quietStderr>
@@ -937,42 +1004,58 @@ describe('a record has a deadline', () => {
     stderr.mockRestore()
   })
 
+  // Another connection holds the write lock until both records have
+  // settled, or for HOLD_MS if they never do. The sink's busy timeout would
+  // outwait the lock, so only the deadline can end the wait early.
+  //
+  // The second record is called OFFSET_MS after the first, so its turn comes
+  // when the first is abandoned, with OFFSET_MS of its own deadline used. A
+  // deadline that ran from the turn instead would end it at about
+  // 2 * DEADLINE_MS - OFFSET_MS from its call, past DEADLINE_MS + SLACK_MS.
   it('a stalled write fails its call at the deadline, does not hold up the next, and never lands', async () => {
+    const DEADLINE_MS = 600
+    const SLACK_MS = 400
+    const OFFSET_MS = 100
+    const HOLD_MS = 2500
     const path = join(scratch(), 'audit.sqlite3')
     const sink = createAuditSink({ path, deadlineMs: DEADLINE_MS })
     await sink.record(validRecord({ tool: 'first' }))
 
+    const watch = watchSinkConnections()
     const holder = await createDatabase(path)
-    await exec(holder, 'BEGIN IMMEDIATE')
-    const started = Date.now()
-    const stalled = sink.record(validRecord({ tool: 'stalled' })).then(
-      () => ({ status: 'fulfilled', ms: Date.now() - started, message: '' }),
-      (error: unknown) => ({ status: 'rejected', ms: Date.now() - started, message: (error as Error).message }),
-    )
-    // Called at the same moment, so queued behind the stalled record. Its
-    // deadline runs from its own call, not from when its turn came.
-    const behind = call(sink, 'fake_ok', { scope: 'personal' }).then((result) => ({ result, ms: Date.now() - started }))
+    try {
+      await exec(holder, 'BEGIN IMMEDIATE')
+      const aStarted = Date.now()
+      const stalled = sink.record(validRecord({ tool: 'stalled' })).then(
+        () => ({ status: 'fulfilled', ms: Date.now() - aStarted, message: '' }),
+        (error: unknown) => ({ status: 'rejected', ms: Date.now() - aStarted, message: (error as Error).message }),
+      )
+      await sleep(OFFSET_MS)
+      const bStarted = Date.now()
+      const behind = call(sink, 'fake_ok', { scope: 'personal' }).then((result) => ({ result, ms: Date.now() - bStarted }))
 
-    await sleep(HOLD_MS)
-    await exec(holder, 'COMMIT')
-    await close(holder)
+      await Promise.race([Promise.all([stalled, behind]), sleep(HOLD_MS)])
+      await exec(holder, 'COMMIT')
+      await close(holder)
 
-    const a = await stalled
-    expect(a.status).toBe('rejected')
-    expect(a.message).toBe(DEADLINE_MESSAGE)
-    expect(a.ms).toBeLessThan(DEADLINE_MS + SLACK_MS)
-    const b = await behind
-    expect(errorCode(b.result)).toBe('audit_unavailable')
-    expect(JSON.stringify(b.result)).not.toContain(SENTINEL)
-    expect(b.ms).toBeLessThan(DEADLINE_MS + SLACK_MS)
+      const a = await stalled
+      expect(a.status).toBe('rejected')
+      expect(a.message).toBe(DEADLINE_MESSAGE)
+      expect(a.ms).toBeLessThan(DEADLINE_MS + SLACK_MS)
+      const b = await behind
+      expect(errorCode(b.result)).toBe('audit_unavailable')
+      expect(JSON.stringify(b.result)).not.toContain(SENTINEL)
+      expect(b.ms).toBeLessThan(DEADLINE_MS + SLACK_MS)
 
-    // The lock is free: the abandoned writes now reach their commit, see
-    // the deadline passed, and roll back. The queue was never wedged, so a
-    // fresh record lands at once and in order.
+      // The lock is free: each abandoned write reaches its commit, sees its
+      // deadline passed, rolls back and closes. Both had their turn, so both
+      // opened; wait until both have closed, then a fresh record lands in
+      // order.
+      await watch.allClosed(2)
+    } finally {
+      watch.restore()
+    }
     await sink.record(validRecord({ tool: 'fresh' }))
-    // Long enough for SQLite's busy handler, which retries at most every
-    // 100 ms, to hand the lock to each abandoned write in turn.
-    await sleep(500)
     const rows = await readRows(path)
     expect(rows.map((row) => row.tool)).toEqual(['first', 'fresh'])
     expect(Object.keys(rows[1]).sort()).toEqual(COLUMNS)
@@ -984,76 +1067,54 @@ describe('a record has a deadline', () => {
   // the record behind it can land, which it does only if the queue moved on
   // at the deadline rather than waiting for the hung write to come back.
   it('a hung write does not wedge the queue: the record behind it lands, the hung one never does', async () => {
+    const DEADLINE_MS = 1000
+    const OFFSET_MS = 500
+    const HOLD_MS = 2500
     const path = join(scratch(), 'audit.sqlite3')
     const sink = createAuditSink({ path, deadlineMs: DEADLINE_MS })
     await sink.record(validRecord({ tool: 'first' }))
 
-    const realExec = sqlite3.Database.prototype.exec
-    let release: () => void = () => undefined
-    const released = new Promise<void>((resolve) => {
-      release = resolve
-    })
-    let hung = false
-    const spy = vi.spyOn(sqlite3.Database.prototype, 'exec').mockImplementation(function (
-      this: sqlite3.Database,
-      sql: string,
-      callback?: (this: sqlite3.Statement, err: Error | null) => void,
-    ) {
-      if (sql === 'BEGIN IMMEDIATE' && !hung) {
-        hung = true
-        void released.then(() => realExec.call(this, sql, callback))
-        return this
-      }
-      return realExec.call(this, sql, callback)
-    })
+    const watch = watchSinkConnections('BEGIN IMMEDIATE')
     try {
-      // The hung write comes back at HOLD_MS whatever happens, so a sink
-      // that waits for it is slow rather than stuck.
-      let isReleased = false
-      const releasing = sleep(HOLD_MS).then(() => {
-        isReleased = true
-        release()
-      })
       const stalled = sink.record(validRecord({ tool: 'hung' })).catch((error: unknown) => (error as Error).message)
-      // Called halfway through the hung record's deadline, so it is queued
-      // behind it with time to spare once its turn comes.
-      await sleep(DEADLINE_MS / 2)
-      const started = Date.now()
-      const behind = call(sink, 'fake_ok', { scope: 'personal' }).then((result) => ({
-        result,
-        ms: Date.now() - started,
-        whileHung: !isReleased,
-      }))
+      // Called partway through the hung record's deadline, so it is queued
+      // behind it and has the rest of its own deadline once its turn comes.
+      await sleep(OFFSET_MS)
+      let isReleased = false
+      const behind = call(sink, 'fake_ok', { scope: 'personal' }).then((result) => ({ result, whileHung: !isReleased }))
+      // The hung write comes back once the record behind it settles, or at
+      // HOLD_MS, so a sink that waits for it is slow rather than stuck.
+      await Promise.race([behind, sleep(HOLD_MS)])
+      isReleased = true
+      watch.release()
 
       const b = await behind
       expect(b.result.isError).toBeUndefined()
       expect(JSON.stringify(b.result)).toContain(SENTINEL)
       expect(b.whileHung).toBe(true)
-      expect(b.ms).toBeLessThan(DEADLINE_MS + SLACK_MS)
       expect(await stalled).toBe(DEADLINE_MESSAGE)
-      expect(hung).toBe(true)
+      expect(watch.held()).toBe(true)
 
-      // Once released, the hung write reaches its commit after the record
-      // behind it has landed, sees its deadline passed, and rolls back.
-      await releasing
-      await sleep(200)
-      await sink.record(validRecord({ tool: 'fresh' }))
+      // Released after the record behind it landed, the hung write reaches
+      // its commit, sees its deadline passed, rolls back and closes.
+      await watch.allClosed(2)
     } finally {
-      release()
-      spy.mockRestore()
+      watch.restore()
     }
+    await sink.record(validRecord({ tool: 'fresh' }))
     expect((await readRows(path)).map((row) => row.tool)).toEqual(['first', 'fake_ok', 'fresh'])
   })
 
   it('defaults to 10 s: a stalled record is pending just before and rejected at it', async () => {
     const path = join(scratch(), 'audit.sqlite3')
     await createAuditSink({ path }).record(validRecord({ tool: 'first' }))
+    const watch = watchSinkConnections()
     const holder = await createDatabase(path)
-    await exec(holder, 'BEGIN IMMEDIATE')
-    // Only the sink's timer is faked. SQLite's busy wait runs in real time,
-    // and in real time the advances below take milliseconds.
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     try {
+      await exec(holder, 'BEGIN IMMEDIATE')
+      // Only the sink's timer is faked. SQLite's busy wait runs in real time,
+      // and in real time the advances below take milliseconds.
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
       let outcome: string | undefined
       const pending = createAuditSink({ path })
         .record(validRecord({ tool: 'stalled' }))
@@ -1078,13 +1139,15 @@ describe('a record has a deadline', () => {
       await flush()
       expect(outcome).toBe(DEADLINE_MESSAGE)
       await pending
-    } finally {
       vi.useRealTimers()
       await exec(holder, 'COMMIT')
+      await watch.allClosed(1)
+    } finally {
+      vi.useRealTimers()
+      watch.restore()
       await close(holder)
     }
     await createAuditSink({ path }).record(validRecord({ tool: 'fresh' }))
-    await sleep(300)
     expect((await readRows(path)).map((row) => row.tool)).toEqual(['first', 'fresh'])
   })
 
