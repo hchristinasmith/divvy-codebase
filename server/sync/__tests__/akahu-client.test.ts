@@ -1317,6 +1317,99 @@ describe('account full fields (#155, prd-01 Ruling 4)', () => {
   })
 })
 
+describe('logo and website URLs (#193)', () => {
+  /**
+   * A bare account whose connection carries `connection` raw JSON members.
+   * The literal follows `accountWith` in the account full fields describe.
+   */
+  function accountWith(connection: string): string {
+    return `{"_id":"acc_fixture_url_inline","name":"Fixture Url","type":"SAVINGS","status":"ACTIVE","connection":{"_id":"conn_fixture_url","name":"Example Bank"${connection}},"balance":{"current":10}}`
+  }
+
+  /** One URL-bearing field: how to build its body, and how to read it back. */
+  interface UrlField {
+    /** The Akahu response body carrying `url` in this field. */
+    body: (url: string) => string
+    /** The field as the client's parse returns it. */
+    read: (client: AkahuClient) => Promise<string | null>
+  }
+
+  // Each row is [label, field]: one URL-bearing field, named once, here.
+  const FIELDS: [string, UrlField][] = [
+    [
+      'account connection.logo',
+      {
+        body: (url) => page([accountWith(`,"logo":${JSON.stringify(url)}`)]),
+        read: async (client) =>
+          (await client.listAccounts())[0].connection_logo,
+      },
+    ],
+    [
+      'merchant.logo',
+      {
+        body: (url) =>
+          page([
+            settledItem(
+              'trans_fixture_url_logo',
+              '-1.00',
+              `,"merchant":{"logo":${JSON.stringify(url)}}`,
+            ),
+          ]),
+        read: async (client) =>
+          (await client.listTransactions(WINDOW))[0].merchant?.logo ?? null,
+      },
+    ],
+    [
+      'merchant.website',
+      {
+        body: (url) =>
+          page([
+            settledItem(
+              'trans_fixture_url_site',
+              '-1.00',
+              `,"merchant":{"website":${JSON.stringify(url)}}`,
+            ),
+          ]),
+        read: async (client) =>
+          (await client.listTransactions(WINDOW))[0].merchant?.website ?? null,
+      },
+    ],
+    [
+      'meta.logo',
+      {
+        body: (url) =>
+          page([
+            settledItem(
+              'trans_fixture_url_meta',
+              '-1.00',
+              `,"meta":{"logo":${JSON.stringify(url)}}`,
+            ),
+          ]),
+        read: async (client) =>
+          (await client.listTransactions(WINDOW))[0].meta?.logo ?? null,
+      },
+    ],
+  ]
+
+  /** Sends one response carrying `url` in `field` and returns what comes back. */
+  async function readBack(
+    field: UrlField,
+    url: string,
+  ): Promise<string | null> {
+    const { client } = clientWith([field.body(url)])
+    return field.read(client)
+  }
+
+  it.each(FIELDS)(
+    'keeps a javascript: %s verbatim (behaviour before #193)',
+    async (_label, field) => {
+      expect(await readBack(field, 'javascript:alert(1)')).toBe(
+        'javascript:alert(1)',
+      )
+    },
+  )
+})
+
 describe('pagination (prd-01 Ruling 2)', () => {
   it('follows cursor.next to a second page and returns both, in order', async () => {
     const { client, calls } = clientWith([
