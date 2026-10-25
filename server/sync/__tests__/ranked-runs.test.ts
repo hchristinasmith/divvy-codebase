@@ -94,7 +94,11 @@ describe('static guard on the sync_runs ranking (#206)', () => {
     '..',
     '..',
   )
-  const FILTER_TEXT = ', started_at) = started_at'
+  // Matched with every space removed, so a copy reformatted by hand or by a
+  // formatter is still found: the filter, and the ordering it goes with.
+  const RANKING_TEXT = ['started_at)=started_at', 'julianday(started_at)']
+  const squashed = (name: string): string =>
+    readFileSync(Path.join(serverDir, name), 'utf8').replace(/\s+/g, '')
 
   /** Every non-test `.ts` file under `dir`, relative to server/. */
   function sourceFiles(dir: string): string[] {
@@ -111,7 +115,7 @@ describe('static guard on the sync_runs ranking (#206)', () => {
       .sort()
   }
 
-  it('writes the started_at filter once, in ranked-runs.ts, across server/sync and server/routes', () => {
+  it('writes the started_at filter and ordering once, in ranked-runs.ts, across server/sync and server/routes', () => {
     const files = [...sourceFiles('sync'), ...sourceFiles('routes')]
     expect(files).toEqual(
       expect.arrayContaining([
@@ -120,15 +124,13 @@ describe('static guard on the sync_runs ranking (#206)', () => {
       ]),
     )
 
-    const holders = files.filter((name) =>
-      readFileSync(Path.join(serverDir, name), 'utf8').includes(FILTER_TEXT),
-    )
-    expect(holders).toEqual([Path.join('sync', 'ranked-runs.ts')])
-
-    const helper = readFileSync(
-      Path.join(serverDir, 'sync', 'ranked-runs.ts'),
-      'utf8',
-    )
-    expect(helper.split(FILTER_TEXT).length - 1).toBe(1)
+    for (const text of RANKING_TEXT) {
+      const holders = files.filter((name) => squashed(name).includes(text))
+      expect(holders, text).toEqual([Path.join('sync', 'ranked-runs.ts')])
+      expect(
+        squashed(Path.join('sync', 'ranked-runs.ts')).split(text).length - 1,
+        text,
+      ).toBe(1)
+    }
   })
 })
