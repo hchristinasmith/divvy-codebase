@@ -869,9 +869,22 @@ describe('the advisor banner', () => {
     const banner = screen.getByTestId('advisor-banner')
     const link = within(banner).getByRole('link')
     expect(link.textContent).toBe('Help me cancel →')
-    expect(link.getAttribute('href')).toBe('claude://')
+    expect(link.getAttribute('href')).toBe('https://claude.ai/download')
     expect(banner.textContent).not.toContain('Example Stream')
     expect(banner.textContent).not.toContain('Sample Cloud')
     expect(banner.textContent).not.toMatch(/\$\d/)
+  })
+
+  it('opens Claude desktop in a new tab, sending no referrer', async () => {
+    setup(response({ questions: [merchant()] }))
+    await loaded()
+
+    const link = within(screen.getByTestId('advisor-banner')).getByRole('link')
+    expect(link.getAttribute('target')).toBe('_blank')
+    expect(link.getAttribute('rel')?.split(/\s+/).sort()).toEqual([
+      'noopener',
+      'noreferrer',
+    ])
+    expect(link.getAttribute('referrerpolicy')).toBe('no-referrer')
   })
 })
