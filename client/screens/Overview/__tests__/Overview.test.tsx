@@ -681,6 +681,8 @@ describe('inline category edit', () => {
     for (const row of rows) {
       const source = row.querySelector('[data-category-source]')
       expect(source?.textContent).toBe('Akahu')
+      // Only a user-set category gets the blush chip; these are not user rows.
+      expect(source?.className).not.toContain('bg-blush')
     }
   })
 
@@ -718,6 +720,9 @@ describe('inline category edit', () => {
     expect(picker.disabled).toBe(true)
     expect(activityRow('103').textContent).toContain('Pending')
     fireEvent.change(picker, { target: { value: NEW_CATEGORY } })
+    // The PATCH is sent asynchronously, so flush before asserting none was sent:
+    // this wait is what lets the test catch a missing pending guard.
+    await act(async () => {})
     expect(fx.calls.filter((c) => c.method === 'PATCH')).toHaveLength(0)
   })
 
