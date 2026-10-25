@@ -423,6 +423,77 @@ describe('accounts: scope and source are never written by sync', () => {
   })
 })
 
+// #145: an account's role and a bill's account link hang off the account's id,
+// so a re-sync that updates or drops the account must leave both in place.
+describe('accounts: a role and a bill link survive re-sync', () => {
+  it('keeps the account_settings role and the bills.account_id through an update and a dropped account', async () => {
+    await runSync({ client: fakeAkahu().client, db, now: fixed(NOW) })
+    const credit = await db('accounts')
+      .where({ akahu_id: 'acc_fixture0003credit' })
+      .first()
+    await db('account_settings').insert({
+      account_id: credit.id,
+      role: 'credit_card',
+      updated_at: NOW.toISOString(),
+    })
+    await db('bills').insert({
+      scope: 'personal',
+      name: 'Card payment',
+      amount_cents: 15000,
+      repeat: 'monthly',
+      first_due_date: '2026-11-05',
+      account_id: credit.id,
+      created_at: NOW.toISOString(),
+      updated_at: NOW.toISOString(),
+    })
+    const [role] = await db('account_settings').select()
+    expect(Object.keys(role).sort()).toEqual(
+      ['account_id', 'id', 'role', 'updated_at'].sort(),
+    )
+
+    async function expectRoleAndBillKept(): Promise<void> {
+      expect(await db('account_settings').select()).toEqual([role])
+      expect(await db('bills').select('account_id')).toEqual([
+        { account_id: credit.id },
+      ])
+      const same = await db('accounts').where({ id: credit.id }).first()
+      expect(same?.akahu_id).toBe('acc_fixture0003credit')
+    }
+
+    // Run 2: Akahu renames the card, so the account row is UPDATED in place.
+    const accounts = fixture('akahu-accounts.json')
+    const renamed = replaceOnce(
+      accounts,
+      '"Fixture Credit Card"',
+      '"Fixture Credit Card Renamed"',
+    )
+    await runSync({
+      client: fakeAkahu({ accounts: renamed }).client,
+      db,
+      now: fixed(at(15 * MINUTE_MS)),
+    })
+    expect((await db('accounts').where({ id: credit.id }).first()).name).toBe(
+      'Fixture Credit Card Renamed',
+    )
+    await expectRoleAndBillKept()
+
+    // Run 3: Akahu stops listing the card. Sync must not delete the account.
+    const listed = JSON.parse(accounts) as { items: { _id: string }[] }
+    const withoutCard = JSON.stringify({
+      ...listed,
+      items: listed.items.filter((a) => a._id !== 'acc_fixture0003credit'),
+    })
+    await runSync({
+      client: fakeAkahu({ accounts: withoutCard }).client,
+      db,
+      now: fixed(at(30 * MINUTE_MS)),
+    })
+    expect(await db('accounts').select('id')).toHaveLength(3)
+    await expectRoleAndBillKept()
+    expect(await db('account_settings').select()).toEqual([role])
+  })
+})
+
 describe('the settled window (Ruling 2, amended by Ruling 10)', () => {
   async function windowAfter(
     priorRuns: { started_at: string; outcome: 'success' | 'failed' }[],
