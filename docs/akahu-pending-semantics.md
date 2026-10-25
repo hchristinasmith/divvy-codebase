@@ -157,7 +157,7 @@ how the code consumes it on 2026-10-25:
 - `client/components/Dashboard/TxAnalysis.tsx:5` groups by `category.name`;
   `client/components/Dashboard/Txs.tsx:39` shows `category.name`.
 - `PATCH /api/v1/transactions/:id` accepts only names listed in
-  `data/cats.js` (`server/routes/transactions.ts:31`,
+  `data/cats.js` (`server/routes/transactions.ts:34`,
   `server/db/categories.ts:18`). A user's choice is therefore always a name.
 - `20261023130000_transaction_effective_category.js` backfilled `category`
   from `category_name`, and the seed writes `category` from
@@ -191,7 +191,10 @@ instead would make that delete fail and stop every later sync.
 
 So every category edit path must refuse a transaction whose `status` is not
 `settled`. Today's path, `setUserCategory` in `server/db/transactions.ts`,
-does not check `status` yet; it belongs to another lane.
+refuses: the `status = 'settled'` check is in its UPDATE's WHERE, so it
+returns `'pending'` without writing, and `PATCH /api/v1/transactions/:id`
+answers 409 `Transaction is still pending; its category can be changed once
+it settles`.
 
 ## 6. Account fields
 

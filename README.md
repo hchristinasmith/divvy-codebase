@@ -7,7 +7,7 @@ It is an early prototype. [docs/audit-2026-10-23.md](docs/audit-2026-10-23.md) r
 ## What works today
 
 - The Dashboard lists your Akahu accounts and shows a spending breakdown from live Akahu transactions. The Express server proxies Akahu, using one token from `.env`.
-- `GET /api/v1/transactions?description=` searches the local SQLite `transactions` table, and `PUT /api/v1/transactions/:id` updates a row's category.
+- `GET /api/v1/transactions?description=` searches the local SQLite `transactions` table, and `PATCH /api/v1/transactions/:id` sets your category on a row (a row still pending is refused with 409 until it settles).
 - The Transactions, Targets, Subscriptions, Wishlist, Challenges and Settings pages are shells or show mock data.
 
 ## Stack

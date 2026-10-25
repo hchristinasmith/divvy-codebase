@@ -14,6 +14,7 @@
 // No runtime code beyond the settings constants and no runtime imports, so
 // it is safe to import from the client, the server and `mcp/`.
 
+import type { BillRepeat } from '../models/planning.ts'
 import type { CategorySource } from '../models/transactions.ts'
 
 export type { CategorySource }
@@ -301,16 +302,20 @@ export interface UpdateBudgetRequest {
 // ---------------------------------------------------------------------------
 
 /**
- * One bill as due on one date. Whether bills repeat is #35's answer and the
- * migration's (#39); whatever it is, the bills route resolves each bill to
- * the occurrence that is due, which is the shape here.
+ * One bill, resolved by the bills route to the occurrence that is due
+ * (`dueDate`), with its `repeat` and anchor `firstDueDate`.
  */
 export interface BillResponse {
   id: string
   scope: RowScope
   name: string
   amountCents: Cents
+  /** The occurrence that is due. */
   dueDate: IsoDate
+  /** How the bill repeats (#35 option C). */
+  repeat: BillRepeat
+  /** The anchor every occurrence is computed from. */
+  firstDueDate: IsoDate
   paid: boolean
   /** When "Mark paid" was pressed for this occurrence; null if unpaid. */
   paidAt: IsoTimestamp | null
@@ -331,7 +336,10 @@ export interface CreateBillRequest {
   scope: RowScope
   name: string
   amountCents: Cents
-  dueDate: IsoDate
+  /** The anchor: on create, the date given is the first due date. */
+  firstDueDate: IsoDate
+  /** How the bill repeats (#35 option C). */
+  repeat: BillRepeat
   accountId?: string | null
 }
 

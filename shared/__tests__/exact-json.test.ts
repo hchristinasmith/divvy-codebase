@@ -135,6 +135,10 @@ describe('parseExactJson', () => {
     ['XML', '<Response><Invoices/></Response>'],
     ['empty', ''],
     ['truncated', '{"success":true,"items":['],
+    [
+      'an unterminated string with a number after a backslash',
+      '["{\\1]',
+    ],
   ])('throws SyntaxError on a body that is not JSON (%s)', (_label, text) => {
     expect(() => parseExactJson(text)).toThrow(SyntaxError)
   })
@@ -148,24 +152,26 @@ describe('parseExactJson', () => {
   )
 
   it.each([
-    ['', ''],
-    [' ending in a lone backslash', '\\'],
-  ])(
-    'rejects an unterminated string of escaped quotes%s in one pass',
-    (_label, tail) => {
-      // A string pattern that must end at a quote rescans this body from
-      // every quote in it, and so does one whose escape needs a character
-      // after the backslash when the body ends in a lone one: each measured
-      // at about seven seconds, against well under a millisecond for the
-      // shipped pattern. The limit is far from both so a slow CI machine
-      // cannot flip it.
-      const body = `{"success":true,"items":["${'\\"'.repeat(100_000)}${tail}`
-
-      const started = performance.now()
-      expect(() => parseExactJson(body)).toThrow(SyntaxError)
-      expect(performance.now() - started).toBeLessThan(1_000)
-    },
-  )
+    ['of escaped quotes', `{"success":true,"items":["${'\\"'.repeat(100_000)}`],
+    [
+      'of escaped quotes ending in a lone backslash',
+      `{"success":true,"items":["${'\\"'.repeat(100_000)}\\`,
+    ],
+    ['of backslashes', `{"a":"${'\\'.repeat(44)}`],
+  ])('rejects an unterminated string %s in one pass', (_label, body) => {
+    // The token pattern must not backtrack through an unterminated string.
+    // An escape that stops at its backslash can split a run of backslashes
+    // into escapes in many ways, and a pattern that must end at a quote
+    // explores all of them before it fails (the backslashes row). An escape
+    // that needs a character after its backslash rescans the body from every
+    // quote in it when the body ends in a lone backslash (the lone-backslash
+    // row), and with both changes the escaped-quotes row is rescanned the
+    // same way. The shipped pattern finishes each in milliseconds. The limit is
+    // far from that so a slow CI machine cannot flip it.
+    const started = performance.now()
+    expect(() => parseExactJson(body)).toThrow(SyntaxError)
+    expect(performance.now() - started).toBeLessThan(1_000)
+  })
 })
 
 describe('parseExactJson against the oracle', () => {
