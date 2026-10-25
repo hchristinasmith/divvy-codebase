@@ -37,11 +37,18 @@ export type Scope = 'all' | 'personal' | 'strawb'
 export type RowScope = 'personal' | 'strawb'
 
 /**
- * What an account is for (prd-02 Ruling 2; the values #39 constrains
- * `account_settings.role` to). An account with no role row is `null` where
- * it appears, and is not liquid.
+ * What an account is for (prd-02 Rulings 2, 10 and 11; the values #39
+ * constrains `account_settings.role` to). An account with no role row is
+ * `null` where it appears, and is not liquid.
+ *
+ * - `current`: liquid.
+ * - `savings`: not liquid.
+ * - `tax_pot`: not liquid; nets the tax hold of its own scope only. Each
+ *   scope may have its own (Ruling 11).
+ * - `credit_card`: not liquid; what is owed on it is card debt, subtracted
+ *   from safe-to-spend (Ruling 10).
  */
-export type AccountRole = 'current' | 'savings' | 'tax_pot'
+export type AccountRole = 'current' | 'savings' | 'tax_pot' | 'credit_card'
 
 export type TransactionStatus = 'settled' | 'pending'
 
@@ -61,18 +68,22 @@ export interface ScopeQuery {
  *
  * - `tax_rate_bp`: tax rate in basis points (2500 = 25%), an integer so a
  *   rate like 10.5% needs no float. 25% is the handoff's default
- *   (`handoff.md:78`).
+ *   (`handoff.md:78`). It applies to Strawb's profit only (prd-02
+ *   Ruling 11).
  * - `profit_cents`: Strawb's year-to-date accrual profit (prd-02 open
  *   question, answered 2026-10-23). 0 until Xero is connected (prd-05
- *   Ruling 4), which makes the tax hold 0.
- * - `payday_day`: day of the month pay arrives, 1 to 31. A day past the end
- *   of a short month means that month's last day.
+ *   Ruling 4), which makes the Strawb tax hold 0.
+ * - `payday_weekday`: the weekday pay arrives, every week, 0 (Sunday) to
+ *   6 (Saturday) (prd-02 Ruling 9). Hannah's is Tuesday, 2.
+ * - `personal_tax_owed_cents`: what Hannah owes Inland Revenue in personal
+ *   income tax, typed in; no rate is applied (prd-02 Ruling 11).
  * - `currency`: the display symbol tweak from `handoff.md:78`.
  */
 export const SETTINGS_DEFAULTS = {
   tax_rate_bp: 2500,
   profit_cents: 0,
-  payday_day: 28,
+  payday_weekday: 2,
+  personal_tax_owed_cents: 0,
   currency: '$',
 } as const
 
@@ -82,7 +93,8 @@ export type SettingKey = keyof typeof SETTINGS_DEFAULTS
 export const SETTING_KEYS = {
   taxRateBasisPoints: 'tax_rate_bp',
   profitCents: 'profit_cents',
-  paydayDay: 'payday_day',
+  paydayWeekday: 'payday_weekday',
+  personalTaxOwedCents: 'personal_tax_owed_cents',
   currency: 'currency',
 } as const satisfies Record<keyof SettingsResponse, SettingKey>
 
@@ -92,7 +104,9 @@ export type CurrencySymbol = '$' | 'NZ$' | '£'
 export interface SettingsResponse {
   taxRateBasisPoints: number
   profitCents: Cents
-  paydayDay: number
+  /** 0 = Sunday … 6 = Saturday (prd-02 Ruling 9). */
+  paydayWeekday: number
+  personalTaxOwedCents: Cents
   currency: CurrencySymbol
 }
 
@@ -110,25 +124,48 @@ export type UpdateSettingsRequest = Partial<SettingsResponse>
  *
  * `safeCents` is signed (prd-02 Ruling 3): the hero shows `$0` and
  * "short by `shortByCents`" when it is negative. The clamp is the screen's.
+ *
+ * Each scope holds its own tax against its own pot (prd-02 Ruling 11), so
+ * the tax parts come per scope. A part for a scope not in view is 0: in
+ * Personal every `strawb…` field is 0, in Strawb every `personal…` field.
  */
 export interface SafeToSpendResult {
   scope: Scope
   today: IsoDate
+  /** The most recent payday weekday on or before `today` (prd-02 Ruling 9). */
   lastPayday: IsoDate
+  /** Seven days after `lastPayday`. */
   nextPayday: IsoDate
   liquidCents: Cents
   unpaidBillsCents: Cents
   remainingBudgetCents: Cents
-  /** `taxRate × profit`, before netting the tax pot. 0 in Personal. */
-  taxOwedCents: Cents
-  /** Balance of the in-scope `tax_pot` accounts. 0 in Personal. */
-  taxPotCents: Cents
-  /** `max(0, taxOwedCents − taxPotCents)`. 0 in Personal. */
+  /** `taxRate × profit`, rounded up, before netting the Strawb tax pot. */
+  strawbTaxOwedCents: Cents
+  /** Balance of the Strawb-scope `tax_pot` accounts. */
+  strawbTaxPotCents: Cents
+  /** `max(0, strawbTaxOwedCents − strawbTaxPotCents)`. */
+  strawbTaxHoldCents: Cents
+  /** The `personal_tax_owed_cents` setting, before netting the personal pot. */
+  personalTaxOwedCents: Cents
+  /** Balance of the personal-scope `tax_pot` accounts. */
+  personalTaxPotCents: Cents
+  /** `max(0, personalTaxOwedCents − personalTaxPotCents)`. */
+  personalTaxHoldCents: Cents
+  /**
+   * `strawbTaxHoldCents + personalTaxHoldCents`. One scope's surplus pot
+   * never reduces the other's hold.
+   */
   taxHoldCents: Cents
+  /**
+   * What is owed on the in-scope `credit_card` accounts: per card
+   * `max(0, −balance)`, summed (prd-02 Ruling 10). A card in credit adds 0
+   * and never offsets another card.
+   */
+  cardDebtCents: Cents
   safeCents: Cents
   /** `max(0, −safeCents)`. */
   shortByCents: Cents
-  /** Whole days from `today` to `nextPayday`; at least 1. */
+  /** Whole days from `today` to `nextPayday`: 1 to 7, and 7 on payday. */
   daysToPayday: number
   /** `safeCents ÷ daysToPayday`, rounded down. Negative when short. */
   perDayCents: Cents
@@ -236,6 +273,7 @@ export interface BudgetsResponse {
 export interface CreateBudgetRequest {
   scope: RowScope
   category: string
+  /** A weekly amount: spend is counted from the last payday (prd-02 Ruling 9). */
   limitCents: Cents
   note?: string | null
 }

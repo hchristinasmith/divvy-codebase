@@ -3,21 +3,31 @@
 // `get_safe_to_spend` imports the same function. Nothing else re-derives
 // the number or any of its parts.
 //
-//   safe = liquid − unpaid bills − remaining budget − tax hold
+//   safe = liquid − unpaid bills − remaining budget − tax hold − card debt
 //
-// Each term is exactly as prd-02 Ruling 2 rules it:
+// Each term is exactly as prd-02 Ruling 2 rules it, as amended by Rulings 9,
+// 10 and 11:
 //
 // - liquid: balances of in-scope accounts whose role is `current`. Savings,
-//   the tax pot and accounts with no role are not liquid.
+//   tax pots, credit cards and accounts with no role are not liquid.
 // - unpaid bills: in-scope bills not paid and due on or before the next
 //   payday, overdue ones included.
 // - remaining budget: over in-scope budgets, `max(0, limit − spent)`; spent
 //   is effective-category outflow, settled and pending, since the last
-//   payday (`budgetSpentCents`).
-// - tax hold: `max(0, taxRate × profit − taxPot)` in All and Strawb, 0 in
-//   Personal. Profit is Strawb's year-to-date accrual profit; until Xero is
-//   connected it is the typed setting and is 0 by default, so the hold is 0
-//   (prd-02 open question, answered 2026-10-23; prd-05 Ruling 4).
+//   payday (`budgetSpentCents`). Payday is weekly (Ruling 9), so a limit is
+//   a weekly amount. Spend on a credit card counts like any other.
+// - tax hold: each scope holds its own, against its own pot (Ruling 11).
+//   - Strawb: `max(0, taxRate × profit − Strawb tax pots)`. Profit is
+//     Strawb's year-to-date accrual profit; until Xero is connected it is
+//     the typed setting and is 0 by default, so this hold is 0 (prd-02 open
+//     question, answered 2026-10-23; prd-05 Ruling 4).
+//   - Personal: `max(0, personalTaxOwed − personal tax pots)`, the owed
+//     amount typed in, with no rate.
+//   Strawb scope holds the Strawb hold, Personal the personal one, All the
+//   sum of both. A surplus pot on one side never reduces the other's hold.
+// - card debt: over in-scope `credit_card` accounts, `max(0, −balance)`
+//   (Ruling 10). Akahu reports what is owed on a card as a negative balance;
+//   a card in credit adds 0 and never offsets another card.
 //
 // The result is signed (prd-02 Ruling 3): a negative `safeCents` is
 // returned as it is, with `shortByCents`; showing `$0` is the screen's job.
@@ -84,12 +94,20 @@ export interface SafeToSpendTransaction {
 export interface SafeToSpendInput {
   scope: Scope
   today: IsoDate
-  /** Day of the month pay arrives, 1 to 31. */
-  paydayDay: number
-  /** Tax rate in basis points: 2500 is 25%. */
+  /** The weekday pay arrives, every week: 0 (Sunday) to 6 (Saturday). */
+  paydayWeekday: number
+  /** Tax rate in basis points: 2500 is 25%. Feeds the Strawb hold only. */
   taxRateBasisPoints: number
-  /** Strawb's year-to-date accrual profit; 0 until Xero is connected. */
+  /**
+   * Strawb's year-to-date accrual profit; 0 until Xero is connected. Feeds
+   * the Strawb hold only.
+   */
   profitCents: Cents
+  /**
+   * Personal income tax owed, as typed in. Feeds the personal hold only; no
+   * rate is applied (prd-02 Ruling 11).
+   */
+  personalTaxOwedCents: Cents
   /** Every account; the function applies the scope. */
   accounts: readonly SafeToSpendAccount[]
   bills: readonly SafeToSpendBill[]
@@ -139,11 +157,33 @@ function formatDate({ year, month, day }: CivilDate): IsoDate {
   return `${String(year).padStart(4, '0')}-${mm}-${dd}`
 }
 
-function assertPaydayDay(paydayDay: number): void {
-  if (!Number.isInteger(paydayDay) || paydayDay < 1 || paydayDay > 31) {
+function assertPaydayWeekday(paydayWeekday: number): void {
+  if (
+    !Number.isInteger(paydayWeekday) ||
+    paydayWeekday < 0 ||
+    paydayWeekday > 6
+  ) {
     throw new RangeError(
-      `paydayDay must be a whole day from 1 to 31, got ${paydayDay}`,
+      `paydayWeekday must be a whole weekday from 0 (Sunday) to 6 (Saturday), got ${paydayWeekday}`,
     )
+  }
+}
+
+// Date.UTC and the getUTC* readers are plain arithmetic on the given
+// fields: no clock, no timezone.
+
+/** The weekday of a date: 0 is Sunday, 6 is Saturday. */
+function weekday({ year, month, day }: CivilDate): number {
+  return new Date(Date.UTC(year, month - 1, day)).getUTCDay()
+}
+
+/** `date` moved by `days` calendar days (negative moves back). */
+function addDays({ year, month, day }: CivilDate, days: number): CivilDate {
+  const d = new Date(Date.UTC(year, month - 1, day + days))
+  return {
+    year: d.getUTCFullYear(),
+    month: d.getUTCMonth() + 1,
+    day: d.getUTCDate(),
   }
 }
 
@@ -156,34 +196,26 @@ export function daysInMonth(year: number, month: number): number {
   return [4, 6, 9, 11].includes(month) ? 30 : 31
 }
 
-/** Payday in a given month: `paydayDay`, or the month's last day if shorter. */
-function paydayIn(year: number, month: number, paydayDay: number): CivilDate {
-  return { year, month, day: Math.min(paydayDay, daysInMonth(year, month)) }
+function lastPaydayDate(today: IsoDate, paydayWeekday: number): CivilDate {
+  assertPaydayWeekday(paydayWeekday)
+  const t = parseDate(today, 'today')
+  return addDays(t, -((weekday(t) - paydayWeekday + 7) % 7))
 }
 
 /**
- * The most recent payday on or before `today`. On payday itself that is
- * today: pay has landed and the budgets have reset.
+ * The most recent payday weekday on or before `today` (prd-02 Ruling 9). On
+ * payday itself that is today: pay has landed and the budgets have reset.
  */
-export function lastPayday(today: IsoDate, paydayDay: number): IsoDate {
-  assertPaydayDay(paydayDay)
-  const t = parseDate(today, 'today')
-  const thisMonth = paydayIn(t.year, t.month, paydayDay)
-  if (t.day >= thisMonth.day) return formatDate(thisMonth)
-  const year = t.month === 1 ? t.year - 1 : t.year
-  const month = t.month === 1 ? 12 : t.month - 1
-  return formatDate(paydayIn(year, month, paydayDay))
+export function lastPayday(today: IsoDate, paydayWeekday: number): IsoDate {
+  return formatDate(lastPaydayDate(today, paydayWeekday))
 }
 
-/** The first payday strictly after `today`. */
-export function nextPayday(today: IsoDate, paydayDay: number): IsoDate {
-  assertPaydayDay(paydayDay)
-  const t = parseDate(today, 'today')
-  const thisMonth = paydayIn(t.year, t.month, paydayDay)
-  if (t.day < thisMonth.day) return formatDate(thisMonth)
-  const year = t.month === 12 ? t.year + 1 : t.year
-  const month = t.month === 12 ? 1 : t.month + 1
-  return formatDate(paydayIn(year, month, paydayDay))
+/**
+ * The first payday strictly after `today`: seven days after the last one
+ * (prd-02 Ruling 9), so a week from today on payday itself.
+ */
+export function nextPayday(today: IsoDate, paydayWeekday: number): IsoDate {
+  return formatDate(addDays(lastPaydayDate(today, paydayWeekday), 7))
 }
 
 /** Whole calendar days from `from` to `to` (negative if `to` is earlier). */
@@ -221,10 +253,10 @@ function floorDiv(a: number, b: number): number {
 }
 
 /**
- * `rate × profit`, rounded up to the cent. A loss owes nothing. This is
- * what the Tax card calls "owed so far" before the pot is netted.
+ * Strawb's `rate × profit`, rounded up to the cent. A loss owes nothing.
+ * This is what the Tax card calls "owed so far" before the pot is netted.
  */
-function taxOwedCents(taxRateBasisPoints: number, profitCents: Cents): Cents {
+function strawbTaxOwed(taxRateBasisPoints: number, profitCents: Cents): Cents {
   if (
     !Number.isInteger(taxRateBasisPoints) ||
     taxRateBasisPoints < 0 ||
@@ -301,14 +333,14 @@ function inScope(scope: Scope, rowScope: RowScope): boolean {
 }
 
 export function safeToSpend(input: SafeToSpendInput): SafeToSpendResult {
-  const { scope, today, paydayDay } = input
+  const { scope, today, paydayWeekday } = input
   if (scope !== 'all' && scope !== 'personal' && scope !== 'strawb') {
     throw new RangeError(
       `scope must be all, personal or strawb, got "${String(scope)}"`,
     )
   }
-  const last = lastPayday(today, paydayDay)
-  const next = nextPayday(today, paydayDay)
+  const last = lastPayday(today, paydayWeekday)
+  const next = nextPayday(today, paydayWeekday)
   const daysToPayday = daysBetween(today, next)
 
   // Every row is checked before the scope filter, so the same rows never
@@ -333,6 +365,9 @@ export function safeToSpend(input: SafeToSpendInput): SafeToSpendResult {
       throw new RangeError(`transaction on unknown account "${tx.accountId}"`)
     }
   }
+  // Both tax inputs are checked whatever the scope, for the same reason.
+  const strawbOwed = strawbTaxOwed(input.taxRateBasisPoints, input.profitCents)
+  assertNonNegativeCents(input.personalTaxOwedCents, 'personalTaxOwedCents')
 
   const accounts = input.accounts.filter((a) => inScope(scope, a.scope))
 
@@ -370,24 +405,45 @@ export function safeToSpend(input: SafeToSpendInput): SafeToSpendResult {
     })
   const remainingBudgetCents = sumCents(budgets.map((b) => b.remainingCents))
 
-  // Personal never holds tax, whatever the data says (Ruling 2).
-  const owed = taxOwedCents(input.taxRateBasisPoints, input.profitCents)
-  const taxOwed = scope === 'personal' ? 0 : owed
-  const taxPotCents =
-    scope === 'personal'
-      ? 0
-      : sumCents(
-          accounts
-            .filter((a) => a.role === 'tax_pot')
-            .map((a) => a.balanceCents),
-        )
-  const taxHoldCents = Math.max(0, taxOwed - taxPotCents)
+  // Each scope's hold nets only that scope's pots, and each is clamped at 0
+  // before they are added, so a surplus on one side never reduces the
+  // other's hold (Ruling 11). A scope not in view holds nothing.
+  const potsOf = (rowScope: RowScope): Cents =>
+    sumCents(
+      accounts
+        .filter((a) => a.role === 'tax_pot' && a.scope === rowScope)
+        .map((a) => a.balanceCents),
+    )
+  const strawbInView = inScope(scope, 'strawb')
+  const personalInView = inScope(scope, 'personal')
+
+  const strawbTaxOwedCents = strawbInView ? strawbOwed : 0
+  const strawbTaxPotCents = strawbInView ? potsOf('strawb') : 0
+  const strawbTaxHoldCents = Math.max(0, strawbTaxOwedCents - strawbTaxPotCents)
+
+  const personalTaxOwedCents = personalInView ? input.personalTaxOwedCents : 0
+  const personalTaxPotCents = personalInView ? potsOf('personal') : 0
+  const personalTaxHoldCents = Math.max(
+    0,
+    personalTaxOwedCents - personalTaxPotCents,
+  )
+
+  const taxHoldCents = sumCents([strawbTaxHoldCents, personalTaxHoldCents])
+
+  // Owed is a negative balance (Akahu's convention, Ruling 10). Each card is
+  // clamped before the sum, so credit on one never offsets debt on another.
+  const cardDebtCents = sumCents(
+    accounts
+      .filter((a) => a.role === 'credit_card')
+      .map((a) => Math.max(0, -a.balanceCents)),
+  )
 
   const safeCents = sumCents([
     liquidCents,
     -unpaidBillsCents,
     -remainingBudgetCents,
     -taxHoldCents,
+    -cardDebtCents,
   ])
 
   return {
@@ -398,9 +454,14 @@ export function safeToSpend(input: SafeToSpendInput): SafeToSpendResult {
     liquidCents,
     unpaidBillsCents,
     remainingBudgetCents,
-    taxOwedCents: taxOwed,
-    taxPotCents,
+    strawbTaxOwedCents,
+    strawbTaxPotCents,
+    strawbTaxHoldCents,
+    personalTaxOwedCents,
+    personalTaxPotCents,
+    personalTaxHoldCents,
     taxHoldCents,
+    cardDebtCents,
     safeCents,
     shortByCents: Math.max(0, -safeCents),
     daysToPayday,
