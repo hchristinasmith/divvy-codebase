@@ -224,6 +224,27 @@ describe('insertProposal', () => {
     )
     await expect(attempt).rejects.not.toThrow(SENTINEL)
   })
+
+  // #313 pins today's behaviour: no length cap on reason. The non-BMP run
+  // makes code points and UTF-16 units differ, so a cap counted in either
+  // unit would refuse these strings.
+  it.each([
+    ['2,001 code points', 2_001],
+    ['50,000 code points', 50_000],
+  ])('#313 pins today: accepts a reason of %s and stores it whole', async (_name, codePoints) => {
+    const txId = await transaction('a')
+    const reason = '\u{20000}'.repeat(codePoints - 1) + 'a'
+    expect(Array.from(reason)).toHaveLength(codePoints)
+    expect(reason.length).toBeGreaterThan(codePoints)
+
+    const result = await insertProposal(proposal(txId, { reason }), NOW)
+    expect(result).toStrictEqual({ inserted: true, id: expect.any(Number) })
+
+    const stored = await rows()
+    expect(stored).toHaveLength(1)
+    expect(Object.keys(stored[0]).sort()).toEqual([...PROPOSAL_COLUMNS].sort())
+    expect(stored[0].reason).toBe(reason)
+  })
 })
 
 describe('setStatus', () => {
