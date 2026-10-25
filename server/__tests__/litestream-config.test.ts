@@ -596,3 +596,73 @@ describe('scripts/restore.sh, run', { timeout: RUN_TIMEOUT_MS * 3 }, () => {
     }
   })
 })
+
+// ---- the runbook ----
+
+const restoreMd = read('docs/restore.md')
+const deployMd = read('docs/deploy.md')
+const SECRETS = [
+  'LITESTREAM_REPLICA_URL',
+  'LITESTREAM_ACCESS_KEY_ID',
+  'LITESTREAM_SECRET_ACCESS_KEY',
+]
+
+// Fenced sh blocks only, so prose that merely names a command cannot stand
+// in for the command the operator copies.
+const shBlocks = (markdown: string): string[] =>
+  [...markdown.matchAll(/^ *```sh\n([\s\S]*?)^ *```$/gm)].map((b) => b[1])
+
+describe('docs/restore.md', () => {
+  const blocks = shBlocks(restoreMd)
+
+  it('gives the operator one fly secrets set line with all three secrets', () => {
+    const lines = blocks.flatMap((block) => block.split('\n'))
+    const set = lines.filter((line) => line.includes('fly secrets set '))
+
+    expect(set).toHaveLength(1)
+    for (const name of SECRETS) expect(set[0]).toContain(` ${name}=`)
+    expect(set[0]).toContain('-a divvy-strawb')
+  })
+
+  it('gives the operator scripts/restore.sh to run', () => {
+    expect(blocks.some((block) => block.includes('scripts/restore.sh '))).toBe(true)
+  })
+
+  // A restored database is in WAL mode with no -shm, which `sqlite3
+  // -readonly` refuses to open (found by the #24 drill).
+  it('never tells the operator to open a restored database with sqlite3 -readonly', () => {
+    expect(blocks.length).toBeGreaterThan(0)
+    for (const block of blocks) expect(block).not.toContain('sqlite3 -readonly')
+  })
+
+  // Each bold lead quoting `restore.sh: ERROR: ...` must begin a message the
+  // script really dies with; `…` in the doc stands for the part that varies.
+  it('quotes only messages restore.sh prints', () => {
+    const printed = [
+      ...restoreSh.matchAll(/(?:\bdie|restore\.sh: ERROR:) "?([^"\n]*)"?/g),
+    ].map((m) => m[1].replace(/\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/g, '…'))
+    const quoted = [...restoreMd.matchAll(/^- \*\*`restore\.sh: ERROR: ([^`]+)`/gm)]
+      .map((m) => m[1])
+
+    expect(quoted.length).toBeGreaterThan(0)
+    for (const text of quoted) {
+      const fixed = text.split('…').map((part) => part.trim()).filter(Boolean)
+      expect(
+        printed.some((message) => fixed.every((part) => message.includes(part))),
+      ).toBe(true)
+    }
+  })
+})
+
+describe('docs/deploy.md, the backup', () => {
+  it('links the restore runbook and names the three secrets', () => {
+    expect(deployMd).toContain('](restore.md)')
+    for (const name of SECRETS) expect(deployMd).toContain(`\`${name}\``)
+  })
+})
+
+describe.each(['docs/restore.md', 'docs/deploy.md'])('%s', (rel) => {
+  it.each(KEY_SHAPED)('holds nothing shaped like %s', (_label, shape) => {
+    expect(read(rel)).not.toMatch(shape)
+  })
+})
