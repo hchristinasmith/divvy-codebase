@@ -82,6 +82,21 @@ describe('getReceivableInvoices', () => {
     })
   })
 
+  it('keeps an amount a double cannot hold exact to the cent', async () => {
+    // Read as a float and printed back, 85541708717991.35 is
+    // 85541708717991.34: a body reader that let numbers become doubles would
+    // land this a cent out while every shape check still passed.
+    const page = fixture('invoices-accrec-page1.json').replace(
+      '"AmountDue": 1150.00',
+      '"AmountDue": 85541708717991.35',
+    )
+    const { client } = clientWith([page, fixture('invoices-empty.json')])
+
+    const [first] = await client.getReceivableInvoices()
+
+    expect(first.amountDueCents).toBe(8554170871799135)
+  })
+
   it('keeps an invoice with no number or due date, and an escaped contact name', async () => {
     const { client } = clientWith(receivablePages())
 

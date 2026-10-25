@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest'
 import { xeroAmountToCents } from '../money.ts'
 
 // Issue #34 done-when 1: the conversion table, and refusal of every shape
-// Xero does not send. The inputs are strings because `parseXeroJson` never
-// lets an amount become a number (see json.test.ts).
+// Xero does not send. The inputs are strings because `parseExactJson` never
+// lets an amount become a number (see shared/__tests__/exact-json.test.ts).
 
 describe('xeroAmountToCents', () => {
   it.each([

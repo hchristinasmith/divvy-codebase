@@ -1,21 +1,18 @@
-import { parseExactJson } from '../../../shared/exact-json.ts'
 import { badResponse } from './errors.ts'
 import { xeroAmountToCents } from './money.ts'
 
 // Reading Xero's JSON without letting an amount become a float.
 //
 // `JSON.parse` turns `1234567.89` into a binary double before any code can
-// see it. `parseXeroJson` is the shared exact-text reader
-// (shared/exact-json.ts), which quotes every number literal outside a string
-// before parsing and refuses whatever `JSON.parse` would refuse. The result
-// has no numbers in it at all: amounts arrive as their decimal text and go
-// through `xeroAmountToCents`; counts (pagination) go through `readCount`.
+// see it. Every Xero body is read by the shared exact-text reader
+// (`parseExactJson`, shared/exact-json.ts, called from http.ts), which quotes
+// every number literal outside a string before parsing and refuses whatever
+// `JSON.parse` would refuse. The result has no numbers in it at all: amounts
+// arrive as their decimal text and go through `xeroAmountToCents`; counts
+// (pagination) go through `readCount`.
 //
 // The readers below narrow `unknown` one field at a time and raise
 // `bad_response` naming the field, never echoing the value.
-
-/** JSON.parse with every number literal kept as its source text. */
-export { parseExactJson as parseXeroJson }
 
 export type JsonRecord = Record<string, unknown>
 
