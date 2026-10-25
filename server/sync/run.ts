@@ -79,18 +79,22 @@ type Claim =
  * The settled window to fetch (Ruling 2, amended by Ruling 10). With no
  * successful run yet, as far back as a personal app may read. After one,
  * from 30 days before the last success started, so an outage longer than
- * the overlap is still covered; never later than 30 days before now.
+ * the overlap is still covered; never later than 30 days before now. A
+ * start time that does not parse counts as no success, like the stale
+ * check, so one bad row cannot fail every later run.
  */
 function windowFor(
   lastSuccessStartedAt: string | null,
   now: Date,
 ): { start: Date; end: Date } {
-  if (lastSuccessStartedAt === null) {
+  const lastSuccess =
+    lastSuccessStartedAt === null ? NaN : Date.parse(lastSuccessStartedAt)
+  if (Number.isNaN(lastSuccess)) {
     return { start: new Date(now.getTime() - FIRST_RUN_LOOKBACK_MS), end: now }
   }
   const start = Math.min(
     now.getTime() - OVERLAP_MS,
-    Date.parse(lastSuccessStartedAt) - OVERLAP_MS,
+    lastSuccess - OVERLAP_MS,
   )
   return { start: new Date(start), end: now }
 }

@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import * as Path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { runSync, STALE_RUN_AFTER_MS } from '../run.ts'
 import { TRANSACTION_COLUMNS } from '../../db/__tests__/transactionColumns.ts'
@@ -31,6 +31,9 @@ import {
 
 beforeEach(async () => {
   await freshDb()
+})
+afterEach(() => {
+  vi.restoreAllMocks()
 })
 afterAll(closeDb)
 
@@ -480,6 +483,12 @@ describe('the settled window (Ruling 2, amended by Ruling 10)', () => {
     ).toEqual({ start: at(-75 * DAY_MS).toISOString(), end: NOW.toISOString() })
   })
 
+  it('reaches back 730 days when the last success has an unreadable start', async () => {
+    expect(
+      await windowAfter([{ started_at: 'not-a-timestamp', outcome: 'success' }]),
+    ).toEqual({ start: at(-730 * DAY_MS).toISOString(), end: NOW.toISOString() })
+  })
+
   it('never starts later than 30 days before now, even if the clock went back', async () => {
     expect(
       await windowAfter([
@@ -557,6 +566,36 @@ describe('one run at a time (Ruling 6)', () => {
     })
     expect(a.calls.length + b.calls.length).toBe(4)
     expect(await syncRuns()).toHaveLength(1)
+  })
+
+  // One connection serialises claims in this process; these stand in for a
+  // second process whose claim committed first, so the unique index
+  // `sync_runs_one_running` refused this one.
+  it('skips when another process claimed between the read and the insert', async () => {
+    vi.spyOn(db, 'transaction').mockImplementationOnce(async () => {
+      await db('sync_runs').insert({ started_at: NOW.toISOString(), outcome: 'running' })
+      throw new Error('SQLITE_CONSTRAINT: UNIQUE constraint failed: sync_runs.outcome')
+    })
+    const akahu = fakeAkahu()
+
+    const result = await runSync({ client: akahu.client, db, now: fixed(NOW) })
+
+    expect(result).toEqual({ outcome: 'skipped', reason: 'already_running', runningRunId: 1 })
+    expect(akahu.calls).toEqual([])
+    expect(await syncRuns()).toHaveLength(1)
+  })
+
+  it('rejects when the claim fails and no other run holds sync', async () => {
+    vi.spyOn(db, 'transaction').mockImplementationOnce(async () => {
+      throw new Error('SQLITE_IOERR: disk I/O error')
+    })
+    const akahu = fakeAkahu()
+
+    await expect(
+      runSync({ client: akahu.client, db, now: fixed(NOW) }),
+    ).rejects.toThrow('SQLITE_IOERR')
+    expect(akahu.calls).toEqual([])
+    expect(await syncRuns()).toEqual([])
   })
 })
 
