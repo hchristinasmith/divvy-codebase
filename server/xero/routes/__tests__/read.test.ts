@@ -65,15 +65,16 @@ const keys = (value: object) => Object.keys(value).sort()
 
 const ZERO = { nzd: { amountDueCents: 0, count: 0 }, otherCurrencies: [] }
 
+const XERO_ENV = [
+  'XERO_CLIENT_ID',
+  'XERO_CLIENT_SECRET',
+  'XERO_TOKEN_KEY',
+  'XERO_REDIRECT_URI',
+]
+const envValue = (name: string) => `invented-${name.toLowerCase()}`
+
 beforeEach(async () => {
-  for (const name of [
-    'XERO_CLIENT_ID',
-    'XERO_CLIENT_SECRET',
-    'XERO_TOKEN_KEY',
-    'XERO_REDIRECT_URI',
-  ]) {
-    vi.stubEnv(name, `invented-${name.toLowerCase()}`)
-  }
+  for (const name of XERO_ENV) vi.stubEnv(name, envValue(name))
   vi.stubGlobal(
     'fetch',
     vi.fn(() => Promise.reject(new Error('fetch must not be called'))),
@@ -524,10 +525,21 @@ describe('not connected is flagged, never zero', () => {
       payRuns: null,
     })
 
+    // Nothing was pulled this week, which is true, so the week is zeros.
     const status = await getStatus()
-    expect(status.body.state).toBe('stale')
-    expect(status.body.lastSyncedAt).toBeNull()
-    expect(status.body.lastRun).toBeNull()
+    expect(keys(status.body)).toEqual(STATUS_KEYS)
+    expect(status.body).toStrictEqual({
+      state: 'stale',
+      lastSyncedAt: null,
+      lastRun: null,
+      pulledThisWeek: {
+        since: iso(-7 * DAY),
+        receivables: ZERO,
+        payables: ZERO,
+        payRuns: { count: 0, totalCostCents: 0, totalPayCents: 0 },
+        profit: { count: 0, netProfitCents: null },
+      },
+    })
   })
 })
 
@@ -726,7 +738,16 @@ describe('no response carries a token, tenant, scope or ciphertext (Ruling 2, Do
     await payRun({ synced_at: at })
     await pl({ fetched_at: at })
 
-    const forbidden = [ACCESS, REFRESH, TENANT, SCOPES, 'sentinel.scope', EXPIRES, 'Buffer']
+    const forbidden = [
+      ACCESS,
+      REFRESH,
+      TENANT,
+      SCOPES,
+      'sentinel.scope',
+      EXPIRES,
+      'Buffer',
+      ...XERO_ENV.map(envValue),
+    ]
     for (const secret of [ACCESS, REFRESH, TENANT]) {
       const blob = enc(secret)
       forbidden.push(blob.toString('base64'), blob.toString('hex'))
