@@ -640,3 +640,41 @@ export interface SubscriptionMarkResponse {
   answer: SubscriptionAnswer | null
   cancelledOn: IsoDate | null
 }
+
+// ---------------------------------------------------------------------------
+// Spending
+// ---------------------------------------------------------------------------
+
+/** One category's outflow in the month, as a positive. */
+export interface SpendingCategoryLine {
+  /** The effective category: the user's over Akahu's (prd-01 Ruling 4). */
+  category: string
+  spentCents: Cents
+}
+
+/**
+ * GET /api/v1/spending/categories?scope=&month=&top=, exactly as
+ * `spendingByCategory` in `./spending.ts` returns it. The client displays
+ * it; it never adds anything up (prd-02 Ruling 1, note of 2026-10-25).
+ *
+ * `sum(categories) + otherCents + uncategorisedCents === totalCents`.
+ */
+export interface SpendingByCategoryResponse {
+  scope: Scope
+  /** `YYYY-MM`, an NZ calendar month; today's month when none was asked. */
+  month: string
+  /** Every counted outflow in the month, as a positive. */
+  totalCents: Cents
+  /**
+   * Largest first, ties by category in code-point order: the first `top`
+   * when `top` was sent, else every category.
+   */
+  categories: SpendingCategoryLine[]
+  /** The categories beyond `top`, summed; 0 when `top` was not sent. */
+  otherCents: Cents
+  /**
+   * Outflow with no effective category. Never inside `categories` or
+   * `otherCents`.
+   */
+  uncategorisedCents: Cents
+}
