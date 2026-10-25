@@ -69,6 +69,13 @@ describe('the desktop sidebar', () => {
     expect(current).toEqual(['Budgets'])
   })
 
+  it('rounds every nav row at the 12px nav radius (update 2)', () => {
+    renderWithProviders(<ShellSidebar />)
+    for (const link of links()) {
+      expect(link.classList.contains('rounded-nav')).toBe(true)
+    }
+  })
+
   it('shows the open-alert count beside Overview', () => {
     alerts.count = 3
     renderWithProviders(<ShellSidebar />)

@@ -53,6 +53,13 @@ describe('the phone tab bar', () => {
     }
   })
 
+  it('rounds every tab at the 12px nav radius (update 2)', () => {
+    renderWithProviders(<TabBar />)
+    for (const tab of tabLinks()) {
+      expect(tab.classList.contains('rounded-nav')).toBe(true)
+    }
+  })
+
   it('is fixed to the bottom and hidden from 720px up', () => {
     renderWithProviders(<TabBar />)
     const bar = screen.getByRole('navigation', { name: 'Tab bar' })
