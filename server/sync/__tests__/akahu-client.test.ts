@@ -314,6 +314,22 @@ describe('reading the body exactly', () => {
     expect(settled[0].description).toBe('EXAMPLE CAFE 12 HIGH ST')
   })
 
+  it('keeps digits after an odd number of escaped quotes inside the string', async () => {
+    // An even number of `\"` pairs up, so a tokenizer that ends a string at
+    // any quote still re-pairs them; an odd number leaves `12.50` outside its
+    // string, where it would be quoted and the body would stop parsing.
+    const item = settledItem('trans_fixture_escape').replace(
+      '"description":"Example inline"',
+      '"description":"x\\"y 12.50"',
+    )
+    expect(item).toContain('"description":"x\\"y 12.50"')
+    const { client } = clientWith([page([item])])
+
+    const [txn] = await client.listTransactions(WINDOW)
+
+    expect(txn.description).toBe('x"y 12.50')
+  })
+
   it.each([
     ['truncated', '{"success":true,"items":['],
     ['not JSON at all', '<html>gateway</html>'],
@@ -329,8 +345,11 @@ describe('reading the body exactly', () => {
   })
 
   it('rejects an unterminated string of escaped quotes in one pass', async () => {
-    // A scanner that restarts at every quote inside an unterminated string
-    // takes seconds on this 200 kB body; one pass takes about a millisecond.
+    // The tokenizer this replaced, whose escape was `\\.`, could not end a
+    // string on the backslash before a quote, so it rescanned the rest of
+    // this 200 kB body from every quote in it: measured at about eight
+    // seconds, against well under a millisecond now. The limit is far from
+    // both so a slow CI machine cannot flip it.
     const body = `{"success":true,"items":["${'\\"'.repeat(100_000)}`
     const { client } = clientWith([body])
 
@@ -578,6 +597,7 @@ describe('settled transactions', () => {
       '"description":"Example inline",',
       'transaction.description is missing or not text',
     ],
+    ['type', '"type":"EFTPOS",', 'transaction.type is missing or not text'],
   ])('rejects a settled item missing %s', async (_label, cut, message) => {
     const item = settledItem('trans_fixture_req')
     expect(item).toContain(cut)
@@ -589,14 +609,79 @@ describe('settled transactions', () => {
     })
   })
 
-  it('rejects a merchant that is not an object', async () => {
+  it.each([
+    [
+      '_id',
+      '"_id":"trans_fixture_req"',
+      '"_id":""',
+      'transaction._id is missing or not text',
+    ],
+    [
+      '_account',
+      '"_account":"acc_fixture_inline"',
+      '"_account":""',
+      'transaction._account is missing or not text',
+    ],
+    [
+      'date',
+      '"date":"2026-10-01T00:00:00.000Z"',
+      '"date":""',
+      'transaction.date is missing or not text',
+    ],
+  ])(
+    'rejects a settled item whose %s is empty text',
+    async (_label, field, empty, message) => {
+      const item = settledItem('trans_fixture_req')
+      expect(item).toContain(field)
+      const { client } = clientWith([page([item.replace(field, empty)])])
+
+      await expect(client.listTransactions(WINDOW)).rejects.toMatchObject({
+        code: 'bad_response',
+        message,
+      })
+    },
+  )
+
+  it('keeps an empty description, which identifies nothing', async () => {
+    const item = settledItem('trans_fixture_blank').replace(
+      '"description":"Example inline"',
+      '"description":""',
+    )
+    expect(item).toContain('"description":""')
+    const { client } = clientWith([page([item])])
+
+    const [txn] = await client.listTransactions(WINDOW)
+
+    expect(txn.description).toBe('')
+  })
+
+  it.each([
+    ['text', '"Example"'],
+    ['a list', '[]'],
+  ])('rejects a merchant that is %s, not an object', async (_label, merchant) => {
     const { client } = clientWith([
-      page([settledItem('trans_fixture_m', '-1.00', ',"merchant":"Example"')]),
+      page([
+        settledItem('trans_fixture_m', '-1.00', `,"merchant":${merchant}`),
+      ]),
     ])
 
     await expect(client.listTransactions(WINDOW)).rejects.toMatchObject({
       code: 'bad_response',
       message: 'transaction.merchant is not an object',
+    })
+  })
+
+  it.each([
+    ['true', 'true'],
+    ['an object', '{}'],
+  ])('rejects an optional text field that is %s', async (_label, hash) => {
+    const { client } = clientWith([
+      page([settledItem('trans_fixture_h', '-1.00', `,"hash":${hash}`)]),
+    ])
+
+    await expect(client.listTransactions(WINDOW)).rejects.toMatchObject({
+      code: 'bad_response',
+      message: 'transaction.hash is not text',
     })
   })
 })
@@ -1010,6 +1095,7 @@ describe('typed errors', () => {
     [429, 'rate_limited'],
     [500, 'server'],
     [503, 'server'],
+    [599, 'server'],
     [404, 'http'],
     [400, 'http'],
   ])('rejects a %d as %s with the status', async (status, code) => {
@@ -1027,6 +1113,24 @@ describe('typed errors', () => {
       name: 'AkahuError',
     })
     expect(error.message).toContain(String(status))
+  })
+
+  it('rejects a 600 as http, not server', async () => {
+    // `new Response` refuses a status outside 200..599, so the status is
+    // set on the instance; `ok` is already false from the 599 underneath.
+    const client = clientFetching(async () =>
+      Object.defineProperty(new Response('', { status: 599 }), 'status', {
+        value: 600,
+      }),
+    )
+
+    const error = await rejection(client.listAccounts())
+
+    expect({ code: error.code, status: error.status }).toEqual({
+      code: 'http',
+      status: 600,
+    })
+    expect(error.message).toBe('Akahu responded 600 on /v1/accounts')
   })
 
   it('rejects when fetch itself fails, as network with no cause', async () => {
@@ -1359,6 +1463,80 @@ describe('the fixtures are scrubbed (this repository is public)', () => {
           text,
         )?.[0] ?? null,
       ).toBeNull()
+    },
+  )
+
+  /**
+   * Every `name` and `description` text in a fixture, with the key of the
+   * object it sits in (`items` for an account or a transaction itself).
+   */
+  function namedTexts(file: string) {
+    const found: { key: string; under: string; text: string }[] = []
+    const walk = (value: unknown, under: string): void => {
+      if (Array.isArray(value)) value.forEach((inner) => walk(inner, under))
+      else if (typeof value === 'object' && value !== null) {
+        for (const [key, inner] of Object.entries(value)) {
+          if (
+            (key === 'name' || key === 'description') &&
+            typeof inner === 'string'
+          ) {
+            found.push({ key, under, text: inner })
+          }
+          walk(inner, key)
+        }
+      }
+    }
+    walk(JSON.parse(fixture(file)), 'root')
+    return found
+  }
+
+  /** Akahu's category vocabulary is generic and names nobody. */
+  const CATEGORY_NAMES = new Set([
+    'Bank fees',
+    'Cafes and restaurants',
+    'Fuel stations',
+    'Housing',
+    'Income',
+    'Lifestyle',
+    'Professional services',
+    'Rent',
+    'Salary',
+    'Supermarkets and grocery stores',
+    'Transfers',
+    'Transport',
+  ])
+  const isCategory = (under: string) =>
+    under === 'category' || under === 'personal_finance'
+
+  it('looks at descriptions, account, connection, merchant and category names', () => {
+    const roles = new Set(
+      files.flatMap((file) =>
+        namedTexts(file).map(({ key, under }) => `${under}.${key}`),
+      ),
+    )
+
+    expect([...roles].sort()).toEqual(
+      [
+        'items.description',
+        'items.name',
+        'connection.name',
+        'merchant.name',
+        'category.name',
+        'personal_finance.name',
+      ].sort(),
+    )
+  })
+
+  it.each(files)(
+    '%s marks every description and name as invented, or uses a generic category',
+    (file) => {
+      const offenders = namedTexts(file).filter(({ under, text }) =>
+        isCategory(under)
+          ? !CATEGORY_NAMES.has(text)
+          : !/\b(example|fixture)\b/i.test(text),
+      )
+
+      expect(offenders).toEqual([])
     },
   )
 })

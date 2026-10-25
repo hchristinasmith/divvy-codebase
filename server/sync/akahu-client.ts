@@ -74,9 +74,10 @@ function badResponse(message: string, status: number | null = null) {
 // does not end it), or a JSON number literal. A number is matched by JSON's
 // own grammar, so `01` splits into `0` and `1` and the quoted result fails to
 // parse, as `JSON.parse` would. A number followed by `:` is left bare, so an
-// invalid numeric key stays invalid instead of becoming a quoted one. A
-// string with no closing quote runs to the end of the text (still invalid),
-// so a malformed body is scanned once rather than once per quote in it.
+// invalid numeric key stays invalid instead of becoming a quoted one. An
+// escape may stop at its backslash (`\\[\s\S]?`), so a string with no
+// closing quote is consumed once (still invalid) rather than rescanned from
+// every quote in it.
 const JSON_TOKEN =
   /"(?:[^"\\]|\\[\s\S]?)*(?:"|$)|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?(?!\s*:)/g
 
