@@ -1,42 +1,55 @@
-# Divvy on Fly.io (D1): one always-on machine in Sydney, SQLite on a mounted
-# volume, no public IP. Nothing here is deployed yet; the first deploy, the
-# Tailscale sidecar and Litestream backups (D2) are M2.
+# Divvy on Fly.io (D1, D4): one always-on machine in Sydney, SQLite on a
+# mounted volume, no public IP, reachable only over Tailscale.
 #
-# `app` is a placeholder until the Fly app is created in M2.
-app = "divvy"
+# Tailscale and the app both run inside the machine. `scripts/start.sh` (the
+# image's CMD) joins the tailnet, publishes the app there with
+# `tailscale serve`, and only then starts it. It refuses to start without the
+# TS_AUTHKEY Fly secret. The operator steps are in docs/deploy.md.
+app = "divvy-strawb"
 primary_region = "syd"
+
+# SIGTERM is what node, npm and litestream all handle; the timeout gives
+# Litestream (#24) time for a final sync before the machine stops.
+kill_signal = "SIGTERM"
+kill_timeout = "30s"
 
 [build]
   dockerfile = "Dockerfile"
 
+# There is deliberately no HOST here: the server binds 127.0.0.1 by default
+# (#149), so only `tailscale serve`, in the same machine, can reach it.
 [env]
   NODE_ENV = "production"
   PORT = "3005"
   DATABASE_PATH = "/data/divvy.sqlite3"
 
 # SQLite has one writer, so the app runs as a single machine pinned to this
-# volume. Create it in the same region before the first deploy:
-#   fly volumes create divvy_data --region syd --size 1
+# volume. The volume also holds Tailscale's state (/data/tailscale), so a
+# restart keeps the same tailnet node.
 [mounts]
   source = "divvy_data"
   destination = "/data"
 
-# Deliberately no [http_service] and no [[services]] (D1, D4): the app must
-# never face the public internet. Without a service, Fly's proxy routes
-# nothing to the machine and no public IP is needed; if `fly ips list` ever
-# shows one, release it with `fly ips release`.
+# Deliberately no [http_service], no [[services]], no [checks] and no
+# [processes] (prd-01 Rulings 6, 7; D1, D4). Without a service, Fly's proxy
+# routes nothing to the machine and no public IP is needed; if `fly ips list`
+# ever shows one, release it with `fly ips release`. A [checks] block cannot
+# work either: it would probe from Fly's network, and the app answers only on
+# loopback.
 #
-# The app is reached only over Tailscale. Tailscale needs no inbound service:
-# the node dials out to the tailnet (UDP, falling back to DERP over HTTPS),
-# and the tailnet then reaches the server on port 3005 inside the machine.
-# Adding the Tailscale sidecar is M2. Until then the machine is reachable over
-# Fly's private network (`fly proxy 3005`), which every app in the same Fly org
-# shares; M2 decides whether to bind to localhost behind the sidecar.
+# Tailscale needs no inbound service: the node dials out to the tailnet (UDP,
+# falling back to DERP over HTTPS). Because the app is on loopback,
+# `fly proxy 3005` and the rest of Fly's private network cannot reach it; the
+# tailnet is the only way in.
 #
-# Deploying (M2): create the app with `fly apps create`, never `fly launch`,
-# which can write an [http_service] from the Dockerfile's EXPOSE. Deploy with
-# `fly deploy --ha=false --no-public-ips` so there is one machine and no
-# address, then check `fly ips list` is empty.
+# There is no `min_machines_running` key. It only means something inside
+# [http_service] or [[services]], which must not exist; at the top level Fly
+# drops it silently. One machine is held by `fly deploy --ha=false`, the single
+# volume, and the `fly machines list` check in docs/deploy.md.
+#
+# Create the app with `fly apps create`, never `fly launch`, which can write an
+# [http_service] from the Dockerfile's EXPOSE. Deploy with
+# `fly deploy --ha=false --no-public-ips` (docs/deploy.md).
 
 [[vm]]
   size = "shared-cpu-1x"
