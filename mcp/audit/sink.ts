@@ -31,6 +31,17 @@
 //     anything longer, or anything that does not serialise, is replaced by
 //     a small marker rather than cut, so `params_json` is always valid JSON.
 //
+// What the file and the wait are bounded by (#113):
+//   - the file has a size ceiling. A record that would take the file over it
+//     is rolled back and rejected, so the call answers with no data; nothing
+//     is pruned, wrapped or deleted to make room. A caller controls how many
+//     rows are written, and the file may share a volume with the main
+//     database and Litestream, so a looping client must not be able to fill
+//     the disk;
+//   - every record has a deadline, measured from the `record` call. A record
+//     that has not settled by then rejects, and the record behind it takes
+//     its turn, so a stalled filesystem fails calls instead of hanging them.
+//
 // The file keeps a rollback journal (`journal_mode=DELETE`), not WAL, so a
 // reader opening it read-only on a quiescent file needs no `-wal` or `-shm`
 // file and no write access to the directory.
@@ -56,6 +67,44 @@ const MAX_TOOL_LENGTH = 64
 
 /** How long a write waits for another connection's lock before failing. */
 const BUSY_TIMEOUT_MS = 5000
+
+/**
+ * The largest the audit file may be, as `page_count * page_size`: Hannah's
+ * 50 MB (2026-10-25, recorded under prd-03 Ruling 4), taken as 50 MiB so it
+ * is a whole number of 4 KiB pages. A rejected call's row takes about 1.4 KB,
+ * or about one 4 KiB page when its parameters are not ASCII, so this is over
+ * ten thousand rows, and a small share of the 1 GB volume the file may sit on.
+ */
+const DEFAULT_MAX_FILE_BYTES = 50 * 1024 * 1024
+
+/**
+ * How long a record may take to settle, from the `record` call: 10 s. It is
+ * twice `BUSY_TIMEOUT_MS`, so a write that waits the whole busy timeout once
+ * for another connection's lock still fails or lands on its own terms before
+ * the deadline. A write can wait on a lock at each step that takes one, so
+ * ordinary contention past 10 s in total is cut off too; that fails closed.
+ * It is well inside the MCP SDK's 60 s default request timeout, so the
+ * client hears `audit_unavailable` rather than timing out.
+ */
+const DEFAULT_DEADLINE_MS = 10_000
+
+/** The longest delay `setTimeout` honours; a longer one fires at once. */
+const MAX_TIMER_MS = 2 ** 31 - 1
+
+/** What `createAuditSink` accepts: the contract's `path`, and the bounds tests shrink. */
+interface AuditSinkOptions {
+  readonly path: string
+  readonly maxFileBytes?: number
+  readonly deadlineMs?: number
+}
+
+/**
+ * One record's write, as its deadline sees it. `aborted` is set when the
+ * deadline passes; the write reads it before it commits.
+ */
+interface WriteAttempt {
+  aborted: boolean
+}
 
 /**
  * The `application_id` every audit file carries in its header: the ASCII
@@ -247,8 +296,26 @@ async function assertAuditFile(db: sqlite3.Database): Promise<void> {
   if (!ownId || !ownEntries) throw new Error('the audit path holds a database that is not an audit file')
 }
 
-/** Writes one checked row: open, check, schema, insert, close. Rejects on any failure. */
-async function writeRow(path: string, row: AuditRow): Promise<void> {
+/**
+ * The file's size as this connection sees it, `page_count * page_size`.
+ * Inside a write transaction that includes the pages it has added but not
+ * yet committed, which is what lets the ceiling refuse a row before it lands.
+ */
+async function fileBytes(db: sqlite3.Database): Promise<number> {
+  const [count] = await all(db, 'PRAGMA page_count')
+  const [size] = await all(db, 'PRAGMA page_size')
+  const pageCount = count?.page_count
+  const pageSize = size?.page_size
+  if (typeof pageCount !== 'number' || typeof pageSize !== 'number') throw new Error('audit file size is unreadable')
+  return pageCount * pageSize
+}
+
+/**
+ * Writes one checked row: open, check, schema, insert, size check, commit,
+ * close. Rejects on any failure, and on a row that would take the file over
+ * `maxFileBytes`. Never commits once `attempt.aborted` is set.
+ */
+async function writeRow(path: string, row: AuditRow, maxFileBytes: number, attempt: WriteAttempt): Promise<void> {
   const db = await openFile(path)
   try {
     db.configure('busyTimeout', BUSY_TIMEOUT_MS)
@@ -268,6 +335,14 @@ async function writeRow(path: string, row: AuditRow): Promise<void> {
     await exec(db, `PRAGMA application_id = ${AUDIT_APPLICATION_ID}`)
     const changes = await insert(db, row)
     if (changes !== 1) throw new Error('audit insert did not write exactly one row')
+    // Measured after the insert, so a file already over the ceiling refuses
+    // every record, and a row that would cross it is never committed. The
+    // throw rolls the row back, and with it any page the insert added.
+    if ((await fileBytes(db)) > maxFileBytes) throw new Error('the audit file is at its size ceiling')
+    // The deadline may have passed while this write waited. Checked and
+    // COMMIT issued in one synchronous step, with no await between, so a
+    // write whose deadline has passed never starts to commit; it rolls back.
+    if (attempt.aborted) throw new Error('the audit write was abandoned at its deadline')
     await exec(db, 'COMMIT')
   } catch (error) {
     // Closing with a transaction open rolls it back. The first error is the
@@ -288,19 +363,46 @@ function assertFilePath(path: unknown): asserts path is string {
 }
 
 /**
+ * `value` if it is a whole number from 1 to `max`, `fallback` if it is
+ * absent. Anything else throws, at creation, before any I/O.
+ */
+function bound(value: unknown, fallback: number, max: number, message: string): number {
+  if (value === undefined) return fallback
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1 || value > max) throw new TypeError(message)
+  return value
+}
+
+/**
  * The audit sink for the file at `path`. Does no I/O: the file is created,
  * given its schema and written on each `record`. Throws only for a path that
  * is not absolute, which is also what refuses an empty path, `:memory:` and
- * a `file:` URI; every I/O failure is a rejected `record`, never a throw here.
+ * a `file:` URI, or for a bound that is not a positive whole number; every
+ * I/O failure is a rejected `record`, never a throw here.
+ *
+ * `maxFileBytes` and `deadlineMs` default to `DEFAULT_MAX_FILE_BYTES` and
+ * `DEFAULT_DEADLINE_MS`; only tests pass them.
  *
  * Records are written one at a time, in the order `record` was called. A
- * failed record does not stop the ones queued behind it.
+ * failed record does not stop the ones queued behind it, and nor does one
+ * that misses its deadline.
  *
  * It returns the sink itself, not a promise, which the contract's
  * `CreateAuditSink` allows; `satisfies` checks it against that type.
  */
-export const createAuditSink = (({ path }: { path: string }): AuditSink => {
+export const createAuditSink = (({ path, maxFileBytes, deadlineMs }: AuditSinkOptions): AuditSink => {
   assertFilePath(path)
+  const ceiling = bound(
+    maxFileBytes,
+    DEFAULT_MAX_FILE_BYTES,
+    Number.MAX_SAFE_INTEGER,
+    'the audit size ceiling must be a positive whole number of bytes',
+  )
+  const deadline = bound(
+    deadlineMs,
+    DEFAULT_DEADLINE_MS,
+    MAX_TIMER_MS,
+    'the audit deadline must be a positive whole number of milliseconds that setTimeout can wait',
+  )
   let tail: Promise<void> = Promise.resolve()
 
   return {
@@ -311,9 +413,42 @@ export const createAuditSink = (({ path }: { path: string }): AuditSink => {
       } catch (error) {
         return Promise.reject(error)
       }
-      const run = tail.then(() => writeRow(path, row))
-      tail = run.catch(() => undefined)
-      return run
+
+      // The deadline runs from this call, not from the record's turn, so
+      // every call has the same bound however many records queue ahead.
+      const attempt: WriteAttempt = { aborted: false }
+      let expire: (error: Error) => void = () => undefined
+      const expired = new Promise<never>((_resolve, reject) => {
+        expire = reject
+      })
+      const timer = setTimeout(() => {
+        attempt.aborted = true
+        expire(new Error('the audit record did not settle within its deadline'))
+      }, deadline)
+      // A pending deadline alone never keeps the process alive.
+      timer.unref()
+
+      // A record whose deadline passed while it queued never opens the file.
+      const written = tail.then(() => {
+        if (attempt.aborted) throw new Error('the audit write was abandoned at its deadline')
+        return writeRow(path, row, ceiling, attempt)
+      })
+
+      // The queue moves on when this record settles or its deadline passes,
+      // whichever is first. The abandoned write may still be running then;
+      // its later rejection is handled, because the race subscribed to it,
+      // and it cannot land out of order:
+      //   - if the deadline passed before it reached COMMIT, it sees
+      //     `aborted` and rolls back, so it never lands at all;
+      //   - if COMMIT was already issued, it holds the write lock from its
+      //     BEGIN IMMEDIATE until that COMMIT finishes, so the next record's
+      //     BEGIN IMMEDIATE waits behind it on the busy timeout, and its row
+      //     lands first. That call has already answered `audit_unavailable`,
+      //     so the file holds a row for a call that returned no data: the
+      //     log over-records, never under-records.
+      const settled = Promise.race([written, expired]).finally(() => clearTimeout(timer))
+      tail = settled.catch(() => undefined)
+      return settled
     },
   }
 }) satisfies CreateAuditSink
