@@ -16,7 +16,10 @@
 // reason carries merchant text. So does a refused write: knex puts the SQL,
 // bound values and all, in its error message, and `scrubbed` rethrows it as
 // SQLite's own words alone. A reason past its length cap is a refused input
-// too, as a title or body_md is in insights.ts.
+// too, as a title or body_md is in insights.ts. current_category is capped at
+// the column's 255 code points and kept raw, never trimmed or normalised,
+// because the accept route's stale check compares it with transactions.category
+// as stored.
 import {
   PROPOSAL_ORIGINS,
   parseProposedCategory,
@@ -43,6 +46,7 @@ export type InsertProposalResult =
 // Length cap, counted in code points, not UTF-16 units: a non-BMP character
 // is one code point and two units.
 const REASON_MAX_LENGTH = 2_000
+const CURRENT_CATEGORY_MAX_LENGTH = 255
 
 function atMostLength(value: string, field: string, max: number): void {
   if (Array.from(value).length > max) {
@@ -77,6 +81,12 @@ export async function insertProposal(
   atMostLength(proposal.reason, 'reason', REASON_MAX_LENGTH)
   if (!(PROPOSAL_ORIGINS as readonly unknown[]).includes(proposal.origin)) {
     throw new Error('origin is not a known proposal origin')
+  }
+  if (proposal.current_category !== null && typeof proposal.current_category !== 'string') {
+    throw new Error('current_category must be a string or null')
+  }
+  if (proposal.current_category !== null) {
+    atMostLength(proposal.current_category, 'current_category', CURRENT_CATEGORY_MAX_LENGTH)
   }
 
   const row: Omit<CategoryProposal, 'id'> = {

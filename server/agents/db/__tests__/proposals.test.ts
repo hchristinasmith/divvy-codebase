@@ -305,29 +305,101 @@ describe('insertProposal', () => {
     expect((await rows())[0].reason).toBe(reason)
   })
 
-  // #329 regression: pins old behaviour; the build replaces this. Today
-  // current_category has no cap and no type check, so any length and any type
-  // reaches the column.
-  it('accepts a current_category of 100,000 code points and stores it whole', async () => {
+  // current_category is the raw category the transaction had when the proposal
+  // was made. It is capped at the column's 255 code points and never trimmed,
+  // normalised or blank-checked: the accept route compares it with the raw
+  // transactions.category (#329).
+  const CURRENT_SENTINEL = 'Fixture Category 9042'
+  const CURRENT_CAP = /^current_category must be at most 255 characters$/
+
+  it('accepts a current_category of exactly 255 code points, and stores it whole', async () => {
     const txId = await transaction('a')
-    const current = 'a'.repeat(100_000)
-    expect(Array.from(current)).toHaveLength(100_000)
+    const current = 'a'.repeat(255)
+    expect(Array.from(current)).toHaveLength(255)
 
     const result = await insertProposal(proposal(txId, { current_category: current }), NOW)
     expect(result).toStrictEqual({ inserted: true, id: expect.any(Number) })
     expect((await rows())[0].current_category).toBe(current)
   })
 
-  // #329 regression: pins old behaviour; the build replaces this.
-  it('accepts a non-string current_category (the number 42) and stores it', async () => {
+  // Non-BMP characters are two UTF-16 units each: 255 of them are 510 units,
+  // and a `.length` cap would refuse this value.
+  it('counts current_category in code points, not UTF-16 units: 255 non-BMP code points (510 units) is accepted', async () => {
     const txId = await transaction('a')
+    const current = '\u{20000}'.repeat(255)
+    expect(Array.from(current)).toHaveLength(255)
+    expect(current.length).toBe(510)
 
-    const result = await insertProposal(
-      proposal(txId, { current_category: 42 as unknown as string }),
-      NOW,
-    )
+    const result = await insertProposal(proposal(txId, { current_category: current }), NOW)
     expect(result).toStrictEqual({ inserted: true, id: expect.any(Number) })
-    expect((await rows())[0].current_category).toBe('42') // the TEXT column's affinity turns the number into text
+    expect((await rows())[0].current_category).toBe(current)
+  })
+
+  it('refuses a current_category of 256 code points, naming the field and the cap, and writes nothing', async () => {
+    const txId = await transaction('a')
+    const attempt = insertProposal(proposal(txId, { current_category: 'a'.repeat(256) }), NOW)
+    await expect(attempt).rejects.toThrow(CURRENT_CAP)
+    expect(await rows()).toEqual([])
+  })
+
+  // The refusal never echoes the value, so the message must not hold the sentinel.
+  it('refuses a 256-code-point current_category holding a sentinel, with a message that does not contain it', async () => {
+    const txId = await transaction('a')
+    const current = CURRENT_SENTINEL + 'a'.repeat(256 - Array.from(CURRENT_SENTINEL).length)
+    expect(Array.from(current)).toHaveLength(256)
+
+    const attempt = insertProposal(proposal(txId, { current_category: current }), NOW)
+    await expect(attempt).rejects.toThrow(CURRENT_CAP)
+    await expect(attempt).rejects.not.toThrow(CURRENT_SENTINEL)
+    expect(await rows()).toEqual([])
+  })
+
+  it('refuses a current_category of 100,000 code points, and writes nothing', async () => {
+    const txId = await transaction('a')
+    const attempt = insertProposal(proposal(txId, { current_category: 'a'.repeat(100_000) }), NOW)
+    await expect(attempt).rejects.toThrow(CURRENT_CAP)
+    expect(await rows()).toEqual([])
+  })
+
+  const NOT_STRINGS: [label: string, value: unknown][] = [
+    ['the number 42', 42],
+    ['undefined', undefined],
+    ['an object', {}],
+    ['true', true],
+  ]
+  it.each(NOT_STRINGS)(
+    'refuses current_category as %s, naming the field and the type, and writes nothing',
+    async (_, value) => {
+      const txId = await transaction('a')
+      const attempt = insertProposal(
+        proposal(txId, { current_category: value as unknown as string }),
+        NOW,
+      )
+      await expect(attempt).rejects.toThrow(/^current_category must be a string or null$/)
+      expect(await rows()).toEqual([])
+    },
+  )
+
+  it('stores a null current_category as null', async () => {
+    const txId = await transaction('a')
+    await inserted(proposal(txId, { current_category: null }))
+    expect((await rows())[0].current_category).toBeNull()
+  })
+
+  // Raw: leading and trailing spaces and an invisible character are kept as given.
+  it('stores a current_category with spaces and U+3164 byte-for-byte unchanged', async () => {
+    const txId = await transaction('a')
+    const current = '  ㅤ Bakeries ㅤ  '
+    await inserted(proposal(txId, { current_category: current }))
+    expect((await rows())[0].current_category).toBe(current)
+  })
+
+  // The cap counts the value as given: the trailing space is the 256th code point.
+  it('refuses 255 code points followed by a space, counting the space: the cap is on the raw value', async () => {
+    const txId = await transaction('a')
+    const attempt = insertProposal(proposal(txId, { current_category: 'a'.repeat(255) + ' ' }), NOW)
+    await expect(attempt).rejects.toThrow(CURRENT_CAP)
+    expect(await rows()).toEqual([])
   })
 
   // #330 regression: pins old behaviour; the build replaces this. A reason made
