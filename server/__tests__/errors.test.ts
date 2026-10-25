@@ -886,6 +886,7 @@ const UNLOGGED_CODES: ReadonlyArray<readonly [string, unknown]> = [
   ['a String object', new String(SQLITE_CODE)],
   ['an empty string', ''],
   ['lowercase', 'sqlite_constraint'],
+  ['a lowercase first letter', 'sQLITE_ERROR'],
   ['mixed case', 'SQLITE_Constraint'],
   ['65 characters', 'A'.repeat(65)],
   ['a leading digit', '1SQLITE'],
@@ -1054,6 +1055,50 @@ describe('#354: a 500 carrying a constant-shaped err.code logs the name, the cod
       expectNoLogLeak(errorLog.mock.calls)
     },
   )
+
+  // The stack getter throws, so no frame can be read; the name and the code
+  // are still logged, and the message is never read from the stack (#354).
+  it('a coded Error whose stack getter throws logs `Error SQLITE_CONSTRAINT` and nothing else', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+    codeCase.make = (err) => {
+      Object.defineProperty(err, 'stack', {
+        get() {
+          throw new Error(FIELD_SECRET)
+        },
+      })
+      return Object.assign(err, { code: SQLITE_CODE })
+    }
+
+    const res = await api
+      .get('/api/v1/__test/coded-case')
+      .set('X-Divvy-Test', HEADER_SECRET)
+
+    expectFixed500(res)
+    expect(errorLog.mock.calls).toStrictEqual([
+      ['Unhandled /api error:', `Error ${SQLITE_CODE}`],
+    ])
+    expectNoLogLeak(errorLog.mock.calls)
+  })
+
+  // The stack's header is right and one frame follows, but a line after it is
+  // not a frame: the frames are dropped, the name and the code are not (#354).
+  it('a coded Error whose stack holds a line that is not a frame logs `Error SQLITE_CONSTRAINT` and nothing else', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+    codeCase.make = (err) => {
+      err.stack = `Error: ${err.message}\n    at f (x.js:1:1)\nnot a frame`
+      return Object.assign(err, { code: SQLITE_CODE })
+    }
+
+    const res = await api
+      .get('/api/v1/__test/coded-case')
+      .set('X-Divvy-Test', HEADER_SECRET)
+
+    expectFixed500(res)
+    expect(errorLog.mock.calls).toStrictEqual([
+      ['Unhandled /api error:', `Error ${SQLITE_CODE}`],
+    ])
+    expectNoLogLeak(errorLog.mock.calls)
+  })
 
   it('the coded Error after the response started logs `Error SQLITE_CONSTRAINT` and its frames on its own line', async () => {
     const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
