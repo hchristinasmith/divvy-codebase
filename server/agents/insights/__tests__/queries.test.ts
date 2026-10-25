@@ -1025,9 +1025,85 @@ describe('dates', () => {
     },
   )
 
-  // 0000-W01 is Monday 0000-01-03 to Sunday 0000-01-09: a real week, so it is returned.
-  it('weekRange(0000-W01) is returned, not refused', () => {
-    expect(weekRange('0000-W01')).toStrictEqual({ label: '0000-W01', start: '0000-01-03', end: '0000-01-09' })
+  // 0000-W01 (Monday 0000-01-03 to Sunday 0000-01-09) and 0000-W25 are real
+  // weeks, but their analysis window starts before 0000-01-01: W01's monthly
+  // months, W25's read padding (its months start at 0000-01 exactly). A date
+  // helper or monthsEnding throws its own text; weekRange refuses with the
+  // period text instead (#349).
+  it.each(['0000-W01', '0000-W25'])(
+    'weekRange(%s) refuses a week whose analysis window leaves the year 0000, with the period message',
+    (label) => {
+      let caught: unknown
+      try {
+        weekRange(label)
+      } catch (err) {
+        caught = err
+      }
+      expect(caught).toBeInstanceOf(RangeError)
+      expect((caught as Error).message).toBe('period must be an ISO week label (YYYY-Www)')
+    },
+  )
+
+  it('weekRange(0000-W26) is returned: its analysis window fits after 0000-01-01', () => {
+    expect(weekRange('0000-W26')).toStrictEqual({ label: '0000-W26', start: '0000-06-26', end: '0000-07-02' })
+  })
+
+  // The other end is unchanged: 9999-W51's padded read stops before
+  // 9999-12-30 (the exclusive SQL bound), inside the year 9999.
+  it('weekRange(9999-W51) is returned', () => {
+    expect(weekRange('9999-W51')).toStrictEqual({ label: '9999-W51', start: '9999-12-20', end: '9999-12-26' })
+  })
+
+  // The first week the window math accepts, found by sweeping the year 0000
+  // rather than written down, so a change to MONTHLY_MONTHS,
+  // UNUSUAL_LOOKBACK_WEEKS or TRANSFER_WINDOW_DAYS that moves it fails here.
+  // The year 0000 has no week 53, so its last accepted week is W52.
+  it('sweeping the year 0000, weekRange accepts exactly 0000-W26 to 0000-W52', () => {
+    const labels = Array.from({ length: 53 }, (_, i) => `0000-W${String(i + 1).padStart(2, '0')}`)
+    const accepted = labels.filter((label) => {
+      try {
+        weekRange(label)
+        return true
+      } catch {
+        return false
+      }
+    })
+    expect(accepted[0]).toBe('0000-W26')
+    expect(accepted.at(-1)).toBe('0000-W52')
+    expect(accepted).toStrictEqual(labels.slice(labels.indexOf('0000-W26'), labels.indexOf('0000-W52') + 1))
+  })
+
+  // weekOverWeek refuses a refused week with the period text, before its
+  // step back to the previous week can throw a date helper's text.
+  it('weekOverWeek([], 0000-W01) refuses with the period message', () => {
+    let caught: unknown
+    try {
+      weekOverWeek([], '0000-W01')
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(RangeError)
+    expect((caught as Error).message).toBe('period must be an ISO week label (YYYY-Www)')
+  })
+
+  // The previous week, 0000-W25, is itself one weekRange refuses, so this
+  // returns only because weekOverWeek reads the previous week's days without
+  // the analysis-window check; the 0000-06-20 row shows those days are W25's.
+  it('weekOverWeek over 0000-W26 returns, counting 0000-W25 as last week', () => {
+    const row = (date: string, amountCents: number) => ({
+      date,
+      accountId: 'acc_one',
+      amountCents,
+      category: 'Groceries',
+      merchant: 'Corner Shop',
+    })
+    expect(weekOverWeek([row('0000-06-20', -1000), row('0000-06-27', -3000)], '0000-W26')).toStrictEqual({
+      thisWeekCents: 3000,
+      lastWeekCents: 1000,
+      changeCents: 2000,
+      changePct: 200,
+      byCategory: [{ category: 'Groceries', thisCents: 3000, lastCents: 1000, changeCents: 2000 }],
+    })
   })
 
   // A window that would start before 0000-01 has no label for its earliest

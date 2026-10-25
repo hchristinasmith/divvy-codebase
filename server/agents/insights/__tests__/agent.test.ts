@@ -880,12 +880,31 @@ describe('failure and repeat', () => {
     ['an unknown scope', 'everyone', {}, 'scope must be personal or strawb'],
     ['a bad period', 'personal', { period: '2026-W99' }, 'period must be an ISO week label (YYYY-Www)'],
     ['a period past the year 9999', 'personal', { period: '9999-W52' }, 'period must be an ISO week label (YYYY-Www)'],
+    // #349: these weeks are real, but their analysis window (the monthly
+    // months, then the read's padding) starts before 0000-01-01.
+    ['a personal 0000-W01, whose window leaves the year 0000', 'personal', { period: '0000-W01' }, 'period must be an ISO week label (YYYY-Www)'],
+    ['a strawb 0000-W01, whose window leaves the year 0000', 'strawb', { period: '0000-W01' }, 'period must be an ISO week label (YYYY-Www)'],
+    ['a personal 0000-W25, whose window leaves the year 0000', 'personal', { period: '0000-W25' }, 'period must be an ISO week label (YYYY-Www)'],
+    ['a strawb 0000-W25, whose window leaves the year 0000', 'strawb', { period: '0000-W25' }, 'period must be an ISO week label (YYYY-Www)'],
     ['a sync trigger', 'personal', { trigger: 'sync' }, 'trigger must be manual or weekly'],
   ])('%s is refused before any run is logged', async (_why, scope, options, message) => {
     await expect(
       runInsightsAgent(scope as 'personal', options as { period?: string }, clockAt(NOW)),
     ).rejects.toThrow(message)
     expect(await runRows()).toEqual([])
+  })
+
+  // 0000-W26 (Monday 0000-06-26) is the first week of the year 0000 whose
+  // analysis window, padding included, fits after 0000-01-01 (#349; the sweep
+  // in queries.test.ts derives it). Its run is logged and succeeds.
+  it.each(['personal', 'strawb'] as const)('a %s run for 0000-W26 logs one successful run', async (scope) => {
+    await seedAccounts()
+    const result = await runInsightsAgent(scope, { period: '0000-W26' }, clockAt(NOW))
+    expect(result).toMatchObject({ outcome: 'success', period: '0000-W26', considered: 0, written: 0, rejected: [] })
+    const runs = await runRows()
+    expect(runs).toHaveLength(1)
+    expect(runs[0]).toMatchObject({ outcome: 'success' })
+    expect(errors).not.toHaveBeenCalled()
   })
 })
 
