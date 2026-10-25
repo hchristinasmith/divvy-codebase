@@ -4,10 +4,10 @@
 // their migrations belong to `models/sync.ts` (#19). Every field is flat and
 // snake_case, every amount is integer cents in a `*_cents` field (prd-01
 // Ruling 3), and every text field is verbatim what Akahu sent, except that a
-// logo or website URL is kept as sent only when it is an absolute https URL,
-// and is otherwise `null` (issue #193). A field Akahu may omit is `null`
-// here, never `undefined`, so a consumer cannot mistake a missing key for a
-// missing value.
+// logo or website URL is kept only when it is an absolute https URL; other
+// text there is `null` (issue #193). A field Akahu may omit is `null` here,
+// never `undefined`, so a consumer cannot mistake a missing key for a missing
+// value.
 //
 // A foreign-currency conversion's `rate` (issue #155) is a number that is
 // not money, so it is not cents either. It stays the exact decimal text
