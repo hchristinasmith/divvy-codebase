@@ -988,6 +988,25 @@ describe('cleanLabel', () => {
     expect(cleanLabel(null, FALLBACK)).toBe(FALLBACK)
   })
 
+  // #304 pins today's behaviour: every \p{M} mark is replaced by a space, so
+  // a mark inside a word splits it. NFKC runs first, so a base letter and a
+  // mark that compose are one letter and survive.
+  it('#304 pins today: a Devanagari vowel sign and virama become spaces, splitting the word', () => {
+    expect(cleanLabel('हिन्दी Store', FALLBACK)).toBe('ह न द Store')
+  })
+
+  it('#304 pins today: a Latin base with stacked marks keeps the composed letter and turns the rest into one space', () => {
+    expect(cleanLabel('Ź̂̃̄̅oo', FALLBACK)).toBe('Ź oo')
+  })
+
+  it('#304 pins today: a lone combining mark at the start is dropped', () => {
+    expect(cleanLabel('́Shop', FALLBACK)).toBe('Shop')
+  })
+
+  it('#304 pins today: a decomposed Kāpiti is composed by NFKC and survives', () => {
+    expect(cleanLabel('Kāpiti', FALLBACK)).toBe('Kāpiti')
+  })
+
   it('cuts by code point and never splits a surrogate pair', () => {
     const out = cleanLabel('a'.repeat(39) + surrogate + surrogate, FALLBACK)
     expect(Array.from(out)).toHaveLength(40)
