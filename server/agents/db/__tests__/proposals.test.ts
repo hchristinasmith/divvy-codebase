@@ -624,6 +624,8 @@ describe('every module under server/agents/db/ touches only the inbox tables', (
         }
       } else if (ts.isImportEqualsDeclaration(node)) {
         problems.push('import = require')
+      } else if (ts.isImportTypeNode(node)) {
+        problems.push('type-position import(')
       } else if (ts.isCallExpression(node)) {
         if (node.expression.kind === ts.SyntaxKind.ImportKeyword) problems.push('dynamic import(')
         if (ts.isIdentifier(node.expression) && node.expression.text === 'require') {
@@ -687,6 +689,8 @@ describe('every module under server/agents/db/ touches only the inbox tables', (
     ['a dynamic import', "await import('../../sync/upsert.ts')", 'dynamic import('],
     ['a require', "const m = require('../../sync/upsert.ts')", 'require('],
     ['import = require', "import m = require('../../sync/upsert.ts')", 'import = require'],
+    ['a typeof import', "export type C = typeof import('../../db/connection.ts')", 'type-position import('],
+    ['a type from import()', "export type U = import('../../sync/upsert.ts').default", 'type-position import('],
     ["db['raw']", "db['raw']('select 1')", "computed member access ['raw']"],
     ['db["raw"]', 'db["raw"]("select 1")', 'computed member access ["raw"]'],
     ['a computed key in a variable', 'db[method]()', 'computed member access [method]'],
@@ -737,7 +741,7 @@ describe('every module under server/agents/db/ touches only the inbox tables', (
   // allows, so each is held to no specifier and no import problem. Named here
   // rather than read from the headers, so a rename fails as a missing module.
   const IMPORTS_NOTHING = ['scrubbed.ts', 'text-checks.ts']
-  it.each(IMPORTS_NOTHING)('%s exists and imports nothing, by any route', (file) => {
+  it.each(IMPORTS_NOTHING)('%s exists and imports nothing, by any import route', (file) => {
     expect(modules()).toContain(file)
     const { specifiers, problems: reached } = imports(source(file))
     expect([...specifiers, ...reached], file).toEqual([])
