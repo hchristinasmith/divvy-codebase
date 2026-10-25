@@ -301,9 +301,10 @@ describe('findDrawingIds: one-to-one, greedy, fixed tie-breaks', () => {
 })
 
 // ---------------------------------------------------------------------------
-// #276 regression pins. These describe what the greedy matcher does TODAY,
-// before the pairing is changed to prefer a maximum pairing. They are meant to
-// be edited deliberately by the fix, not worked around.
+// #276: the largest pairing, then the tie-breaks. These began as regression
+// pins on the greedy matcher; the fix edited them deliberately: the issue's
+// table now pairs all four, and greedy's "sometimes pairs fewer" is now
+// "never pairs fewer".
 // ---------------------------------------------------------------------------
 
 /** A candidate with the integer day offset it was built from kept beside it. */
@@ -416,12 +417,12 @@ function lexMaxOracle(rows: readonly OracleRow[]): number[] {
   return [...used].sort((a, b) => a - b)
 }
 
-describe("findDrawingIds: today's greedy pairing (#276 regression pins)", () => {
-  it("today: the issue's table pairs only 2 ↔ 3, leaving 1 and 4 (greedy, #276)", () => {
+describe('findDrawingIds: the largest pairing, then the tie-breaks (#276)', () => {
+  it("pairs all four rows of the issue's table: 1 ↔ 3 and 2 ↔ 4 (#276 Done-when 1)", () => {
     // Gaps, in date − out date: 1 → 3 is +1, 2 → 3 is 0, 2 → 4 is +3, and
-    // 1 → 4 is +4, out of the window. The smallest gap goes first, so 2 ↔ 3
-    // is taken and strands both 1 and 4, though 1 ↔ 3 with 2 ↔ 4 would pair
-    // all four. This pins the greedy answer the fix will change.
+    // 1 → 4 is +4, out of the window. Greedy took 2 ↔ 3 (the smallest gap)
+    // and stranded both 1 and 4. 2 ↔ 3 is in no pairing of two, so it is
+    // passed over, and 1 ↔ 3 with 2 ↔ 4 pairs all four.
     expect(
       ids([
         out(1, '2026-10-26'),
@@ -429,10 +430,10 @@ describe("findDrawingIds: today's greedy pairing (#276 regression pins)", () => 
         into(3, '2026-10-27'),
         into(4, '2026-10-30'),
       ]),
-    ).toStrictEqual([2, 3])
+    ).toStrictEqual([1, 2, 3, 4])
   })
 
-  it('agrees with the maximum-pairing oracle whenever greedy pairs as many as the maximum, and sometimes pairs fewer', () => {
+  it('agrees with the maximum-pairing oracle whenever it pairs as many as the maximum, and never pairs fewer', () => {
     // A fixed-seed generator (mulberry32, a different seed from the shuffle
     // above), so a failure is reproducible.
     let seed = 0x276
@@ -488,7 +489,7 @@ describe("findDrawingIds: today's greedy pairing (#276 regression pins)", () => 
 
       const best = maximumPairs(oraclePairs(rows), new Set())
 
-      // Greedy can never beat the maximum.
+      // No pairing beats the maximum.
       expect(pairsFound, `case ${n}`).toBeLessThanOrEqual(best)
       if (pairsFound === best) {
         atMaximum += 1
@@ -501,10 +502,150 @@ describe("findDrawingIds: today's greedy pairing (#276 regression pins)", () => 
     }
 
     expect(atMaximum + shortOfMaximum).toBe(cases)
-    // The generator reaches the bug the fix targets, and the agreeing bucket
-    // is not empty either.
-    expect(shortOfMaximum).toBeGreaterThan(0)
-    expect(atMaximum).toBeGreaterThan(0)
+    // Greedy fell short on this seed (its regression pin asserted so); the
+    // fix never does, so the conditional check above covered every case.
+    expect(shortOfMaximum).toBe(0)
+    expect(atMaximum).toBe(cases)
+  })
+
+  it('pairs a chain greedy would strand at both ends (#276)', () => {
+    // Gaps: 1 → 11 +1, 1 → 12 +2; 2 → 11 0, 2 → 12 +1; 3 → 11 −1,
+    // 3 → 12 0, 3 → 13 +3; 1 and 2 cannot reach 13 (+5, +4). Greedy took the
+    // two 0 gaps, 2 ↔ 11 and 3 ↔ 12, and stranded 1 and 13. 13 needs 3, so
+    // 3 ↔ 12 is passed over: 2 ↔ 11, then 1 ↔ 12 (+2) and 3 ↔ 13 (+3).
+    expect(
+      ids([
+        out(1, '2026-10-26'),
+        out(2, '2026-10-27'),
+        out(3, '2026-10-28'),
+        into(11, '2026-10-27'),
+        into(12, '2026-10-28'),
+        into(13, '2026-10-31'),
+      ]),
+    ).toStrictEqual([1, 2, 3, 11, 12, 13])
+  })
+
+  it('when one outflow must stay a charge, the tie-breaks pick which (#276)', () => {
+    // Gaps: 1 (21st) → 3 +3; 4 (23rd) → 3 +1, → 2 +3; 5 (22nd) → 3 +2.
+    // Only 4 reaches 2, so the largest pairing has two pairs and 4 ↔ 2 is in
+    // it. Greedy took 4 ↔ 3 (+1) and left 2 alone. 5 ↔ 3 (+2) comes before
+    // 1 ↔ 3 (+3), so 1 is the one left.
+    expect(
+      ids([
+        out(1, '2026-10-21'),
+        out(4, '2026-10-23'),
+        out(5, '2026-10-22'),
+        into(2, '2026-10-26'),
+        into(3, '2026-10-24'),
+      ]),
+    ).toStrictEqual([2, 3, 4, 5])
+  })
+
+  it('equals the maximum-pairing oracle on every case, in one dense run or split into several', () => {
+    // A fixed-seed generator (mulberry32, a seed of its own), so a failure is
+    // reproducible. More halves a side, and more amounts, than the generator
+    // above, spread over a few days or a few weeks: some cases hold one dense
+    // run and some split into several.
+    let seed = 0x2761
+    const random = () => {
+      seed = (seed + 0x6d2b79f5) | 0
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+    }
+    const below = (n: number) => Math.floor(random() * n)
+
+    const generate = (): OracleRow[] => {
+      const shapes: Omit<DrawingCandidate, 'id' | 'date'>[] = []
+      const amounts = [30000, 12345, 500].slice(0, 1 + below(3))
+      for (const cents of amounts) {
+        for (let n = below(7); n > 0; n -= 1) {
+          shapes.push({ scope: 'strawb', amountCents: -cents })
+        }
+        for (let n = below(7); n > 0; n -= 1) {
+          shapes.push({ scope: 'personal', amountCents: cents })
+        }
+        // Money put in: never a half, but it must not disturb the pairing.
+        if (below(4) === 0) {
+          shapes.push({ scope: 'personal', amountCents: -cents })
+        }
+        if (below(4) === 0) {
+          shapes.push({ scope: 'strawb', amountCents: cents })
+        }
+      }
+      const idPool = shapes.map((_, index) => index + 1)
+      for (let i = idPool.length - 1; i > 0; i -= 1) {
+        const j = below(i + 1)
+        ;[idPool[i], idPool[j]] = [idPool[j], idPool[i]]
+      }
+      const days = [4, 8, 21][below(3)]
+      return shapes.map((shape, index) => {
+        const day = below(days)
+        return {
+          day,
+          candidate: { ...shape, id: idPool[index], date: dateAtOffset(day) },
+        }
+      })
+    }
+
+    const cases = 2500
+    let somePaired = 0
+    let someLeft = 0
+    for (let n = 0; n < cases; n += 1) {
+      const rows = generate()
+      const halves = rows.filter(
+        ({ candidate: c }) =>
+          (c.scope === 'strawb' && c.amountCents < 0) ||
+          (c.scope === 'personal' && c.amountCents > 0),
+      ).length
+      const found = ids(rows.map((row) => row.candidate))
+      expect(found, `case ${n}: ${JSON.stringify(rows)}`).toStrictEqual(
+        lexMaxOracle(rows),
+      )
+      if (found.length > 0) somePaired += 1
+      if (found.length < halves) someLeft += 1
+    }
+    // The cases are not all empty, and not all pair every half: the
+    // tie-breaks had a choice to make.
+    expect(somePaired).toBeGreaterThan(0)
+    expect(someLeft).toBeGreaterThan(0)
+  })
+
+  it('pairs 20,000 equal rows inside one window without listing every pair', () => {
+    // 10,000 outflows on days 0 and 1, 10,000 inflows on days 0 to 3: every
+    // gap is −1 to +3, so every outflow can pair with every inflow, and all
+    // 20,000 rows pair. Listing the pairs would hold 100 million of them.
+    const candidates: DrawingCandidate[] = []
+    for (let n = 0; n < 10_000; n += 1) {
+      candidates.push(out(n + 1, dateAtOffset(n % 2)))
+      candidates.push(into(n + 10_001, dateAtOffset(n % 4)))
+    }
+    const started = performance.now()
+    const result = findDrawingIds(candidates)
+    const elapsed = performance.now() - started
+    expect(result.size).toBe(20_000)
+    expect(elapsed).toBeLessThan(2000)
+  })
+
+  it('pairs a daily chain across 10,000 days, every pair three days apart', () => {
+    // An outflow on each of days 0 to 9,999, each landing 3 days later, so
+    // days 3 to 9,999 hold an outflow and an inflow. Outflow 0 reaches only
+    // inflow 3, so outflow 1 must take inflow 4, and so on up the chain:
+    // the only pairing of all 20,000 rows is every outflow with its own
+    // inflow, and every same-day (gap 0) pair is passed over. Greedy took
+    // those and stranded the first three outflows and the last three
+    // inflows.
+    const days = 10_000
+    const candidates: DrawingCandidate[] = []
+    for (let day = 0; day < days; day += 1) {
+      candidates.push(out(day + 1, dateAtOffset(day)))
+      candidates.push(into(day + 1 + days, dateAtOffset(day + 3)))
+    }
+    const started = performance.now()
+    const result = findDrawingIds(candidates)
+    const elapsed = performance.now() - started
+    expect(result.size).toBe(2 * days)
+    expect(elapsed).toBeLessThan(2000)
   })
 })
 
