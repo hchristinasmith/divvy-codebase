@@ -864,6 +864,50 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
     },
   )
 
+  // The test above leans on the fake Litestream to fill the AWS_ key names, so
+  // with backups off nothing sets them. Fly secrets can set any of the scrubbed
+  // names directly, in either branch, so each one is set here by name.
+  it.each([
+    ['under litestream', true],
+    ['backups OFF', false],
+  ])(
+    'keeps every scrubbed name and its value out of npm and the server when each is set directly, %s',
+    (_label, backups) => {
+      // AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are set, so the fake
+      // Litestream does not copy the LITESTREAM_ values over them.
+      const scrubbed = {
+        LITESTREAM_ACCESS_KEY_ID: 'not-a-real-litestream-key-id',
+        LITESTREAM_SECRET_ACCESS_KEY: 'not-a-real-litestream-secret-key',
+        LITESTREAM_REPLICA_URL: 'not-a-real-litestream-replica-url',
+        AWS_ACCESS_KEY_ID: 'not-a-real-aws-key-id',
+        AWS_SECRET_ACCESS_KEY: 'not-a-real-aws-secret-key',
+        AWS_SESSION_TOKEN: 'not-a-real-aws-session-token',
+      }
+      const appSecret = 'not-a-real-secret-sentinel-4'
+      if (backups) writeFileSync(join(tmp, 'litestream.yml'), 'dbs: []\n')
+      const run = runStart({
+        env: { ...scrubbed, AKAHU_USER_TOKEN: appSecret },
+      })
+
+      expect(run.status).toBe(0)
+      for (const name of ['npm', 'node']) {
+        const env = dump(name)
+        expect(env).not.toBe('')
+        const names = env
+          .split('\n')
+          .filter(Boolean)
+          .map((line) => line.slice(0, line.indexOf('=')))
+        for (const [scrubbedName, value] of Object.entries(scrubbed)) {
+          expect(names).not.toContain(scrubbedName)
+          expect(env).not.toContain(value)
+        }
+      }
+      expect(dump('node')).toMatch(
+        new RegExp(`^AKAHU_USER_TOKEN=${appSecret}$`, 'm'),
+      )
+    },
+  )
+
   it('never hands the auth key to tailscaled, npm, node or litestream, and never prints it', () => {
     const plain = runStart()
     const npmEnv = dump('npm')
