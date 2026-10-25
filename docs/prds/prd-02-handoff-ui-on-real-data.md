@@ -90,6 +90,8 @@ Why: the handoff's formula (`handoff.md:25`) only works once each term is pinned
 >
 > Amended 2026-10-25 (#35): bills repeat none/weekly/monthly/yearly; Hannah chose option C on #35. Each bill has its own repeat (none is a one-off), anchored on `first_due_date`, and every occurrence is computed from that anchor. A monthly bill keeps its day of month, clamped to the month's end; a yearly bill dated 29 Feb falls on 28 Feb outside leap years. "Mark paid" records a `bill_payments` row for that occurrence and the bill comes back next cycle; a one-off is done once paid. A bill's "unpaid" occurrences are those with no payment row. Open, not ruled: when several occurrences of one bill are unpaid on or before the next payday (a weekly bill overdue), whether each one counts toward "unpaid bills".
 >
+> Amended 2026-10-25 (#151), answering the open question in the #35 note: Hannah ruled that every unpaid occurrence of an overdue repeating bill counts toward "unpaid bills". A weekly bill two cycles overdue holds back both occurrences that fall on or before the next payday, so safe-to-spend never counts money already owed.
+>
 > Roles are stored as `current`, `savings`, `tax_pot` and `credit_card`; the text above writes "tax pot" and "credit card".
 
 ## Ruling 3 — A negative result is shown as $0 plus how short you are
