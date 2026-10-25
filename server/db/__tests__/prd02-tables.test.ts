@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import knex, { Knex } from 'knex'
 import config from '../knexfile.js'
 import { migrateToJustBefore } from './migrateToJustBefore.ts'
+import { omit } from './omit.ts'
 import type { AccountRole } from '../../../shared/contracts.ts'
 import type { AccountScope } from '../../../models/sync.ts'
 import type {
@@ -124,13 +125,6 @@ const AT = '2026-10-25T03:00:00.000Z'
 const LATER = '2026-10-25T03:05:00.000Z'
 
 type Row = Record<string, unknown>
-
-// `row` without `column`, so the insert leaves it out. Not `{ column: undefined }`:
-// with `useNullAsDefault` knex binds that as NULL, which a column default
-// never sees, so it could not catch a default creeping in.
-function omit(row: Row, column: string): Row {
-  return Object.fromEntries(Object.entries(row).filter(([key]) => key !== column))
-}
 
 let db: Knex
 
