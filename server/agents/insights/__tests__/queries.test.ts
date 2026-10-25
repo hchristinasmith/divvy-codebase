@@ -1032,6 +1032,14 @@ describe('cleanLabel', () => {
     expect(cleanLabel('\u115F\u0301x', FALLBACK)).not.toContain('\u0301')
   })
 
+  it('#304: a digit is a base, so its marks are kept, up to the cap, outside a long digit run', () => {
+    expect(cleanLabel('Zone 2\u0301', FALLBACK)).toBe('Zone 2\u0301')
+    expect(cleanLabel('Zone 2\u0301\u0302\u0303\u0304', FALLBACK)).toBe('Zone 2\u0301\u0302\u0303')
+    // Seven digits are short of LONG_DIGIT_RUN, so they stay, marks and all.
+    const seven = '1\u03012\u03013\u03014\u03015\u03016\u03017\u0301'
+    expect(cleanLabel(seven, FALLBACK)).toBe(seven)
+  })
+
   it('#304: NFKC composes before marks are counted, so a composed mark frees a place under the cap', () => {
     expect(cleanLabel('a\u0301\u0302\u0303\u0304', FALLBACK)).toBe('\u00E1\u0302\u0303\u0304')
   })

@@ -278,8 +278,9 @@ const LABEL_BASE = /^(?!\p{DI})[\p{L}\p{N}]$/u
 // to the height real scripts reach after NFKC. The value is what common words
 // need: Hindi "ज़िंदगी" is ज with a nukta (NFKC decomposes ज़, a composition
 // exclusion), a vowel sign and an anusvara, and Tibetan stacks such as
-// "སྒྲུབ" carry two subjoined letters and a vowel sign. Thai (vowel and tone),
-// pointed Arabic and Hebrew need at most two; Vietnamese and Māori compose
+// "སྒྲུབ" carry two subjoined letters and a vowel sign, and pointed Hebrew
+// "שָּׁ" a shin dot, a dagesh and a vowel. Thai (vowel and tone) and pointed
+// Arabic (shadda and vowel) need at most two; Vietnamese and Māori compose
 // to precomposed letters under NFKC and keep none. Burmese "မြို့" needs four,
 // and loses its last mark (the dot below); a higher cap was not worth the
 // extra overdraw for it.
