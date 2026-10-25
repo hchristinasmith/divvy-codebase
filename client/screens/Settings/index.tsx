@@ -12,7 +12,7 @@ export default function SettingsScreen() {
         title="Settings"
         subtitle="Tax, payday and what each account is for."
       />
-      <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-4">
         <SettingsForm />
         <AccountRoles />
       </div>

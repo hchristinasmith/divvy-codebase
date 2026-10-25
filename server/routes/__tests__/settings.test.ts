@@ -53,6 +53,10 @@ const DEFAULTS = Object.fromEntries(
 ) as unknown as SettingsResponse
 const FIELDS = Object.keys(SETTING_KEYS).sort()
 
+// The cents cap: the largest profit safe-to-spend can multiply by 10000 basis
+// points and stay a safe integer. Worked out here, not imported.
+const CAP = Math.floor(Number.MAX_SAFE_INTEGER / 10000)
+
 function store(rows: Record<string, string>) {
   return connection('settings').insert(
     Object.entries(rows).map(([key, value]) => ({
@@ -129,21 +133,6 @@ describe('GET /api/v1/settings', () => {
     expect(res.status).toBe(200)
     expect(res.body).toStrictEqual(DEFAULTS)
   })
-
-  it('answers 500 with a fixed error when the table cannot be read', async () => {
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
-    // Moved aside rather than dropped, so the next freshApp() can roll back.
-    await connection.schema.renameTable('settings', 'settings_aside')
-    try {
-      const res = await api.get('/api/v1/settings')
-
-      expect(res.status).toBe(500)
-      expect(res.body).toStrictEqual({ error: 'Internal server error' })
-      expect(logged).toHaveBeenCalled()
-    } finally {
-      await connection.schema.renameTable('settings_aside', 'settings')
-    }
-  })
 })
 
 describe('PATCH /api/v1/settings', () => {
@@ -181,10 +170,10 @@ describe('PATCH /api/v1/settings', () => {
   it('stores integers as their exact decimal strings', async () => {
     await api
       .patch('/api/v1/settings')
-      .send({ profitCents: Number.MAX_SAFE_INTEGER, personalTaxOwedCents: 0 })
+      .send({ profitCents: CAP, personalTaxOwedCents: 0 })
 
     expect(await stored()).toStrictEqual({
-      profit_cents: '9007199254740991',
+      profit_cents: '900719925474',
       personal_tax_owed_cents: '0',
     })
   })
@@ -212,10 +201,12 @@ describe('PATCH /api/v1/settings', () => {
   })
 
   const TAX = 'taxRateBasisPoints must be a whole number from 0 to 10000'
-  const PROFIT = 'profitCents must be a whole number of cents, 0 or more'
+  const PROFIT =
+    'profitCents must be a whole number of cents from 0 to 900719925474'
   const WEEKDAY =
     'paydayWeekday must be a whole number from 0 (Sunday) to 6 (Saturday)'
-  const OWED = 'personalTaxOwedCents must be a whole number of cents, 0 or more'
+  const OWED =
+    'personalTaxOwedCents must be a whole number of cents from 0 to 900719925474'
   const CURRENCY = 'currency must be one of $, NZ$, £'
 
   it.each([
@@ -227,11 +218,14 @@ describe('PATCH /api/v1/settings', () => {
     [{ taxRateBasisPoints: true }, TAX],
     [{ profitCents: -1 }, PROFIT],
     [{ profitCents: 1.5 }, PROFIT],
+    [{ profitCents: CAP + 1 }, PROFIT],
+    [{ profitCents: Number.MAX_SAFE_INTEGER }, PROFIT],
     [{ profitCents: 2 ** 53 }, PROFIT],
     [{ paydayWeekday: -1 }, WEEKDAY],
     [{ paydayWeekday: 7 }, WEEKDAY],
     [{ paydayWeekday: 1.5 }, WEEKDAY],
     [{ personalTaxOwedCents: -1 }, OWED],
+    [{ personalTaxOwedCents: CAP + 1 }, OWED],
     [{ currency: 'EUR' }, CURRENCY],
     [{ currency: 'NZD' }, CURRENCY],
     [{ currency: '' }, CURRENCY],
@@ -251,9 +245,11 @@ describe('PATCH /api/v1/settings', () => {
     { taxRateBasisPoints: 0 },
     { taxRateBasisPoints: 10000 },
     { profitCents: 0 },
+    { profitCents: CAP },
     { paydayWeekday: 0 },
     { paydayWeekday: 6 },
     { personalTaxOwedCents: 0 },
+    { personalTaxOwedCents: CAP },
     { currency: '$' },
   ])('accepts the boundary %j', async (body) => {
     const res = await api.patch('/api/v1/settings').send(body)
@@ -398,4 +394,62 @@ it('an unlisted settings path is the JSON 404', async () => {
 
   expect(res.status).toBe(404)
   expect(res.body).toStrictEqual({ error: 'Not found' })
+})
+
+describe('a failing database', () => {
+  // Each route's catch block, reached by moving the table it needs aside
+  // (rather than dropping it, so the next freshApp() can roll back).
+  it.each([
+    {
+      route: 'GET /api/v1/settings',
+      table: 'settings',
+      label: 'Error reading settings:',
+      send: () => api.get('/api/v1/settings'),
+    },
+    {
+      route: 'PATCH /api/v1/settings',
+      table: 'settings',
+      label: 'Error updating settings:',
+      send: () => api.patch('/api/v1/settings').send({ profitCents: 424242 }),
+    },
+    {
+      route: 'GET /api/v1/settings/accounts',
+      table: 'account_settings',
+      label: 'Error listing account roles:',
+      send: () => api.get('/api/v1/settings/accounts'),
+    },
+    {
+      route: 'PUT /api/v1/settings/accounts/:id',
+      table: 'account_settings',
+      label: 'Error setting account role:',
+      send: async () => {
+        const id = await insertAccount({ akahu_id: 'acc_inv_1' })
+        return api
+          .put(`/api/v1/settings/accounts/${id}`)
+          .send({ role: 'current' })
+      },
+    },
+  ])(
+    '$route answers 500 with a fixed error and logs only the stack',
+    async ({ table, label, send }) => {
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+      await connection.schema.renameTable(table, `${table}_aside`)
+      try {
+        const res = await send()
+
+        expect(res.status).toBe(500)
+        expect(res.body).toStrictEqual({ error: 'Internal server error' })
+        // The stack as a string, as server.ts logs a 500: never the error
+        // object, whose own fields (errno, code) Node would print beside it.
+        expect(logged).toHaveBeenCalledTimes(1)
+        const [first, second, ...rest] = logged.mock.calls[0]
+        expect(first).toBe(label)
+        expect(typeof second).toBe('string')
+        expect(second).toMatch(/^Error: /)
+        expect(rest).toEqual([])
+      } finally {
+        await connection.schema.renameTable(`${table}_aside`, table)
+      }
+    },
+  )
 })

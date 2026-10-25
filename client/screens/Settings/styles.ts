@@ -1,9 +1,18 @@
+import type { RowScope } from '../../../shared/contracts.ts'
+
 // Class lists the settings panel repeats, from the App.css theme tokens
 // (docs/design/handoff.md "Design tokens"). The design has no settings
 // screen; these follow the card, label and pill shapes the other screens
 // use. Focus is an outline, never a ring.
 
 const FOCUS = 'focus-visible:outline-2 focus-visible:outline-pink'
+
+// A field's border turns pink on focus too (the handoff's "focus border
+// pink"), beside the outline.
+const FIELD_FOCUS = `${FOCUS} focus-visible:border-pink`
+
+const FIELD_SHAPE =
+  'rounded-tile border border-line bg-canvas px-3.5 py-2.5 text-body-14 text-ink disabled:cursor-not-allowed disabled:opacity-50'
 
 export const CARD = 'rounded-card border border-line bg-surface p-6'
 
@@ -17,9 +26,28 @@ export const ERROR = 'm-0 text-body-13 text-danger'
 
 export const FIELD_ERROR = 'm-0 text-body-12 text-danger'
 
-export const INPUT = `rounded-tile border border-line bg-canvas px-3.5 py-2.5 font-mono text-body-14 text-ink ${FOCUS}`
+// DM Mono is for numbers: the typed amounts and rate.
+export const INPUT = `${FIELD_SHAPE} font-mono ${FIELD_FOCUS}`
 
-export const PRIMARY_BUTTON = `cursor-pointer rounded-button bg-pink px-4 py-2.5 text-body-14 font-semibold text-surface hover:bg-pink-hover disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS}`
+// Words, not numbers: the payday, currency and role choices.
+export const SELECT = `${FIELD_SHAPE} font-sans ${FIELD_FOCUS}`
 
-export const SCOPE_TAG =
-  'rounded-tag bg-blush px-2 py-0.5 text-body-12 text-rose'
+const BUTTON_SHAPE =
+  'cursor-pointer rounded-button px-4 py-2.5 text-body-14 font-semibold disabled:cursor-not-allowed disabled:opacity-50'
+
+// Solid pink: Save, the one primary action.
+export const PRIMARY_BUTTON = `${BUTTON_SHAPE} bg-pink text-surface hover:bg-pink-hover ${FOCUS}`
+
+// Blush: a lesser action such as "Try again".
+export const SECONDARY_BUTTON = `${BUTTON_SHAPE} bg-blush text-rose hover:bg-blush-hover ${FOCUS}`
+
+// The handoff codes scope by colour: Personal canvas with muted ink, Strawb
+// solid pink with white text.
+const SCOPE_TAG_COLOURS: Record<RowScope, string> = {
+  personal: 'bg-canvas text-ink-muted',
+  strawb: 'bg-pink-hover text-surface',
+}
+
+export function scopeTag(scope: RowScope): string {
+  return `rounded-tag px-2 py-1 text-body-12 font-semibold ${SCOPE_TAG_COLOURS[scope]}`
+}

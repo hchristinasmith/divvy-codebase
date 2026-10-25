@@ -15,6 +15,7 @@ import {
   type SettingsResponse,
   type UpdateSettingsRequest,
 } from '../../../shared/contracts.ts'
+import { safeToSpend } from '../../../shared/safe-to-spend.ts'
 
 // The settings data module (issue 46). Each test starts from an empty,
 // freshly migrated in-memory database and inserts the rows it needs; there
@@ -41,6 +42,10 @@ const DEFAULTS: SettingsResponse = {
   currency: SETTINGS_DEFAULTS.currency,
 }
 const FIELDS = Object.keys(SETTING_KEYS).sort()
+
+// The cents cap: the largest profit safe-to-spend can multiply by 10000 basis
+// points and stay a safe integer. Worked out here, not imported.
+const CAP = Math.floor(Number.MAX_SAFE_INTEGER / 10000)
 
 function store(rows: Record<string, string>) {
   return connection('settings').insert(
@@ -117,7 +122,10 @@ describe('getSettings', () => {
     ['payday_weekday', '-1', 'paydayWeekday'],
     ['profit_cents', '12.5', 'profitCents'],
     ['profit_cents', '9007199254740992', 'profitCents'],
+    ['profit_cents', '9007199254740991', 'profitCents'],
+    ['profit_cents', String(CAP + 1), 'profitCents'],
     ['personal_tax_owed_cents', '-100', 'personalTaxOwedCents'],
+    ['personal_tax_owed_cents', String(CAP + 1), 'personalTaxOwedCents'],
     ['currency', 'EUR', 'currency'],
     ['currency', 'NZD', 'currency'],
     ['currency', '', 'currency'],
@@ -147,6 +155,40 @@ describe('getSettings', () => {
       })
     },
   )
+})
+
+describe('the cents cap', () => {
+  it('reads a stored profit and tax owed at the cap', async () => {
+    await store({
+      profit_cents: String(CAP),
+      personal_tax_owed_cents: String(CAP),
+    })
+
+    const settings = await getSettings()
+    expect(settings.profitCents).toBe(CAP)
+    expect(settings.personalTaxOwedCents).toBe(CAP)
+  })
+
+  it('keeps safe-to-spend from throwing at the cap and the top tax rate', async () => {
+    // safeToSpend refuses a rate × profit that is not a safe integer; the
+    // largest profit settings can answer must still pass.
+    await updateSettings({ taxRateBasisPoints: 10000, profitCents: CAP })
+    const settings = await getSettings()
+
+    const result = safeToSpend({
+      scope: 'strawb',
+      today: '2026-10-25',
+      paydayWeekday: settings.paydayWeekday,
+      taxRateBasisPoints: settings.taxRateBasisPoints,
+      profitCents: settings.profitCents,
+      personalTaxOwedCents: settings.personalTaxOwedCents,
+      accounts: [],
+      bills: [],
+      budgets: [],
+      transactions: [],
+    })
+    expect(result.strawbTaxHoldCents).toBe(CAP)
+  })
 })
 
 describe('updateSettings', () => {

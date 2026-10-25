@@ -62,7 +62,9 @@ describe('settings', () => {
 
   it("rejects a refused PATCH with the server's message", async () => {
     await expect(api.updateSettings({ profitCents: -1 })).rejects.toThrow(
-      new Error('profitCents must be a whole number of cents, 0 or more'),
+      new Error(
+        'profitCents must be a whole number of cents from 0 to 900719925474',
+      ),
     )
   })
 })

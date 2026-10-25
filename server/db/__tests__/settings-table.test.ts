@@ -47,6 +47,10 @@ async function up() {
 
 describe('up', () => {
   it('keeps one row per key, the latest by updated_at, then by rowid', async () => {
+    // A covering index with `value` descending makes SQLite read the legacy
+    // rows in index order, so `tax_rate_bp` '1500' (s6) comes back before
+    // '1000' (s5). Without the rowid tie-break, the last row read would win.
+    await db.raw('CREATE INDEX settings_probe ON settings (key, value DESC, updated_at)')
     await up()
 
     const rows = await db('settings').orderBy('key').select('key', 'value', 'updated_at')
@@ -70,6 +74,43 @@ describe('up', () => {
       value: 'true',
     })
     expect(await db('settings').where({ key: 'notifications' })).toEqual([])
+  })
+
+  it('drops a key whose newest row is NULL, rather than bringing back an older value', async () => {
+    await db('settings').insert([
+      { id: 's8', user_id: 1, key: 'payday_weekday', value: '3', updated_at: OLD_TEXT },
+      { id: 's9', user_id: 1, key: 'payday_weekday', value: null, updated_at: NEWER_MS },
+    ])
+    await up()
+
+    expect(await db('settings').where({ key: 'payday_weekday' })).toEqual([])
+  })
+
+  it.each([
+    ['NULL', null],
+    ['unparseable', 'not a date'],
+  ])('ranks an undated row (%s updated_at) below a dated row for the same key', async (_label, undated) => {
+    // The undated row is written last, so neither its rowid nor a "now"
+    // stand-in may carry it past the dated row.
+    await db('settings').insert([
+      { id: 's8', user_id: 1, key: 'personal_tax_owed_cents', value: '100', updated_at: OLD_TEXT },
+      { id: 's9', user_id: 1, key: 'personal_tax_owed_cents', value: '999', updated_at: undated },
+    ])
+    await up()
+
+    expect(
+      await db('settings').where({ key: 'personal_tax_owed_cents' }).select('value', 'updated_at'),
+    ).toStrictEqual([{ value: '100', updated_at: OLD_TEXT_ISO }])
+  })
+
+  it('names the unique index settings_key_unique, not after the copy it was built on', async () => {
+    await up()
+
+    const indexes = await db('sqlite_master')
+      .where({ type: 'index', tbl_name: 'settings' })
+      .whereNotNull('sql')
+      .pluck('name')
+    expect(indexes).toEqual(['settings_key_unique'])
   })
 
   it('writes every updated_at as ISO-8601 UTC with a Z', async () => {

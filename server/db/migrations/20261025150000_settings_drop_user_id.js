@@ -18,18 +18,27 @@
 // - `updated_at` becomes ISO: a number is epoch milliseconds (how the sqlite3
 //   driver stores a JS Date, which the old dev seed wrote); a
 //   `YYYY-MM-DD HH:MM:SS` string is the old `CURRENT_TIMESTAMP` default, in
-//   UTC; any other parseable string is read as a date; anything else takes
-//   this migration's own time.
-// - A row whose `value` is NULL is skipped: no row means the default.
+//   UTC; any other parseable string is read as a date. A row with no
+//   readable date is "undated".
 // - Where one key has several rows (the old table had no uniqueness, and one
-//   row per user), the latest `updated_at` wins, then the later rowid.
+//   row per user), one wins: the latest `updated_at`, then the later rowid.
+//   An undated row ranks below every dated row, so it wins only against
+//   other undated rows; a winner that is undated is stored with this
+//   migration's own time.
+// - The winner is picked from every row of the key, NULL values included,
+//   and then dropped if its `value` is NULL: a newer NULL is a cleared
+//   setting, so an older value must not come back. No row means the default.
 // - Keys nothing reads yet (for example `dark_mode`) are kept.
 //
 // The table is copied into `settings_next`, the old one dropped and the copy
-// renamed, rather than altered with `dropColumn` or `.alter()`. Nothing
-// references `settings` with a foreign key, so dropping it deletes nothing
-// elsewhere (the rebuild hazard in 20261023120000_money_as_cents.js is about
-// a parent with children; `settings` has none). `users` is not touched.
+// renamed, rather than altered with `dropColumn` or `.alter()`. SQLite keeps
+// an index's name through a rename, so the unique index is named
+// `settings_key_unique` when it is created, the name knex gives a unique
+// `key` on `settings`, rather than the `settings_next_key_unique` it would
+// otherwise carry for good. Nothing references `settings` with a foreign
+// key, so dropping it deletes nothing elsewhere (the rebuild hazard in
+// 20261023120000_money_as_cents.js is about a parent with children;
+// `settings` has none). `users` is not touched.
 //
 // Rolling back recreates `settings` exactly as 20250619122207_settings.js
 // created it, EMPTY: the old shape needs a `user_id` for every row, and there
@@ -44,7 +53,10 @@ export async function up(knex) {
 
   await knex.schema.createTable('settings_next', (table) => {
     table.increments('id').primary()
-    table.string('key', 255).notNullable().unique()
+    table
+      .string('key', 255)
+      .notNullable()
+      .unique({ indexName: 'settings_key_unique' })
     table.text('value').notNullable()
     table.timestamp('updated_at').notNullable()
   })
@@ -53,22 +65,21 @@ export async function up(knex) {
     'SELECT rowid AS legacy_rowid, key, value, updated_at FROM settings',
   )
 
+  // Oldest first, so the last row set for a key is its winner. `ms` is
+  // undefined for an undated row, which sorts before every dated one.
   const latest = new Map()
   legacy
-    .filter((row) => row.value !== null && row.value !== undefined)
-    .map((row) => ({ ...row, updated_at: toIso(row.updated_at, now) }))
-    .sort(
-      (a, b) =>
-        a.updated_at.localeCompare(b.updated_at) ||
-        a.legacy_rowid - b.legacy_rowid,
-    )
+    .map((row) => ({ ...row, ms: toMs(row.updated_at) }))
+    .sort((a, b) => compareDates(a.ms, b.ms) || a.legacy_rowid - b.legacy_rowid)
     .forEach((row) => latest.set(row.key, row))
 
-  const rows = [...latest.values()].map((row) => ({
-    key: row.key,
-    value: String(row.value),
-    updated_at: row.updated_at,
-  }))
+  const rows = [...latest.values()]
+    .filter((row) => row.value !== null && row.value !== undefined)
+    .map((row) => ({
+      key: row.key,
+      value: String(row.value),
+      updated_at: row.ms === undefined ? now : new Date(row.ms).toISOString(),
+    }))
   if (rows.length > 0) await knex('settings_next').insert(rows)
 
   await knex.schema.dropTable('settings')
@@ -77,16 +88,23 @@ export async function up(knex) {
 
 const SQLITE_DATETIME = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/
 
-// An old `updated_at` as an ISO-8601 UTC string, or `fallback`.
-function toIso(value, fallback) {
+// An old `updated_at` as epoch milliseconds, or undefined if undated.
+function toMs(value) {
   let ms = NaN
   if (typeof value === 'number') ms = value
   else if (typeof value === 'string' && SQLITE_DATETIME.test(value)) {
     ms = Date.parse(`${value.replace(' ', 'T')}Z`)
   } else if (typeof value === 'string') ms = Date.parse(value)
-  if (!Number.isFinite(ms)) return fallback
-  const date = new Date(ms)
-  return Number.isNaN(date.getTime()) ? fallback : date.toISOString()
+  // Date's own range check: outside it, toISOString() would throw.
+  return Number.isNaN(new Date(ms).getTime()) ? undefined : ms
+}
+
+// Orders two `toMs` results, undated first.
+function compareDates(a, b) {
+  if (a === b) return 0
+  if (a === undefined) return -1
+  if (b === undefined) return 1
+  return a - b
 }
 
 /**

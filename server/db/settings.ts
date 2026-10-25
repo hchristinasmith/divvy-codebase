@@ -48,8 +48,15 @@ function wholeNumber(min: number, max: number, error: string): Rule<number> {
   }
 }
 
+// The most a cents setting may hold. safeToSpend in shared/safe-to-spend.ts
+// multiplies profit by the tax rate in basis points (at most 10000) and
+// throws unless the product is a safe integer, so a larger stored profit
+// would make every overview request fail. Personal tax owed shares the cap so
+// that both cents settings read the same way.
+const MAX_SETTING_CENTS = Math.floor(Number.MAX_SAFE_INTEGER / 10000)
+
 const CENTS_ERROR = (field: string) =>
-  `${field} must be a whole number of cents, 0 or more`
+  `${field} must be a whole number of cents from 0 to ${MAX_SETTING_CENTS}`
 
 /** One rule per `SettingsResponse` field, used to validate a patch and to read a stored row. */
 const RULES: { [K in keyof SettingsResponse]: Rule<SettingsResponse[K]> } = {
@@ -58,11 +65,7 @@ const RULES: { [K in keyof SettingsResponse]: Rule<SettingsResponse[K]> } = {
     10000,
     'taxRateBasisPoints must be a whole number from 0 to 10000',
   ),
-  profitCents: wholeNumber(
-    0,
-    Number.MAX_SAFE_INTEGER,
-    CENTS_ERROR('profitCents'),
-  ),
+  profitCents: wholeNumber(0, MAX_SETTING_CENTS, CENTS_ERROR('profitCents')),
   paydayWeekday: wholeNumber(
     0,
     6,
@@ -70,7 +73,7 @@ const RULES: { [K in keyof SettingsResponse]: Rule<SettingsResponse[K]> } = {
   ),
   personalTaxOwedCents: wholeNumber(
     0,
-    Number.MAX_SAFE_INTEGER,
+    MAX_SETTING_CENTS,
     CENTS_ERROR('personalTaxOwedCents'),
   ),
   currency: {

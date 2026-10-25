@@ -12,9 +12,9 @@ import {
   ERROR,
   HEADING,
   HINT,
-  INPUT,
-  PRIMARY_BUTTON,
-  SCOPE_TAG,
+  SECONDARY_BUTTON,
+  SELECT,
+  scopeTag,
 } from './styles.ts'
 
 // What each account is for (issue 46; prd-02 Rulings 2, 10 and 11). The
@@ -65,7 +65,7 @@ export default function AccountRoles() {
           </p>
           <button
             type="button"
-            className={PRIMARY_BUTTON}
+            className={SECONDARY_BUTTON}
             onClick={() => void accounts.refetch()}
           >
             Try again
@@ -110,11 +110,13 @@ function AccountRow({ account }: { account: AccountSettingsRow }) {
           <span className="text-body-14 font-semibold text-ink">
             {account.name}
           </span>
-          <span className={SCOPE_TAG}>{SCOPE_LABELS[account.scope]}</span>
+          <span className={scopeTag(account.scope)}>
+            {SCOPE_LABELS[account.scope]}
+          </span>
         </div>
         <select
           aria-label={`Role for ${account.name}`}
-          className={INPUT}
+          className={SELECT}
           value={shown ?? ''}
           disabled={mutation.isPending}
           onChange={(event) => mutation.mutate(toRole(event.target.value))}

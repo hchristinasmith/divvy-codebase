@@ -24,6 +24,8 @@ import {
   INPUT,
   LABEL,
   PRIMARY_BUTTON,
+  SECONDARY_BUTTON,
+  SELECT,
 } from './styles.ts'
 
 // The settings the safe-to-spend hero reads (issue 46; prd-02 Rulings 9 and
@@ -94,7 +96,7 @@ export default function SettingsForm() {
           </p>
           <button
             type="button"
-            className={PRIMARY_BUTTON}
+            className={SECONDARY_BUTTON}
             onClick={() => void settings.refetch()}
           >
             Try again
@@ -117,11 +119,14 @@ function SettingsFields({ settings }: { settings: SettingsResponse }) {
   const mutation = useMutation({
     mutationFn: updateSettings,
     onMutate: () => setSaved(false),
-    onSuccess: async (data) => {
+    onSuccess: (data) => {
       setServer(data)
       setDraft(toDraft(data))
       setSaved(true)
-      await Promise.all([
+      // Not awaited: the save is done once the server has answered, so the
+      // button stops saying "Saving…" as "Saved" appears. The refetches
+      // follow on their own.
+      void Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.settings.all }),
         invalidateOverview(queryClient),
       ])
@@ -130,9 +135,20 @@ function SettingsFields({ settings }: { settings: SettingsResponse }) {
 
   function edit(change: Partial<Draft>) {
     setDraft((current) => ({ ...current, ...change }))
+    // A field's error is about what was typed before; editing it clears it.
+    setErrors((current) => {
+      const next = { ...current }
+      for (const key of Object.keys(change))
+        delete next[key as keyof DraftErrors]
+      return next
+    })
     setSaved(false)
     if (mutation.isError) mutation.reset()
   }
+
+  // Inputs are locked while a save is in flight, so nothing typed then is
+  // overwritten by the server's answer.
+  const locked = mutation.isPending
 
   function submit(event: FormEvent) {
     event.preventDefault()
@@ -178,6 +194,7 @@ function SettingsFields({ settings }: { settings: SettingsResponse }) {
         label="Tax rate (%)"
         hint="Applies to Strawb's profit only."
         value={draft.taxRate}
+        disabled={locked}
         error={errors.taxRate}
         onChange={(taxRate) => edit({ taxRate })}
       />
@@ -185,6 +202,7 @@ function SettingsFields({ settings }: { settings: SettingsResponse }) {
         label="Strawb profit, year to date ($)"
         hint="Xero will supply this once it is connected. Until then, type it in."
         value={draft.profit}
+        disabled={locked}
         error={errors.profit}
         onChange={(profit) => edit({ profit })}
       />
@@ -192,6 +210,7 @@ function SettingsFields({ settings }: { settings: SettingsResponse }) {
         label="Payday"
         hint="Every week, on this day."
         value={draft.payday}
+        disabled={locked}
         onChange={(payday) => edit({ payday })}
       >
         {WEEKDAYS.map((day, index) => (
@@ -204,12 +223,14 @@ function SettingsFields({ settings }: { settings: SettingsResponse }) {
         label="Personal income tax owed ($)"
         hint="What you owe Inland Revenue. No rate is applied."
         value={draft.personalTaxOwed}
+        disabled={locked}
         error={errors.personalTaxOwed}
         onChange={(personalTaxOwed) => edit({ personalTaxOwed })}
       />
       <SelectField
         label="Currency symbol"
         value={draft.currency}
+        disabled={locked}
         onChange={(currency) => {
           const symbol = CURRENCY_SYMBOLS.find((s) => s === currency)
           if (symbol !== undefined) edit({ currency: symbol })
@@ -226,16 +247,16 @@ function SettingsFields({ settings }: { settings: SettingsResponse }) {
         <button
           type="submit"
           className={PRIMARY_BUTTON}
-          disabled={unchanged || mutation.isPending}
+          disabled={unchanged || locked}
         >
-          {mutation.isPending ? 'Saving…' : 'Save'}
+          {locked ? 'Saving…' : 'Save'}
         </button>
         {mutation.isError && (
           <p role="alert" className={ERROR}>
             {mutation.error.message}
           </p>
         )}
-        {saved && (
+        {saved && !locked && (
           <p role="status" className="text-body-13 font-semibold text-ok">
             Saved
           </p>
@@ -249,12 +270,14 @@ function TextField({
   label,
   hint,
   value,
+  disabled,
   error,
   onChange,
 }: {
   label: string
   hint: string
   value: string
+  disabled: boolean
   error: string | undefined
   onChange: (value: string) => void
 }) {
@@ -272,6 +295,7 @@ function TextField({
         inputMode="decimal"
         className={INPUT}
         value={value}
+        disabled={disabled}
         aria-invalid={error !== undefined}
         aria-describedby={error === undefined ? hintId : `${errorId} ${hintId}`}
         onChange={(event) => onChange(event.target.value)}
@@ -292,12 +316,14 @@ function SelectField({
   label,
   hint,
   value,
+  disabled,
   onChange,
   children,
 }: {
   label: string
   hint?: string
   value: string
+  disabled: boolean
   onChange: (value: string) => void
   children: ReactNode
 }) {
@@ -310,8 +336,9 @@ function SelectField({
       </label>
       <select
         id={id}
-        className={INPUT}
+        className={SELECT}
         value={value}
+        disabled={disabled}
         aria-describedby={hint === undefined ? undefined : hintId}
         onChange={(event) => onChange(event.target.value)}
       >

@@ -16,6 +16,12 @@ import {
 
 const router = express.Router()
 
+// What a 500 logs: the stack as a string, as server.ts logs one, never the
+// error object and the fields Node prints beside it.
+function logged(error: unknown): string | undefined {
+  return error instanceof Error ? error.stack : typeof error
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -26,7 +32,7 @@ router.get('/', async (_req, res) => {
     const body: SettingsResponse = await db.getSettings()
     res.json(body)
   } catch (error) {
-    console.error('Error reading settings:', error)
+    console.error('Error reading settings:', logged(error))
     res.status(500).json({ error: 'Internal server error' })
   }
 })
@@ -41,7 +47,7 @@ router.patch('/', async (req, res) => {
     const body: SettingsResponse = await db.updateSettings(result.patch)
     res.json(body)
   } catch (error) {
-    console.error('Error updating settings:', error)
+    console.error('Error updating settings:', logged(error))
     res.status(500).json({ error: 'Internal server error' })
   }
 })
@@ -54,7 +60,7 @@ router.get('/accounts', async (_req, res) => {
     }
     res.json(body)
   } catch (error) {
-    console.error('Error listing account roles:', error)
+    console.error('Error listing account roles:', logged(error))
     res.status(500).json({ error: 'Internal server error' })
   }
 })
@@ -102,7 +108,7 @@ router.put('/accounts/:id', async (req, res) => {
     }
     res.json(row)
   } catch (error) {
-    console.error('Error setting account role:', error)
+    console.error('Error setting account role:', logged(error))
     res.status(500).json({ error: 'Internal server error' })
   }
 })

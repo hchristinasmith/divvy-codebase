@@ -220,9 +220,77 @@ describe('the settings form', () => {
     expect(screen.queryByRole('status')).toBeNull()
   })
 
+  it('says Save, not Saving…, once Saved shows, while the refetches are still running', async () => {
+    update.mockResolvedValue({ ...SETTINGS, profitCents: 50000 })
+    const { client } = await renderLoaded()
+    // The refetches never finish: the save must not wait for them.
+    vi.spyOn(client, 'invalidateQueries').mockReturnValue(
+      new Promise<void>(() => {}),
+    )
+
+    type('Strawb profit, year to date ($)', '500')
+    fireEvent.click(saveButton())
+
+    expect((await screen.findByRole('status')).textContent).toBe('Saved')
+    expect(screen.getByRole('button', { name: /^Sav/ }).textContent).toBe(
+      'Save',
+    )
+  })
+
+  it('locks every field while a save is in flight, and unlocks it after', async () => {
+    let answer: (value: SettingsResponse) => void = () => {}
+    update.mockReturnValue(
+      new Promise<SettingsResponse>((resolve) => {
+        answer = resolve
+      }),
+    )
+    await renderLoaded()
+    const fields = [
+      field('Tax rate (%)'),
+      field('Strawb profit, year to date ($)'),
+      select('Payday'),
+      field('Personal income tax owed ($)'),
+      select('Currency symbol'),
+    ]
+
+    type('Strawb profit, year to date ($)', '500')
+    fireEvent.click(saveButton())
+
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(1))
+    await waitFor(() =>
+      expect(fields.map((el) => el.disabled)).toEqual(fields.map(() => true)),
+    )
+
+    await act(async () => answer({ ...SETTINGS, profitCents: 50000 }))
+    await waitFor(() =>
+      expect(fields.map((el) => el.disabled)).toEqual(fields.map(() => false)),
+    )
+  })
+
+  it("clears a field's error when that field is edited, and leaves the others", async () => {
+    await renderLoaded()
+
+    type('Tax rate (%)', 'abc')
+    type('Strawb profit, year to date ($)', '-5')
+    fireEvent.click(saveButton())
+    expect(field('Tax rate (%)').getAttribute('aria-invalid')).toBe('true')
+
+    type('Tax rate (%)', '20')
+
+    const tax = field('Tax rate (%)')
+    expect(tax.getAttribute('aria-invalid')).toBe('false')
+    expect(screen.queryByText('Enter a percentage, like 25 or 10.5')).toBeNull()
+    expect(
+      field('Strawb profit, year to date ($)').getAttribute('aria-invalid'),
+    ).toBe('true')
+    expect(screen.queryByText('Must be 0 or more')).not.toBeNull()
+  })
+
   it("shows the server's refusal and never Saved", async () => {
     update.mockRejectedValue(
-      new Error('profitCents must be a whole number of cents, 0 or more'),
+      new Error(
+        'profitCents must be a whole number of cents from 0 to 900719925474',
+      ),
     )
     await renderLoaded()
 
@@ -231,7 +299,7 @@ describe('the settings form', () => {
 
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toBe(
-      'profitCents must be a whole number of cents, 0 or more',
+      'profitCents must be a whole number of cents from 0 to 900719925474',
     )
     expect(screen.queryByRole('status')).toBeNull()
   })
@@ -396,5 +464,109 @@ describe('account roles', () => {
       ),
     ).not.toBeNull()
     expect(screen.queryByRole('list')).toBeNull()
+  })
+})
+
+// The handoff's tokens where the settings screen uses them
+// (docs/design/handoff.md): class names, because the token is the behaviour.
+describe('design tokens', () => {
+  function classes(el: Element) {
+    return el.className.split(/\s+/)
+  }
+
+  it('codes the scope tag by scope: Personal canvas and muted, Strawb solid pink', async () => {
+    renderWithProviders(<SettingsScreen />)
+    const row = (name: string) =>
+      within(
+        screen.getByLabelText(`Role for ${name}`).closest('li') as HTMLElement,
+      )
+    await screen.findByLabelText('Role for Pot Invented')
+
+    const personal = classes(row('Everyday Invented').getByText('Personal'))
+    const strawb = classes(row('Pot Invented').getByText('Strawb'))
+    for (const tag of [personal, strawb]) {
+      expect(tag).toEqual(
+        expect.arrayContaining(['rounded-tag', 'py-1', 'font-semibold']),
+      )
+      expect(tag).not.toContain('bg-blush')
+      expect(tag).not.toContain('py-0.5')
+    }
+    expect(personal).toEqual(
+      expect.arrayContaining(['bg-canvas', 'text-ink-muted']),
+    )
+    expect(strawb).toEqual(
+      expect.arrayContaining(['bg-pink-hover', 'text-surface']),
+    )
+  })
+
+  it('sets numbers in DM Mono and choices in DM Sans, each with a pink focus border', async () => {
+    await renderLoaded()
+    await screen.findByLabelText('Role for Pot Invented')
+
+    const inputs = [
+      field('Tax rate (%)'),
+      field('Strawb profit, year to date ($)'),
+      field('Personal income tax owed ($)'),
+    ]
+    const selects = [
+      select('Payday'),
+      select('Currency symbol'),
+      select('Role for Pot Invented'),
+    ]
+    for (const el of inputs) {
+      expect(classes(el)).toContain('font-mono')
+    }
+    for (const el of selects) {
+      expect(classes(el)).toContain('font-sans')
+      expect(classes(el)).not.toContain('font-mono')
+    }
+    for (const el of [...inputs, ...selects]) {
+      expect(classes(el)).toEqual(
+        expect.arrayContaining([
+          'focus-visible:border-pink',
+          'focus-visible:outline-pink',
+        ]),
+      )
+    }
+  })
+
+  it('spaces the cards 16px apart', async () => {
+    await renderLoaded()
+
+    const card = screen
+      .getByRole('heading', { name: 'Tax and payday' })
+      .closest('section') as HTMLElement
+    const grid = classes(card.parentElement as HTMLElement)
+    expect(grid).toContain('gap-4')
+    expect(grid).not.toContain('gap-6')
+  })
+
+  it('keeps solid pink for Save and blush for Try again', async () => {
+    grab.mockRejectedValueOnce(new Error('Server error (500)'))
+    grabAccounts.mockRejectedValueOnce(new Error('Server error (500)'))
+    renderWithProviders(<SettingsScreen />)
+
+    await waitFor(() =>
+      expect(screen.getAllByRole('button', { name: 'Try again' })).toHaveLength(
+        2,
+      ),
+    )
+    const retries = screen.getAllByRole('button', { name: 'Try again' })
+    for (const retry of retries) {
+      expect(classes(retry)).toEqual(
+        expect.arrayContaining([
+          'bg-blush',
+          'text-rose',
+          'hover:bg-blush-hover',
+        ]),
+      )
+      expect(classes(retry)).not.toContain('bg-pink')
+    }
+
+    fireEvent.click(retries[0])
+    await screen.findByLabelText('Tax rate (%)')
+    expect(classes(saveButton())).toEqual(
+      expect.arrayContaining(['bg-pink', 'text-surface']),
+    )
   })
 })
