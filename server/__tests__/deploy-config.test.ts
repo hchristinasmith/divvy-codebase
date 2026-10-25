@@ -2,11 +2,13 @@ import { spawnSync } from 'node:child_process'
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -761,12 +763,20 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
     expect(run.stderr).not.toContain('start.sh: serving ')
   })
 
-  it.each(['-wal', '-shm', '-journal'])(
-    'refuses to start anything when %s is on the volume without its database',
-    (suffix) => {
+  // A dangling symlink is a leftover too: `test -e` follows it and says no.
+  it.each([
+    ['-wal', 'file'],
+    ['-shm', 'file'],
+    ['-journal', 'file'],
+    ['-wal', 'dangling symlink'],
+  ])(
+    'refuses to start anything when %s, as a %s, is on the volume without its database',
+    (suffix, kind) => {
       const db = join(tmp, 'data', 'divvy.sqlite3')
       mkdirSync(dirname(db))
-      writeFileSync(`${db}${suffix}`, 'not-a-real-database-leftover')
+      if (kind === 'file')
+        writeFileSync(`${db}${suffix}`, 'not-a-real-database-leftover')
+      else symlinkSync(join(tmp, 'not-a-real-target'), `${db}${suffix}`)
       writeFileSync(join(tmp, 'litestream.yml'), 'dbs: []\n')
       const run = runStart()
 
@@ -779,7 +789,7 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
       expect(errors[0]).toContain(`${db}${suffix}`)
       expect(errors[0]).toContain('docs/restore.md')
       expect(run.calls).toEqual([])
-      expect(existsSync(`${db}${suffix}`)).toBe(true)
+      expect(() => lstatSync(`${db}${suffix}`)).not.toThrow()
       expect(existsSync(db)).toBe(false)
     },
   )

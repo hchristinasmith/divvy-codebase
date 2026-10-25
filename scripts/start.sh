@@ -28,12 +28,17 @@ esac
 # lands on a new, empty database instead. Refuse rather than move them, so the
 # volume is left as found, and before the tailnet steps, so a refused boot
 # starts nothing. The default is the production knexfile's: this checks the
-# file the app would open.
+# file the app would open. `-e` follows symlinks, as Litestream's os.Stat
+# does, so a dangling link at the database counts as missing, which is what
+# Litestream will act on; a sidecar counts if anything is there, a dangling
+# link included (-L).
 db="${DATABASE_PATH:-/data/divvy.sqlite3}"
 if [ ! -e "$db" ]; then
   leftovers=""
   for sidecar in "$db-wal" "$db-shm" "$db-journal"; do
-    [ ! -e "$sidecar" ] || leftovers="$leftovers $sidecar"
+    if [ -e "$sidecar" ] || [ -L "$sidecar" ]; then
+      leftovers="$leftovers $sidecar"
+    fi
   done
   [ -z "$leftovers" ] || die "leftover database files with no database:$leftovers. Refusing to start: they would be replayed onto the restored or new database. Move them off the volume (keep them), then restart. See docs/restore.md"
 fi
