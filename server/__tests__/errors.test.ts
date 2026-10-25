@@ -1242,6 +1242,26 @@ const ONLY_STATUS_READS = (err: Error): Error =>
     },
   })
 
+// `get` throws only for `name`; `code` stays readable, so the logged line is
+// `Error` and the code, with no frames once the name cannot be read.
+const NAME_THROWS_CODED = (err: Error): Error =>
+  new Proxy(Object.assign(err, { code: SQLITE_CODE }), {
+    get(target, prop) {
+      if (prop === 'name') throw trapError()
+      return Reflect.get(target, prop) as unknown
+    },
+  })
+
+// `get` throws only for `statusCode`, the second half of the status read; the
+// first half, `status`, is absent.
+const STATUS_CODE_THROWS = (err: Error): Error =>
+  new Proxy(Object.assign(err, { statusCode: 404 }), {
+    get(target, prop) {
+      if (prop === 'statusCode') throw trapError()
+      return Reflect.get(target, prop) as unknown
+    },
+  })
+
 // The logged text when the name and the stack read cleanly and no code is
 // logged: `Error`, then the coded Error's frames.
 function codedLine(): string {
@@ -1255,6 +1275,8 @@ describe('#363: an Error behind a Proxy whose traps throw', () => {
     ['a getPrototypeOf trap that throws', PROTOTYPE_THROWS, (): string => 'object'],
     ['every trap that throws', EVERY_TRAP_THROWS, (): string => 'object'],
     ['a 401 whose get trap throws for every key', GET_THROWS_ON_401, (): string => 'Error'],
+    ['a name getter that throws, code readable', NAME_THROWS_CODED, (): string => `Error ${SQLITE_CODE}`],
+    ['a statusCode getter that throws', STATUS_CODE_THROWS, codedLine],
   ] as const)(
     '%s on the normal path answers the fixed JSON 500 and logs its fixed line',
     async (_what, make, logged) => {
@@ -1303,6 +1325,7 @@ describe('#363: an Error behind a Proxy whose traps throw', () => {
     ['every trap that throws', EVERY_TRAP_THROWS, (): string => 'object'],
     ['a 401 whose get trap throws for every key', GET_THROWS_ON_401, (): string => 'Error'],
     ['a 401 whose other traps and keys throw', ONLY_STATUS_READS, (): string => 'object'],
+    ['a name getter that throws, code readable', NAME_THROWS_CODED, (): string => `Error ${SQLITE_CODE}`],
   ] as const)(
     '%s after the response started logs its fixed line and resets the connection',
     async (_what, make, logged) => {
