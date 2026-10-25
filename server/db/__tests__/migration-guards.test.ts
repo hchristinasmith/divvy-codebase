@@ -17,6 +17,7 @@ import * as Path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import knex, { Knex } from 'knex'
 import config from '../knexfile.js'
+import { migrateThrough } from './migrateToJustBefore.ts'
 
 const CORRECTIONS = '20261024100004_category_corrections.js'
 const AT = '2026-10-25T03:00:00.000Z'
@@ -39,17 +40,6 @@ afterEach(async () => {
   await db?.destroy()
   db = undefined
 })
-
-// Applies every migration up to and including CORRECTIONS, one step at a
-// time, and checks at least one migration is left for `latest` to run, so
-// the guard is never vacuously green.
-async function migrateThroughCorrections(db: Knex) {
-  const [, pending] = (await db.migrate.list()) as [unknown, { file: string }[]]
-  const index = pending.findIndex((m) => m.file === CORRECTIONS)
-  expect(index, `${CORRECTIONS} is not a pending migration`).toBeGreaterThanOrEqual(0)
-  expect(pending.length - index - 1, `no migration runs after ${CORRECTIONS}`).toBeGreaterThan(0)
-  for (let i = 0; i <= index; i++) await db.migrate.up()
-}
 
 async function survivors(db: Knex, transactionId: number): Promise<Survivors> {
   const seq = await db('sqlite_sequence').where({ name: 'transactions' }).first('seq')
@@ -134,7 +124,7 @@ const withRebuild: Knex.MigrationSource<{ file: string }> = {
 describe('migrations after category_corrections (#134)', () => {
   it('leave every category correction, its transaction and the transactions id counter untouched', async () => {
     db = knex(config.test)
-    await migrateThroughCorrections(db)
+    await migrateThrough(db, CORRECTIONS)
     const { transactionId, before } = await seed(db)
 
     await db.migrate.latest()
@@ -153,7 +143,7 @@ describe('migrations after category_corrections (#134)', () => {
 
   it('canary: a migration that rebuilds transactions cascades the corrections away, and the guard catches it', async () => {
     db = knex({ ...config.test, migrations: { migrationSource: withRebuild } })
-    await migrateThroughCorrections(db)
+    await migrateThrough(db, CORRECTIONS)
     const { transactionId, before } = await seed(db)
 
     await db.migrate.latest()
