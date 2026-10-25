@@ -313,6 +313,7 @@ describe('insertInsight', () => {
     ['title', '\u200bx\u200b'],
     ['title', 'Fixture\u0001 Bakery'],
     ['period', '2026-W43\u0090'],
+    ['body_md', 'Line one\n\nFixture\u0001 Bakery\tpaid'],
   ]
 
   it.each(KEPT)('stores a %s with visible text among invisible characters, unchanged', async (field, text) => {
