@@ -495,6 +495,9 @@ interface RunOptions {
   env?: Record<string, string>
   serveStatus?: string
   tailscaled?: 'fail' | 'no-socket'
+  // The shell that runs start.sh itself; `sh` (bash on macOS, dash in the
+  // image) unless a test names another.
+  shell?: string
 }
 
 // The environment is built from scratch so nothing from the developer's shell
@@ -504,6 +507,7 @@ function runStart({
   env = {},
   serveStatus,
   tailscaled,
+  shell = 'sh',
 }: RunOptions = {}): Run {
   if (serveStatus !== undefined)
     writeFileSync(join(fakeDir, 'serve-status'), serveStatus)
@@ -519,7 +523,7 @@ function runStart({
     DATABASE_PATH: join(tmp, 'data', 'divvy.sqlite3'),
   }
   if (authkey !== null) base.TS_AUTHKEY = authkey
-  const result = spawnSync('sh', [startScript], {
+  const result = spawnSync(shell, [startScript], {
     env: { ...base, ...env },
     encoding: 'utf8',
     timeout: RUN_TIMEOUT_MS,
@@ -905,6 +909,164 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
       expect(dump('node')).toMatch(
         new RegExp(`^AKAHU_USER_TOKEN=${appSecret}$`, 'm'),
       )
+    },
+  )
+
+  // The scrub goes by prefix, not by a list (#291): names nobody listed, set
+  // beside the credential, go too, and so does LITESTREAM_CONFIG, which every
+  // run sets (runStart), so no LITESTREAM_ or AWS_ name is exempt. One value
+  // holds a newline, so its second line starts a line of `env` output.
+  const UNLISTED = {
+    LITESTREAM_ACCESS_KEY_ID: 'not-a-real-litestream-key-id-5',
+    LITESTREAM_SECRET_ACCESS_KEY: 'not-a-real-litestream-secret-key-5',
+    LITESTREAM_FOO: 'not-a-real-litestream-foo',
+    AWS_PROFILE: 'not-a-real-aws-profile',
+    AWS_SECURITY_TOKEN:
+      'not-a-real-aws-security-token\nnot-a-real-aws-security-token-line-2',
+  }
+  const UNLISTED_APP_SECRET = 'not-a-real-secret-sentinel-5'
+
+  function expectNoBackupVariables(run: Run, backups: boolean): void {
+    expect(run.status).toBe(0)
+    if (backups) {
+      // Litestream had them, and copied its key into the AWS_ name, so the
+      // command it starts inherited both sets: the scrub had work to do.
+      const litestreamEnv = dump('litestream')
+      expect(litestreamEnv).toMatch(
+        new RegExp(`^LITESTREAM_FOO=${UNLISTED.LITESTREAM_FOO}$`, 'm'),
+      )
+      expect(litestreamEnv).toMatch(
+        new RegExp(
+          `^AWS_ACCESS_KEY_ID=${UNLISTED.LITESTREAM_ACCESS_KEY_ID}$`,
+          'm',
+        ),
+      )
+    }
+    for (const name of ['npm', 'node']) {
+      const env = dump(name)
+      expect(env).not.toBe('')
+      const names = env
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => line.slice(0, line.indexOf('=')))
+      expect(names.filter((n) => /^(LITESTREAM|AWS)_/.test(n))).toEqual([])
+      for (const value of Object.values(UNLISTED)) {
+        for (const part of value.split('\n')) expect(env).not.toContain(part)
+      }
+    }
+    expect(dump('node')).toMatch(
+      new RegExp(`^AKAHU_USER_TOKEN=${UNLISTED_APP_SECRET}$`, 'm'),
+    )
+  }
+
+  it.each([
+    ['under litestream', true],
+    ['backups OFF', false],
+  ])(
+    'keeps every LITESTREAM_ and AWS_ name, listed or not, and its value out of npm and the server, %s',
+    (_label, backups) => {
+      if (backups) writeFileSync(join(tmp, 'litestream.yml'), 'dbs: []\n')
+      const run = runStart({
+        env: { ...UNLISTED, AKAHU_USER_TOKEN: UNLISTED_APP_SECRET },
+      })
+
+      expectNoBackupVariables(run, backups)
+    },
+  )
+
+  // The image's /bin/sh is dash; this machine's may be bash. start.sh runs
+  // under dash here, and an `sh` in fakeDir puts dash behind the command's own
+  // `sh -c` too. The wrapper records its pid and execs dash, which keeps it,
+  // so npm's parent being one of those pids shows dash ran the scrub. Skipped
+  // where there is no /bin/dash: the tests above then run under whatever sh
+  // the host has.
+  it.skipIf(!existsSync('/bin/dash')).each([
+    ['under litestream', true],
+    ['backups OFF', false],
+  ])(
+    'scrubs the same way with dash as every shell, %s',
+    (_label, backups) => {
+      writeExecutable(
+        join(fakeDir, 'sh'),
+        [
+          '#!/bin/dash',
+          `echo "$$" >>"${fakeDir}/dash.pids"`,
+          'exec /bin/dash "$@"',
+          '',
+        ].join('\n'),
+      )
+      if (backups) writeFileSync(join(tmp, 'litestream.yml'), 'dbs: []\n')
+      const run = runStart({
+        shell: '/bin/dash',
+        env: { ...UNLISTED, AKAHU_USER_TOKEN: UNLISTED_APP_SECRET },
+      })
+
+      expectNoBackupVariables(run, backups)
+      const dashPids = recorded('dash.pids').split('\n')
+      expect(dashPids).toContain(recorded('npm.ppid'))
+      expect(recorded('node.pid')).toBe(recorded('npm.ppid'))
+      expect(dashPids).toContain(
+        backups ? recorded('litestream.child.pid') : String(run.pid),
+      )
+    },
+  )
+
+  // A fake `env` in fakeDir passes start.sh's own `env -i … tailscaled`
+  // through to the real one, and misbehaves only when called bare, as the
+  // scrub calls it: it fails (on the removal's call, or only on the check's),
+  // prints nothing, or shows a name the scrub's unset cannot remove (as bash
+  // passes on a name that is not an identifier). Each must stop the app
+  // before npm, with the scrub's own ERROR line.
+  const FAKE_ENV = `#!/bin/sh
+if [ "$#" -gt 0 ]; then exec /usr/bin/env "$@"; fi
+case "$FAKE_ENV" in
+  fail) exit 1 ;;
+  fail-check)
+    [ ! -e "$FAKE_DIR/env.called" ] || exit 1
+    : >"$FAKE_DIR/env.called"
+    exec /usr/bin/env ;;
+  empty) exit 0 ;;
+  leftover) /usr/bin/env; echo "AWS_NOT_REMOVABLE=not-a-real-leftover" ;;
+esac
+`
+  const failures: [string, string, string][] = [
+    [
+      'env fails',
+      'fail',
+      'env failed, so the LITESTREAM_ and AWS_ variables were not removed',
+    ],
+    [
+      'env fails only for the check',
+      'fail-check',
+      'env failed, so the scrub was not checked',
+    ],
+    ['env prints nothing', 'empty', 'env showed no PATH'],
+    ['a name stays after its unset', 'leftover', 'is still set after the scrub'],
+  ]
+  type FailureRow = [string, string, string, string, boolean]
+  it.each(
+    failures.flatMap(([label, mode, reason]): FailureRow[] => [
+      [label, 'under litestream', mode, reason, true],
+      [label, 'backups OFF', mode, reason, false],
+    ]),
+  )(
+    'fails closed when %s in the scrub, %s',
+    (_label, _branch, mode, reason, backups) => {
+      writeExecutable(join(fakeDir, 'env'), FAKE_ENV)
+      if (backups) writeFileSync(join(tmp, 'litestream.yml'), 'dbs: []\n')
+      const run = runStart({ env: { ...UNLISTED, FAKE_ENV: mode } })
+
+      expect(run.status).not.toBe(0)
+      const errors = run.stderr
+        .split('\n')
+        .filter((line) => line.startsWith('start.sh: ERROR: '))
+      expect(errors).toHaveLength(1)
+      expect(errors[0]).toContain(reason)
+      expect(errors[0]).toContain('Refusing to start the app')
+      expect(ran(run.calls, 'tailscaled ')).toBe(true)
+      expect(ran(run.calls, 'litestream replicate ')).toBe(backups)
+      expect(ran(run.calls, 'npm')).toBe(false)
+      expect(ran(run.calls, 'node')).toBe(false)
     },
   )
 
