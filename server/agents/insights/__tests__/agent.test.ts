@@ -887,6 +887,35 @@ describe('failure and repeat', () => {
     ).rejects.toThrow(message)
     expect(await runRows()).toEqual([])
   })
+
+  // Pre-#349 behaviour, pinned so the fix shows as a deliberate flip. An
+  // early week of the year 0000 passes weekRange, so a run is logged, but
+  // the aggregate window then reaches before 0000-01-01 and a date helper
+  // throws a RangeError inside the run: the run fails rather than being
+  // refused. The #349 fix will turn 0000-W01 and 0000-W25 into refusals
+  // before any run is logged; 0000-W26 is the first week whose window fits.
+  it.each(['0000-W01', '0000-W25'])(
+    'pre-#349: %s logs one failed run (a RangeError inside the run), not a refusal',
+    async (period) => {
+      await seedAccounts()
+      const result = await runInsightsAgent('personal', { period }, clockAt(NOW))
+      expect(result).toMatchObject({ outcome: 'failed', period, considered: 0, written: 0, skipped: 0, rejected: [] })
+      const runs = await runRows()
+      expect(runs).toHaveLength(1)
+      expect(runs[0]).toMatchObject({ outcome: 'failed', considered_count: 0, written_count: 0 })
+      expect(errors).toHaveBeenCalledWith('insights agent: run failed', 'RangeError')
+    },
+  )
+
+  it('pre-#349: 0000-W26 logs one successful run', async () => {
+    await seedAccounts()
+    const result = await runInsightsAgent('personal', { period: '0000-W26' }, clockAt(NOW))
+    expect(result).toMatchObject({ outcome: 'success', period: '0000-W26', considered: 0, written: 0, rejected: [] })
+    const runs = await runRows()
+    expect(runs).toHaveLength(1)
+    expect(runs[0]).toMatchObject({ outcome: 'success' })
+    expect(errors).not.toHaveBeenCalled()
+  })
 })
 
 describe('what a run touches', () => {

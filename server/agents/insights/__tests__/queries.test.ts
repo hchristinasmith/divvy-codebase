@@ -1030,6 +1030,26 @@ describe('dates', () => {
     expect(weekRange('0000-W01')).toStrictEqual({ label: '0000-W01', start: '0000-01-03', end: '0000-01-09' })
   })
 
+  // Pre-#349 behaviour, pinned so the fix shows as a deliberate flip.
+  // weekOverWeek steps back seven days from the week's Monday to find the
+  // previous week; from 0000-01-03 that lands in the year -0001, so the
+  // shared date helper throws its own text. 0000-W02 steps back to 0000-01-03
+  // and returns normally.
+  it('pre-#349: weekOverWeek([], 0000-W01) throws the shared date helper RangeError', () => {
+    let caught: unknown
+    try {
+      weekOverWeek([], '0000-W01')
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(RangeError)
+    expect((caught as Error).message).toBe('a bill date falls outside the years 0000 to 9999')
+  })
+
+  it('pre-#349: weekOverWeek([], 0000-W02) returns normally', () => {
+    expect(() => weekOverWeek([], '0000-W02')).not.toThrow()
+  })
+
   // A window that would start before 0000-01 has no label for its earliest
   // months, so it is refused with a fixed text that names `end` and echoes no
   // value. The boundary cases are the window that starts at 0000-01 exactly
