@@ -12,6 +12,7 @@ import {
   nzCalendarDate,
   readOverview,
 } from '../overview.ts'
+import * as matcher from '../../../shared/drawings.ts'
 
 // The overview's data module (prd-02, issue #44). Every value below is
 // invented.
@@ -22,6 +23,17 @@ vi.mock('../../../shared/safe-to-spend.ts', async (importOriginal) => {
   const real =
     await importOriginal<typeof import('../../../shared/safe-to-spend.ts')>()
   return { ...real, safeToSpend: vi.fn(real.safeToSpend) }
+})
+
+// The real drawing matcher, behind a spy, so a test can make it throw
+// through the real loader. The spy sits on shared/drawings.ts, not on
+// server/db/drawings.ts: that module and overview.ts import each other, and
+// test-utils/app.ts loads it first, so overview.ts would bind to the real
+// loader and never see a spy placed there.
+vi.mock('../../../shared/drawings.ts', async (importOriginal) => {
+  const real =
+    await importOriginal<typeof import('../../../shared/drawings.ts')>()
+  return { ...real, findDrawingIds: vi.fn(real.findDrawingIds) }
 })
 
 describe('nzCalendarDate', () => {
@@ -1656,6 +1668,31 @@ describe('readOverview: drawings (prd-02 Ruling 15)', () => {
       id: OVER_SOFTWARE,
     })
   })
+
+  it.each([
+    ['a RangeError', new RangeError('candidate 7 appears twice')],
+    [
+      'a TypeError',
+      new TypeError(
+        'amountCents of candidate 7 must be an integer number of cents, got 1.5',
+      ),
+    ],
+  ])(
+    'the drawing matcher throwing %s is a fixed-text error, not its message',
+    async (_why, thrown) => {
+      await seedPair()
+      vi.mocked(matcher.findDrawingIds).mockClear()
+      vi.mocked(matcher.findDrawingIds).mockImplementationOnce(() => {
+        throw thrown
+      })
+
+      const err = await errorOf(() => readOverview('all', NOW, connection))
+
+      expect(err).toBeInstanceOf(OverviewDataError)
+      expect((err as Error).message).toMatch(/^safe-to-spend input invalid$/)
+      expect(vi.mocked(matcher.findDrawingIds)).toHaveBeenCalledTimes(1)
+    },
+  )
 })
 
 describe('readOverview: dataAsOf', () => {
