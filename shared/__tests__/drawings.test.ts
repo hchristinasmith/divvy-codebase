@@ -300,6 +300,214 @@ describe('findDrawingIds: one-to-one, greedy, fixed tie-breaks', () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// #276 regression pins. These describe what the greedy matcher does TODAY,
+// before the pairing is changed to prefer a maximum pairing. They are meant to
+// be edited deliberately by the fix, not worked around.
+// ---------------------------------------------------------------------------
+
+/** A candidate with the integer day offset it was built from kept beside it. */
+interface OracleRow {
+  candidate: DrawingCandidate
+  day: number
+}
+
+/** One in-window pair, spelled out. */
+interface OraclePair {
+  outId: number
+  inId: number
+  outDay: number
+  gap: number
+}
+
+const ORACLE_BASE_MS = Date.UTC(2026, 9, 20) // 2026-10-20
+
+/** `YYYY-MM-DD` for a whole-day offset from 2026-10-20. */
+function dateAtOffset(offset: number): string {
+  return new Date(ORACLE_BASE_MS + offset * 86_400_000)
+    .toISOString()
+    .slice(0, 10)
+}
+
+/**
+ * The size of a maximum one-to-one matching over `pairs` (Kuhn's augmenting
+ * paths), ignoring any pair that touches an id in `used`.
+ */
+function maximumPairs(
+  pairs: readonly OraclePair[],
+  used: ReadonlySet<number>,
+): number {
+  const insByOut = new Map<number, number[]>()
+  for (const pair of pairs) {
+    if (used.has(pair.outId) || used.has(pair.inId)) continue
+    const list = insByOut.get(pair.outId)
+    if (list === undefined) insByOut.set(pair.outId, [pair.inId])
+    else list.push(pair.inId)
+  }
+  const outOfIn = new Map<number, number>()
+  const augment = (outId: number, visited: Set<number>): boolean => {
+    for (const inId of insByOut.get(outId) ?? []) {
+      if (visited.has(inId)) continue
+      visited.add(inId)
+      const holder = outOfIn.get(inId)
+      if (holder === undefined || augment(holder, visited)) {
+        outOfIn.set(inId, outId)
+        return true
+      }
+    }
+    return false
+  }
+  let size = 0
+  for (const outId of insByOut.keys()) {
+    if (augment(outId, new Set())) size += 1
+  }
+  return size
+}
+
+/** Every in-window pair among `rows`, spelled out explicitly. */
+function oraclePairs(rows: readonly OracleRow[]): OraclePair[] {
+  const pairs: OraclePair[] = []
+  for (const o of rows) {
+    if (o.candidate.scope !== 'strawb' || o.candidate.amountCents >= 0) continue
+    for (const i of rows) {
+      if (i.candidate.scope !== 'personal') continue
+      if (i.candidate.amountCents !== -o.candidate.amountCents) continue
+      const gap = i.day - o.day
+      if (gap < -DRAWING_DAYS_BEFORE || gap > DRAWING_DAYS_AFTER) continue
+      pairs.push({
+        outId: o.candidate.id,
+        inId: i.candidate.id,
+        outDay: o.day,
+        gap,
+      })
+    }
+  }
+  return pairs
+}
+
+/**
+ * Of all maximum pairings, the one the existing tie-breaks prefer, pair by
+ * pair: walk every in-window pair in tie-break order and take it when neither
+ * half is used and a maximum pairing still exists around it. Returns the
+ * sorted ids of every taken half.
+ */
+function lexMaxOracle(rows: readonly OracleRow[]): number[] {
+  const pairs = oraclePairs(rows)
+  pairs.sort(
+    (a, b) =>
+      Math.abs(a.gap) - Math.abs(b.gap) ||
+      (a.gap < 0 ? 1 : 0) - (b.gap < 0 ? 1 : 0) ||
+      a.outDay - b.outDay ||
+      a.outId - b.outId ||
+      a.inId - b.inId,
+  )
+
+  const best = maximumPairs(pairs, new Set())
+  const used = new Set<number>()
+  let taken = 0
+  for (const pair of pairs) {
+    if (used.has(pair.outId) || used.has(pair.inId)) continue
+    const around = new Set(used).add(pair.outId).add(pair.inId)
+    if (taken + 1 + maximumPairs(pairs, around) !== best) continue
+    used.add(pair.outId)
+    used.add(pair.inId)
+    taken += 1
+  }
+  return [...used].sort((a, b) => a - b)
+}
+
+describe("findDrawingIds: today's greedy pairing (#276 regression pins)", () => {
+  it("today: the issue's table pairs only 2 ↔ 3, leaving 1 and 4 (greedy, #276)", () => {
+    // Gaps, in date − out date: 1 → 3 is +1, 2 → 3 is 0, 2 → 4 is +3, and
+    // 1 → 4 is +4, out of the window. The smallest gap goes first, so 2 ↔ 3
+    // is taken and strands both 1 and 4, though 1 ↔ 3 with 2 ↔ 4 would pair
+    // all four. This pins the greedy answer the fix will change.
+    expect(
+      ids([
+        out(1, '2026-10-26'),
+        out(2, '2026-10-27'),
+        into(3, '2026-10-27'),
+        into(4, '2026-10-30'),
+      ]),
+    ).toStrictEqual([2, 3])
+  })
+
+  it('agrees with the maximum-pairing oracle whenever greedy pairs as many as the maximum, and sometimes pairs fewer', () => {
+    // A fixed-seed generator (mulberry32, a different seed from the shuffle
+    // above), so a failure is reproducible.
+    let seed = 0x276
+    const random = () => {
+      seed = (seed + 0x6d2b79f5) | 0
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+    }
+    const below = (n: number) => Math.floor(random() * n)
+
+    const generate = (): OracleRow[] => {
+      const shapes: Omit<DrawingCandidate, 'id' | 'date'>[] = []
+      const amounts = below(2) === 0 ? [30000] : [30000, 12345]
+      for (const cents of amounts) {
+        for (let n = below(5); n > 0; n -= 1) {
+          shapes.push({ scope: 'strawb', amountCents: -cents })
+        }
+        for (let n = below(5); n > 0; n -= 1) {
+          shapes.push({ scope: 'personal', amountCents: cents })
+        }
+        // Money put in: never a half, but it must not disturb the pairing.
+        if (below(4) === 0) {
+          shapes.push({ scope: 'personal', amountCents: -cents })
+        }
+        if (below(4) === 0) {
+          shapes.push({ scope: 'strawb', amountCents: cents })
+        }
+      }
+      // Unique ids, shuffled so the id order and the day order disagree.
+      const idPool = shapes.map((_, index) => index + 1)
+      for (let i = idPool.length - 1; i > 0; i -= 1) {
+        const j = below(i + 1)
+        ;[idPool[i], idPool[j]] = [idPool[j], idPool[i]]
+      }
+      return shapes.map((shape, index) => {
+        const day = below(10)
+        return {
+          day,
+          candidate: { ...shape, id: idPool[index], date: dateAtOffset(day) },
+        }
+      })
+    }
+
+    const cases = 2000
+    let atMaximum = 0
+    let shortOfMaximum = 0
+    for (let n = 0; n < cases; n += 1) {
+      const rows = generate()
+      const result = findDrawingIds(rows.map((row) => row.candidate))
+      const halves = [...result].sort((a, b) => a - b)
+      const pairsFound = result.size / 2
+
+      const best = maximumPairs(oraclePairs(rows), new Set())
+
+      // Greedy can never beat the maximum.
+      expect(pairsFound, `case ${n}`).toBeLessThanOrEqual(best)
+      if (pairsFound === best) {
+        atMaximum += 1
+        expect(halves, `case ${n}: ${JSON.stringify(rows)}`).toStrictEqual(
+          lexMaxOracle(rows),
+        )
+      } else {
+        shortOfMaximum += 1
+      }
+    }
+
+    expect(atMaximum + shortOfMaximum).toBe(cases)
+    // The generator reaches the bug the fix targets, and the agreeing bucket
+    // is not empty either.
+    expect(shortOfMaximum).toBeGreaterThan(0)
+    expect(atMaximum).toBeGreaterThan(0)
+  })
+})
+
 describe('findDrawingIds: refusals', () => {
   it.each<[string, DrawingCandidate[], ErrorConstructor, string]>([
     [
