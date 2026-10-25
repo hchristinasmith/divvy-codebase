@@ -125,10 +125,6 @@ export function nzCalendarDate(at: Date): IsoDate {
   }
 }
 
-// Stays exported for server/db/__tests__/bills.test.ts until it imports
-// from shared/nz-dates.ts.
-export { billOccurrencesThrough }
-
 // ---------------------------------------------------------------------------
 // Reading
 // ---------------------------------------------------------------------------

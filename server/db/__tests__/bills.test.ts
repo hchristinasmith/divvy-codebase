@@ -14,7 +14,7 @@ import {
   validateCreateBill,
   type NewBill,
 } from '../bills.ts'
-import { billOccurrencesThrough } from '../overview.ts'
+import { billOccurrencesThrough } from '../../../shared/nz-dates.ts'
 import type { BillRepeat } from '../../../models/planning.ts'
 import type { BillResponse } from '../../../shared/contracts.ts'
 
