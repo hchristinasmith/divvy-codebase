@@ -40,7 +40,8 @@ const router = express.Router()
 // text. Only the error's class is logged.
 
 /**
- * A copy of `parseScope` in ./overview.ts; change both together.
+ * A copy of `parseScope` in ./overview.ts and ./subscriptions.ts; change
+ * all together.
  * A plain `all`, `personal` or `strawb`; anything else is refused.
  */
 function parseScope(raw: unknown): Scope | null {
@@ -48,9 +49,10 @@ function parseScope(raw: unknown): Scope | null {
 }
 
 /**
- * A copy of `fromThisSite` in ./overview.ts and ./sync.ts; change all
- * together. `Sec-Fetch-Site` when the browser sends it; otherwise no
- * `Origin` (curl) passes and an `Origin` must name this host.
+ * A copy of `fromThisSite` in ./overview.ts, ./subscriptions.ts and
+ * ./sync.ts; change all together. `Sec-Fetch-Site` when the browser sends
+ * it; otherwise no `Origin` (curl) passes and an `Origin` must name this
+ * host.
  */
 function fromThisSite(req: Request): boolean {
   const site = req.headers['sec-fetch-site']
@@ -69,8 +71,8 @@ function fromThisSite(req: Request): boolean {
 }
 
 /**
- * A copy of `errorClass` in ./overview.ts, ./accounts.ts and
- * ../sync/scheduler.ts; change all together.
+ * A copy of `errorClass` in ./overview.ts, ./accounts.ts, ./subscriptions.ts
+ * and ../sync/scheduler.ts; change all together.
  */
 function errorClass(err: unknown): string {
   return err instanceof Error ? err.constructor.name : typeof err
