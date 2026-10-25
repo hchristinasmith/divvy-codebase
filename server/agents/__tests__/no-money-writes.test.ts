@@ -18,10 +18,12 @@ import { assertInMemory, closeDb } from '../../test-utils/app.ts'
 // TypeScript compiler, so a comment is never code.
 //
 // What counts as a write, for every module:
-//   1. importing a writer: anything under server/sync/, server/xero/ or
-//      server/routes/; a server/db/*.ts module that itself contains a write
-//      (found by running rule 2 over server/db/); a database driver; knex as
-//      a value;
+//   1. importing a writer: anything under server/sync/, server/xero/,
+//      server/routes/, server/db/seeds/ or server/db/migrations/; a
+//      server/db/** module that itself contains a write (found by running
+//      rule 2 over server/db/, recursively); a database driver; knex as a
+//      value; or a module in `BANNED_MODULES` (a module loader, the network,
+//      another process or thread, the file system);
 //   2. a knex write (`insert`, `update`, `del`, ...) whose chain does not
 //      start at a call naming an inbox table as a literal, or that starts at
 //      the knex instance itself (`trx.insert(row).into(...)`). A name is
@@ -30,8 +32,10 @@ import { assertInMemory, closeDb } from '../../test-utils/app.ts'
 //      `const q = db('t'); q.update()` and `(tx) => tx.insert(r).into('t')`
 //      are writes to `t`;
 //   3. raw SQL, knex's schema, migrate and seed APIs, a computed member access
-//      that could reach a write or raw SQL, and every way of loading a module
-//      the import rule cannot see.
+//      that could reach a write or raw SQL, every way of loading a module
+//      the import rule cannot see (`process.getBuiltinModule` included), and
+//      any reference to a global in `NETWORK_GLOBALS` (Ruling 7: agents call
+//      nothing over the network, this app's own API included).
 // A table name built at run time is out of reach of any source check, this
 // one included.
 //
@@ -57,8 +61,39 @@ const WRITES = new Set([
   'merge',
 ])
 const DB_HANDLES = new Set(['db', 'trx', 'knex', 'connection'])
-const WRITER_DIRS = ['server/sync/', 'server/xero/', 'server/routes/']
+const WRITER_DIRS = [
+  'server/sync/',
+  'server/xero/',
+  'server/routes/',
+  'server/db/seeds/',
+  'server/db/migrations/',
+]
 const DRIVERS = new Set(['sqlite3', 'better-sqlite3'])
+// Modules no agent has a use for, compared without a `node:` prefix: a
+// module loader (`createRequire` reaches any writer unseen), the network
+// (a request to this app's own API is a write), another process or thread
+// (a `sqlite3` shell, a worker importing a writer), and the file system.
+const BANNED_MODULES = new Set([
+  'module',
+  'http',
+  'https',
+  'http2',
+  'net',
+  'tls',
+  'dgram',
+  'dns',
+  'undici',
+  'axios',
+  'child_process',
+  'worker_threads',
+  'fs',
+  'fs/promises',
+])
+// The globals that reach the network without an import.
+const NETWORK_GLOBALS = new Set(['fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource'])
+// The global object's names, through which a network global is reached as a
+// member.
+const GLOBALS = new Set(['globalThis', 'global', 'window', 'self'])
 const NAMED = /\b(transactions|category_corrections|budgets|bills|goals|settings)\b/
 const RAW = /\.raw\b|[a-z]Raw\b/
 const ADMIN = new Set(['schema', 'migrate', 'seed'])
@@ -70,7 +105,7 @@ const EXEMPTION = {
 } as const
 
 interface Context {
-  // Repo-relative paths of the server/db/*.ts modules that write.
+  // Repo-relative paths of the server/db/** modules that write.
   writers: Set<string>
   // Every table outside the inbox, from the migrated schema.
   others: string[]
@@ -235,7 +270,7 @@ function codeOf(source: ts.SourceFile): string {
 }
 
 // Whether a server/db module writes: rule 2 finds a write to any table, or
-// it reaches raw SQL. Run over server/db/*.ts to build `Context.writers`.
+// it reaches raw SQL. Run over server/db/** to build `Context.writers`.
 function containsWrite(path: string, text: string): boolean {
   const source = parse(path, text)
   const anyTable = writeProblems(source).length > 0
@@ -301,11 +336,30 @@ function importProblems(path: string, source: ts.SourceFile, ctx: Context): stri
       if (!exempt) found.push(`imports writer ${target}`)
     } else if (DRIVERS.has(specifier)) {
       found.push(`imports driver ${specifier}`)
+    } else if (BANNED_MODULES.has(specifier.replace(/^node:/, ''))) {
+      found.push(`imports banned module ${specifier}`)
     } else if (specifier === 'knex' && (clause === undefined || !isTypeOnly(clause))) {
       found.push('imports knex as a value')
     }
   }
   return found
+}
+
+// Whether an identifier is the global of that name: a bare reference, or a
+// member of the global object. A property of anything else (`options.fetch`,
+// a key in an object literal) is some other name.
+function isGlobalReference(node: ts.Identifier): boolean {
+  const p = node.parent
+  if (ts.isPropertyAccessExpression(p) && p.name === node) {
+    return ts.isIdentifier(p.expression) && GLOBALS.has(p.expression.text)
+  }
+  const named =
+    ts.isPropertyAssignment(p) ||
+    ts.isMethodDeclaration(p) ||
+    ts.isPropertyDeclaration(p) ||
+    ts.isPropertySignature(p) ||
+    ts.isMethodSignature(p)
+  return !(named && p.name === node)
 }
 
 // Every way of reaching a module or a query that the import rule cannot see.
@@ -325,7 +379,12 @@ function reachProblems(source: ts.SourceFile): string[] {
       // A literal key is a property read like any other unless it names a
       // write or raw SQL (`db['raw']`); any other computed key could.
       if (literal !== undefined) {
-        if (WRITES.has(literal) || /^raw$|Raw$/.test(literal)) {
+        if (
+          WRITES.has(literal) ||
+          /^raw$|Raw$/.test(literal) ||
+          NETWORK_GLOBALS.has(literal) ||
+          literal === 'getBuiltinModule'
+        ) {
           found.push(`computed member access ['${literal}']`)
         }
       } else if (!ts.isNumericLiteral(key)) {
@@ -334,6 +393,13 @@ function reachProblems(source: ts.SourceFile): string[] {
     } else if (ts.isPropertyAccessExpression(node) && ADMIN.has(node.name.text)) {
       // `db.schema.dropTable(...)`, `db.migrate.rollback()`: DDL, not a query.
       found.push(`knex admin access .${node.name.text}`)
+    } else if (ts.isIdentifier(node)) {
+      // Loads a built-in with no import (Node 22). Any use of the name counts:
+      // a member access, a destructured binding, an alias.
+      if (node.text === 'getBuiltinModule') found.push('module loader getBuiltinModule')
+      if (NETWORK_GLOBALS.has(node.text) && isGlobalReference(node)) {
+        found.push(`network call through ${node.text}`)
+      }
     }
     ts.forEachChild(node, visit)
   }
@@ -412,7 +478,7 @@ beforeAll(async () => {
   const tables: string[] = await connection('sqlite_master')
     .where({ type: 'table' })
     .pluck('name')
-  const writers = modulesUnder('server/db/', false).filter((path) =>
+  const writers = modulesUnder('server/db/').filter((path) =>
     containsWrite(path, read(path)),
   )
   ctx = {
@@ -445,6 +511,12 @@ describe('the guard’s inputs', () => {
     )
     expect(ctx.writers.has('server/db/connection.ts')).toBe(false)
     expect(ctx.writers.has('server/db/categories.ts')).toBe(false)
+  })
+
+  it('writer detection reaches modules nested under server/db/', () => {
+    // The seed deletes and re-inserts `transactions`; it is found only if
+    // the scan recurses.
+    expect(ctx.writers.has('server/db/seeds/transactions.js')).toBe(true)
   })
 
   it('the exemption names a writer module', () => {
@@ -625,6 +697,118 @@ describe('planted violations', () => {
     ['import = require', "import m = require('../../db/transactions.ts')", 'import = require'],
   ])('%s is flagged', (_why, text, problem) => {
     expect(problemsFor(RULES, text, ctx)).toContain(problem)
+  })
+
+  // Found by the security-auditor on #51: each got a planted module past the
+  // guard before its rule existed.
+  it.each([
+    [
+      'createRequire from node:module',
+      "import { createRequire } from 'node:module'\nconst r = createRequire(import.meta.url)\nr('../../db/transactions.ts')",
+      'imports banned module node:module',
+    ],
+    [
+      'createRequire from module',
+      "import { createRequire } from 'module'\nconst r = createRequire(import.meta.url)\nr('../../db/transactions.ts')",
+      'imports banned module module',
+    ],
+    [
+      'a PATCH to this app’s own API with fetch',
+      "await fetch('http://127.0.0.1:3005/api/v1/transactions/1', { method: 'PATCH' })",
+      'network call through fetch',
+    ],
+    [
+      'globalThis.fetch',
+      "await globalThis.fetch('http://127.0.0.1:3005/api/v1/transactions/1', { method: 'PATCH' })",
+      'network call through fetch',
+    ],
+    ['fetch held in a const', "const send = fetch\nawait send('http://127.0.0.1:3005/')", 'network call through fetch'],
+    ["globalThis['fetch']", "await globalThis['fetch']('http://127.0.0.1:3005/')", "computed member access ['fetch']"],
+    ['an XMLHttpRequest', "const req = new XMLHttpRequest()\nreq.open('PATCH', '/api/v1/transactions/1')", 'network call through XMLHttpRequest'],
+    ['a WebSocket', "new WebSocket('ws://127.0.0.1:3005/')", 'network call through WebSocket'],
+    ['globalThis.WebSocket', "new globalThis.WebSocket('ws://127.0.0.1:3005/')", 'network call through WebSocket'],
+    ['an EventSource', "new EventSource('http://127.0.0.1:3005/')", 'network call through EventSource'],
+    ["globalThis['EventSource']", "new globalThis['EventSource']('http://127.0.0.1:3005/')", "computed member access ['EventSource']"],
+    ['process.getBuiltinModule', "const fs = process.getBuiltinModule('fs')", 'module loader getBuiltinModule'],
+    [
+      'getBuiltinModule destructured',
+      "const { getBuiltinModule } = process\nconst cp = getBuiltinModule('child_process')",
+      'module loader getBuiltinModule',
+    ],
+    ["process['getBuiltinModule']", "process['getBuiltinModule']('fs')", "computed member access ['getBuiltinModule']"],
+    [
+      'an execSync of the sqlite3 shell',
+      "import { execSync } from 'node:child_process'\nexecSync(\"sqlite3 dev.sqlite3 'UPDATE transactions SET category = 1'\")",
+      'imports banned module node:child_process',
+    ],
+    [
+      'the seed module',
+      "import { seed } from '../../db/seeds/transactions.js'",
+      'imports writer server/db/seeds/transactions.js',
+    ],
+    // A seed the writer scan has not read (added after it ran, or written so
+    // the detector misses it): only the directory rule catches it.
+    [
+      'a seed the writer scan does not know',
+      "import { seed } from '../../db/seeds/invented_seed.js'",
+      'imports writer server/db/seeds/invented_seed.js',
+    ],
+    // A migration that only creates a table holds no write chain, so only the
+    // directory rule catches it.
+    [
+      'a migration',
+      "import { down } from '../../db/migrations/20250619122142_targets.js'",
+      'imports writer server/db/migrations/20250619122142_targets.js',
+    ],
+  ])('%s is flagged', (_why, text, problem) => {
+    expect(problemsFor(RULES, text, ctx)).toContain(problem)
+  })
+
+  it.each([
+    'module',
+    'http',
+    'https',
+    'http2',
+    'net',
+    'tls',
+    'dgram',
+    'dns',
+    'undici',
+    'axios',
+    'child_process',
+    'worker_threads',
+    'fs',
+    'fs/promises',
+  ])('importing %s, with or without node:, is flagged', (name) => {
+    for (const specifier of [name, `node:${name}`]) {
+      expect(problemsFor(RULES, `import { x } from '${specifier}'`, ctx), specifier).toContain(
+        `imports banned module ${specifier}`,
+      )
+      expect(problemsFor(RULES, `export * from '${specifier}'`, ctx), specifier).toContain(
+        `imports banned module ${specifier}`,
+      )
+    }
+  })
+
+  it('a nested server/db module that writes is a writer to import', () => {
+    const nested = 'server/db/archive/writes.ts'
+    const withNested: Context = { ...ctx, writers: new Set([...ctx.writers, nested]) }
+    expect(problemsFor(RULES, "import { w } from '../../db/archive/writes.ts'", withNested)).toContain(
+      `imports writer ${nested}`,
+    )
+  })
+
+  it('a create-table migration is no writer by detection, so the directory rule is what catches it', () => {
+    expect(ctx.writers.has('server/db/migrations/20250619122142_targets.js')).toBe(false)
+  })
+
+  it.each([
+    ['node:path', "import { posix } from 'node:path'"],
+    ['node:url', "import { fileURLToPath } from 'node:url'"],
+    ['a property named fetch', 'const options = { fetch: false }\nif (options.fetch) go()'],
+    ['a member named WebSocket on an object of its own', 'const kinds = { WebSocket: 1 }\nuse(kinds.WebSocket)'],
+  ])('%s passes', (_why, text) => {
+    expect(problemsFor(RULES, text, ctx)).toEqual([])
   })
 
   it.each([
