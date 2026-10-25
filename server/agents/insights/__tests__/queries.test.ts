@@ -441,6 +441,18 @@ describe('drawings (prd-02 Ruling 15)', () => {
     expect(ledger.map((r) => r.category)).not.toContain('Drawings')
   })
 
+  it('only a raw category of exactly Drawings is one: the check runs before cleaning', async () => {
+    await seedAccounts()
+    // Cleaned, both read "Drawings"; neither is, as shared/drawings.ts reads them.
+    await tx({ at: day('2026-10-20'), cents: -2100, merchant: 'Near Drawings Colon', category: 'Drawings:' })
+    await tx({ at: day('2026-10-20'), cents: -2200, merchant: 'Near Drawings Space', category: ' Drawings', categorySource: 'user' })
+    const ledger = await loadLedger('personal', '2026-10-19', '2026-10-25')
+    expect(ledger.map((r) => [r.merchant, r.category])).toEqual([
+      ['Near Drawings Space', 'Drawings'],
+      ['Near Drawings Colon', 'Drawings'],
+    ])
+  })
+
   it('a drawing is dropped before transfers pair, so it never takes a same-scope leg', async () => {
     await seedWithDrawings()
     // A second strawb account, and an inflow on it equal to the drawing's out
@@ -871,6 +883,8 @@ describe('cleanLabel', () => {
     ['https\uFF1A//x', 'https x'],
     // NFKC first: full-width letters and the ideographic space fold to ASCII.
     ['\uFF26\uFF35\uFF2C\uFF2C\u3000\uFF57\uFF49\uFF44\uFF54\uFF48', 'FULL width'],
+    // A full-width ampersand is a kept `&` only if NFKC runs before the filter.
+    ['A\uFF06B', 'A&B'],
     ['Bad\u202Eevil\u200Bname\u2066', 'Bad evil name'],
     ['a'.repeat(500), 'a'.repeat(40)],
     ['www.evil.com', 'www.evil.com'],
@@ -914,11 +928,85 @@ describe('cleanLabel', () => {
   ])('the cleaned %j holds none of : < / \\ ` and passes the chart validator as a value', (input) => {
     const out = cleanLabel(input, FALLBACK)
     for (const banned of [':', '<', '/', '\\', '`']) expect(out).not.toContain(banned)
-    const checked = validateChartSpec({
-      data: { values: [{ merchant: out, spend_cents: 100 }] },
-      mark: 'bar',
-      encoding: { x: { field: 'merchant', type: 'nominal' }, y: { field: 'spend_cents', type: 'quantitative' } },
-    })
-    expect(checked.ok).toBe(true)
+    expect(passesAsValue(out)).toBe(true)
+  })
+
+  // Only a bounded prefix is read, before NFKC, so a huge feed string costs
+  // bounded work.
+  it('reads only the first 400 UTF-16 units: text after them is never seen', () => {
+    expect(cleanLabel(' '.repeat(400) + 'Shop', FALLBACK)).toBe(FALLBACK)
+    expect(cleanLabel(' '.repeat(399) + 'Shop', FALLBACK)).toBe('S')
+    expect(cleanLabel('Shop' + 'x'.repeat(10_000_000), FALLBACK)).toBe('Shop' + 'x'.repeat(36))
+  })
+
+  it('cuts the prefix before NFKC, not after: a ligature at the edge folds whole', () => {
+    // U+FB01 is one unit that NFKC folds to "fi". Cut after folding, only
+    // the "f" would be inside the first 400 units.
+    expect(cleanLabel(' '.repeat(399) + 'ﬁZ', FALLBACK)).toBe('fi')
+  })
+
+  it('never splits a surrogate pair at the prefix edge', () => {
+    // Unobservable through the output (a lone surrogate is dropped as any
+    // disallowed character is); held so the pair at the edge is whole or gone.
+    expect(cleanLabel('a'.repeat(399) + surrogate, FALLBACK)).toBe('a'.repeat(40))
+    expect(cleanLabel(' '.repeat(398) + surrogate + 'Z', FALLBACK)).toBe(surrogate)
+  })
+
+  it.each([
+    ['12-3456-0123456-00', '####'],
+    ['4111 1111 1111 1111', '####'],
+    ['BNZ 12-3456-0123456-00 Transfer', 'BNZ #### Transfer'],
+    ['12345678', '####'],
+    // NFKC first: full-width digits are digits.
+    ['４１１１ １１１１', '####'],
+    // A slash or an invisible character between groups is counted through.
+    ['4111​1111/1111-1111', '####'],
+    // Masked before the 40 code point cut, so no prefix of the number shows.
+    ['a'.repeat(35) + ' 4111111111111111', 'a'.repeat(35) + ' ####'],
+  ])('a long digit run in %j is masked: %j', (input, output) => {
+    const out = cleanLabel(input, FALLBACK)
+    expect(out).toBe(output)
+    expect(passesAsValue(out)).toBe(true)
+  })
+
+  it.each([
+    ['7 Eleven', '7 Eleven'],
+    ['Store 123', 'Store 123'],
+    ['2026', '2026'],
+    ['1234567', '1234567'],
+    ['Flight NZ 123 4567', 'Flight NZ 123 4567'],
+    ['1,234,567.89', '1,234,567.89'],
+  ])('a short number in %j is kept: %j', (input, output) => {
+    expect(cleanLabel(input, FALLBACK)).toBe(output)
+  })
+
+  // The coupling between cleanLabel and the chart validator, pinned for every
+  // BMP code point (lone surrogates skipped), alone, flanked and repeated.
+  // Every output is checked for the banned characters; distinct outputs are
+  // each run through the validator once.
+  it('every BMP code point, cleaned, holds no banned character and passes the chart validator', () => {
+    const banned = /[:<>/\\`[\]*|~!\n\r]/
+    const outputs = new Set<string>()
+    for (let code = 0; code <= 0xffff; code += 1) {
+      if (code >= 0xd800 && code <= 0xdfff) continue
+      const c = String.fromCharCode(code)
+      for (const input of [c, `a${c}b`, `${c}${c}${c}`]) {
+        const out = cleanLabel(input, FALLBACK)
+        if (banned.test(out)) expect.fail(`U+${code.toString(16)} in ${JSON.stringify(input)} leaves ${JSON.stringify(out)}`)
+        outputs.add(out)
+      }
+    }
+    for (const out of outputs) {
+      if (!passesAsValue(out)) expect.fail(`${JSON.stringify(out)} is refused by the chart validator`)
+    }
   })
 })
+
+// A label as a chart data value, as prompt.ts writes it.
+function passesAsValue(label: string): boolean {
+  return validateChartSpec({
+    data: { values: [{ merchant: label, spend_cents: 100 }] },
+    mark: 'bar',
+    encoding: { x: { field: 'merchant', type: 'nominal' }, y: { field: 'spend_cents', type: 'quantitative' } },
+  }).ok
+}

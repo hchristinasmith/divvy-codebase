@@ -19,6 +19,10 @@
 // id, scope, date and amount (so a personal inflow's merchant, category and
 // description are never read). A `personal` run never makes that read and
 // reads no strawb row: a personal half is an inflow, which is never spend.
+// It therefore cannot tell a drawing's in half from any other inflow, so
+// `excludeTransfers` may pair it with a personal outflow of equal cents on
+// another personal account within TRANSFER_WINDOW_DAYS, and that outflow is
+// then not counted as spend. The strawb side has no such gap.
 // server/db/drawings.ts is not imported because it imports
 // server/db/overview.ts, which writes.
 //
@@ -236,19 +240,38 @@ export function monthsEnding(end: IsoDate, n: number = MONTHLY_MONTHS): string[]
 // and bidi character.
 const LABEL_CHAR = /[\p{L}\p{N} &'.,\-+()#@%_]/u
 
+// Only this many UTF-16 units of a label are read, so a huge feed string
+// costs bounded work: NFKC and the character filter never see the rest.
+// Far past LABEL_MAX_CODE_POINTS, so no ordinary label is changed by it.
+const LABEL_MAX_INPUT_UNITS = 400
+
+// Eight or more decimal digits, counting through spaces and hyphens between
+// groups: an account number ("12-3456-0123456-00") or a card number. Run
+// after the filter, so a slash or an invisible character between groups has
+// already become a space and is counted through too. A dot or a comma, which
+// the filter keeps, ends a run: "1,234,567.89" is left as it is.
+const LONG_DIGIT_RUN = /\p{Nd}(?:[ -]*\p{Nd}){7,}/gu
+const DIGIT_MASK = '####'
+
 /**
- * Merchant or category text made safe to show: NFKC-folded first (so a
- * full-width colon is a colon before it is dropped), disallowed characters
- * replaced by spaces, whitespace collapsed, and cut to a maximum number of
- * code points without splitting a surrogate pair. Empty after that, it is
- * `fallback`.
+ * Merchant or category text made safe to show: cut to a bounded prefix
+ * (never splitting a surrogate pair), NFKC-folded (so a full-width colon is
+ * a colon before it is dropped, and full-width digits are digits),
+ * disallowed characters replaced by spaces, whitespace collapsed, every run
+ * of eight or more digits masked (so no account or card number is stored),
+ * and cut to a maximum number of code points without splitting a surrogate
+ * pair. Empty after that, it is `fallback`.
  */
 export function cleanLabel(text: string | null, fallback: string): string {
   if (typeof text !== 'string') return fallback
+  let end = Math.min(text.length, LABEL_MAX_INPUT_UNITS)
+  const last = text.charCodeAt(end - 1)
+  if (end < text.length && last >= 0xd800 && last <= 0xdbff) end -= 1
   let kept = ''
-  for (const char of text.normalize('NFKC')) kept += LABEL_CHAR.test(char) ? char : ' '
+  for (const char of text.slice(0, end).normalize('NFKC')) kept += LABEL_CHAR.test(char) ? char : ' '
   const collapsed = kept.replace(/\s+/g, ' ').trim()
-  const cut = Array.from(collapsed).slice(0, LABEL_MAX_CODE_POINTS).join('').trim()
+  const masked = collapsed.replace(LONG_DIGIT_RUN, DIGIT_MASK)
+  const cut = Array.from(masked).slice(0, LABEL_MAX_CODE_POINTS).join('').trim()
   return cut === '' ? fallback : cut
 }
 
