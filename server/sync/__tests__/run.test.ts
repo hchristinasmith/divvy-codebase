@@ -489,6 +489,34 @@ describe('the settled window (Ruling 2, amended by Ruling 10)', () => {
     ).toEqual({ start: at(-730 * DAY_MS).toISOString(), end: NOW.toISOString() })
   })
 
+  it('follows the most recent success, not the oldest or the first inserted', async () => {
+    // The recent success has the lower id, so neither ascending start order
+    // nor descending id order alone finds it.
+    expect(
+      await windowAfter([
+        { started_at: at(-15 * MINUTE_MS).toISOString(), outcome: 'success' },
+        { started_at: at(-40 * DAY_MS).toISOString(), outcome: 'success' },
+      ]),
+    ).toEqual({
+      start: at(-30 * DAY_MS - 15 * MINUTE_MS).toISOString(),
+      end: NOW.toISOString(),
+    })
+  })
+
+  it('uses the shared start when two successes started at the same instant', async () => {
+    // The window can only show the start time, which is the same for both
+    // rows, so this pins that duplicates read cleanly; it cannot see which
+    // row the `id desc` tie-break picks.
+    const sameStart = at(-2 * DAY_MS).toISOString()
+    expect(
+      await windowAfter([
+        { started_at: at(-20 * DAY_MS).toISOString(), outcome: 'success' },
+        { started_at: sameStart, outcome: 'success' },
+        { started_at: sameStart, outcome: 'success' },
+      ]),
+    ).toEqual({ start: at(-32 * DAY_MS).toISOString(), end: NOW.toISOString() })
+  })
+
   it('never starts later than 30 days before now, even if the clock went back', async () => {
     expect(
       await windowAfter([
@@ -516,6 +544,32 @@ describe('one run at a time (Ruling 6)', () => {
       {
         id: 1,
         started_at: at(-31 * MINUTE_MS).toISOString(),
+        finished_at: NOW.toISOString(),
+        outcome: 'failed',
+        inserted_count: 0,
+        updated_count: 0,
+        pending_mirrored_count: 0,
+        error_message: 'sync_abandoned: run did not finish within the stale timeout',
+      },
+      expect.objectContaining({ id: 2, outcome: 'success' }),
+    ])
+  })
+
+  it('treats a running row whose start does not parse as abandoned, then runs', async () => {
+    await db('sync_runs').insert({
+      started_at: 'not-a-timestamp',
+      outcome: 'running',
+    })
+    const akahu = fakeAkahu()
+
+    const result = await runSync({ client: akahu.client, db, now: fixed(NOW) })
+
+    expect(result).toMatchObject({ outcome: 'success', runId: 2 })
+    expect(akahu.calls.length).toBeGreaterThan(0)
+    expect(await syncRuns()).toEqual([
+      {
+        id: 1,
+        started_at: 'not-a-timestamp',
         finished_at: NOW.toISOString(),
         outcome: 'failed',
         inserted_count: 0,
@@ -624,6 +678,128 @@ describe('duplicates in one response', () => {
       { akahu_id: 'trans_dup', description: 'EXAMPLE LAST COPY', amount_cents: -200 },
     ])
     expect(await db('accounts').pluck('name')).toEqual(['Fixture Last'])
+  })
+})
+
+describe('a response larger than one SQLite statement can bind', () => {
+  // Each settled row binds one variable per column, so a single insert of
+  // this many rows is far past SQLite's 999-variable bound, and the second
+  // run looks up more ids than one lookup may bind. This SQLite build allows
+  // far more than 999, so the bound is checked on the statements themselves
+  // rather than left to the database to refuse.
+  const COUNT = 1100
+  const SQLITE_MAX_VARIABLES = 999
+
+  /** Invented settled items; `cents` is an integer and is sent as dollars text. */
+  function bulkItems(): string[] {
+    return Array.from({ length: COUNT }, (_, i) => {
+      const cents = -(i * 7 + 1)
+      return settledItem(
+        `trans_bulk_${String(i).padStart(4, '0')}`,
+        `EXAMPLE BULK ${i}`,
+        (cents / 100).toFixed(2),
+      )
+    })
+  }
+
+  const bulkClient = () =>
+    fakeAkahu({ transactions: page(bulkItems()), pending: page([]) }).client
+
+  /** The number of values bound by each statement issued while `body` runs. */
+  async function boundVariables(body: () => Promise<void>): Promise<number[]> {
+    const counts: number[] = []
+    const listener = (query: { bindings?: readonly unknown[] }) => {
+      counts.push(query.bindings?.length ?? 0)
+    }
+    db.on('query', listener)
+    try {
+      await body()
+    } finally {
+      db.off('query', listener)
+    }
+    return counts
+  }
+
+  it('inserts every row once, then finds every row again and changes none', async () => {
+    const firstBound = await boundVariables(async () => {
+      const first = await runSync({ client: bulkClient(), db, now: fixed(NOW) })
+      expect(first).toMatchObject({
+        outcome: 'success',
+        insertedCount: COUNT,
+        updatedCount: 0,
+      })
+    })
+    expect(await db('transactions').count({ n: '*' })).toEqual([{ n: COUNT }])
+    expect(
+      await db('transactions').countDistinct({ n: 'akahu_id' }),
+    ).toEqual([{ n: COUNT }])
+    expect(
+      await db('transactions')
+        .where({ akahu_id: 'trans_bulk_1099' })
+        .pluck('amount_cents'),
+    ).toEqual([-7694])
+
+    const before = await snapshot()
+    const secondBound = await boundVariables(async () => {
+      const second = await runSync({
+        client: bulkClient(),
+        db,
+        now: fixed(at(15 * MINUTE_MS)),
+      })
+      expect(second).toMatchObject({
+        outcome: 'success',
+        insertedCount: 0,
+        updatedCount: 0,
+      })
+    })
+    expect(await db('transactions').count({ n: '*' })).toEqual([{ n: COUNT }])
+    expect(await snapshot()).toEqual(before)
+
+    // The first run split its inserts, the second split its id lookups; the
+    // largest statement of either stays under SQLite's documented bound,
+    // though the second run alone bound at least COUNT ids across them.
+    expect(Math.max(...firstBound)).toBeLessThanOrEqual(SQLITE_MAX_VARIABLES)
+    expect(Math.max(...secondBound)).toBeLessThanOrEqual(SQLITE_MAX_VARIABLES)
+    expect(secondBound.reduce((sum, n) => sum + n, 0)).toBeGreaterThanOrEqual(COUNT)
+  })
+})
+
+describe('the pending mirror only replaces Akahu pending rows', () => {
+  // `transactions.source` accepts only 'akahu' and 'xero' (migration
+  // 20261024100003), so the non-Akahu pending row is a Xero one.
+  it('keeps a pending row that is not from Akahu, run after run', async () => {
+    await db('transactions').insert({
+      account_id: 'acc_fixture0001everyday',
+      date: '2026-10-24T00:00:00.000Z',
+      description: 'EXAMPLE XERO PENDING',
+      amount_cents: -1250,
+      status: 'pending',
+      source: 'xero',
+    })
+    const xeroRow = () =>
+      db('transactions').where({ description: 'EXAMPLE XERO PENDING' }).select()
+
+    const first = await runSync({ client: fakeAkahu().client, db, now: fixed(NOW) })
+    expect(first).toMatchObject({ outcome: 'success', pendingMirroredCount: 2 })
+    const kept = await xeroRow()
+    expect(kept).toHaveLength(1)
+    expect(kept[0]).toMatchObject({
+      status: 'pending',
+      source: 'xero',
+      amount_cents: -1250,
+    })
+
+    // Akahu now lists no pending items: its rows go, the Xero one stays.
+    const second = await runSync({
+      client: fakeAkahu({ pending: page([]) }).client,
+      db,
+      now: fixed(at(15 * MINUTE_MS)),
+    })
+    expect(second).toMatchObject({ outcome: 'success', pendingMirroredCount: 0 })
+    expect(await xeroRow()).toEqual(kept)
+    expect(
+      await db('transactions').where({ status: 'pending' }).pluck('source'),
+    ).toEqual(['xero'])
   })
 })
 
