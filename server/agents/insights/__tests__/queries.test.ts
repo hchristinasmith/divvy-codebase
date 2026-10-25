@@ -1026,10 +1026,11 @@ describe('cleanLabel', () => {
     expect(cleanLabel('a:\u0301b', FALLBACK)).toBe('a b')
   })
 
-  it('#304: a mark on a default-ignorable letter has no base', () => {
-    // U+115F, a Hangul filler, is a letter that draws nothing. It is kept
-    // today (that is not #304's to change); the mark on it is not.
-    expect(cleanLabel('\u115F\u0301x', FALLBACK)).not.toContain('\u0301')
+  it('#304: a mark after a default-ignorable letter has no base', () => {
+    // U+115F, a Hangul filler, is a letter that draws nothing. It becomes a
+    // space (#312), so the mark after it has no base and is dropped.
+    expect(cleanLabel('\u115F\u0301x', FALLBACK)).toBe('x')
+    expect(cleanLabel('a\u115F\u0301x', FALLBACK)).toBe('a x')
   })
 
   it('#304: a digit is a base, so its marks are kept, up to the cap, outside a long digit run', () => {
@@ -1153,25 +1154,29 @@ describe('cleanLabel', () => {
   // The coupling between cleanLabel and the chart validator, pinned for every
   // BMP code point (lone surrogates skipped), alone, flanked and repeated,
   // and for every combining mark in the whole code space stacked deep on a
-  // base and placed with no base, plus a Zalgo string (#304). Every output is
-  // checked for the banned characters and against the mark rule; distinct
-  // outputs are each run through the validator once.
-  it('every BMP code point and every stacked mark, cleaned, holds no banned character, keeps the mark rule and passes the chart validator', () => {
+  // base and placed with no base, plus a Zalgo string (#304), and for every
+  // BMP code point and every default-ignorable one in the whole code space
+  // between the groups of a 16-digit number (#312). Every output is checked
+  // for the banned characters, against the mark rule and for a digit run a
+  // reader would see; distinct outputs are each run through the validator once.
+  it('every BMP code point and every stacked mark, cleaned, holds no banned character, keeps the mark rule, shows no long digit run and passes the chart validator', () => {
     const banned = /[:<>/\\`[\]*|~!\n\r]/
     const inputs: string[] = []
+    const between = (c: string) => ['5550', '0123', '4567', '8901'].join(c)
     for (let code = 0; code <= 0xffff; code += 1) {
       if (code >= 0xd800 && code <= 0xdfff) continue
       const c = String.fromCharCode(code)
-      inputs.push(c, `a${c}b`, `${c}${c}${c}`)
+      inputs.push(c, `a${c}b`, `${c}${c}${c}`, between(c))
     }
     const marks: string[] = []
     for (let code = 0; code <= 0x10ffff; code += 1) {
       if (code >= 0xd800 && code <= 0xdfff) continue
       const c = String.fromCodePoint(code)
       if (/\p{M}/u.test(c)) marks.push(c)
+      if (code > 0xffff && /\p{DI}/u.test(c)) inputs.push(between(c))
     }
     // On a letter and a digit (bases); at the start, after a space, after kept
-    // punctuation and after a Hangul filler, a letter that draws nothing (no base).
+    // punctuation and after a Hangul filler, which becomes a space (no base).
     for (const m of marks) {
       inputs.push(`a${m.repeat(20)}b`, `1${m.repeat(20)}`, `${m.repeat(20)}a`, ` ${m}${m}`, `a.${m}b`, `\u3164${m}a`)
     }
@@ -1182,6 +1187,8 @@ describe('cleanLabel', () => {
       if (banned.test(out)) expect.fail(`${JSON.stringify(input)} leaves ${JSON.stringify(out)}`)
       const broken = markRuleBreak(out)
       if (broken !== null) expect.fail(`${JSON.stringify(input)} leaves ${JSON.stringify(out)}: ${broken}`)
+      const run = visibleDigitRun(out)
+      if (run !== null) expect.fail(`${JSON.stringify(input)} leaves ${JSON.stringify(out)}, which shows ${run}`)
       outputs.add(out)
     }
     for (const out of outputs) {
@@ -1189,42 +1196,56 @@ describe('cleanLabel', () => {
     }
   })
 
-  // #312 pins today's behaviour for a Hangul filler: a letter that draws
-  // nothing and is kept, so it sits between digit groups where a space would
-  // let LONG_DIGIT_RUN count through. NFKC folds U+3164 and U+FFA0 to U+1160
-  // first; U+115F and U+1160 are kept as they are. The digits are invented
-  // (not Luhn-valid, not a known test card).
-  it.each([
-    ['U+3164', '\u3164', '\u1160'],
-    ['U+115F', '\u115F', '\u115F'],
-    ['U+1160', '\u1160', '\u1160'],
-    ['U+FFA0', '\uFFA0', '\u1160'],
-  ])('#312 regression: a 16-digit number split by %s keeps its digits unmasked today', (_name, filler, kept) => {
-    const out = cleanLabel(['5550', '0123', '4567', '8901'].join(filler), FALLBACK)
-    expect(out).toBe(['5550', '0123', '4567', '8901'].join(kept))
-    expect(out).not.toContain('####')
+  // #312: the Hangul fillers are letters that draw nothing and are
+  // default-ignorable, so each becomes a space, as any other invisible
+  // character does. NFKC folds U+3164 and U+FFA0 to U+1160 before the filter,
+  // so a rule naming only the code points in the input would miss them. The
+  // digits are invented (not Luhn-valid, not a known test card).
+  const FILLERS: [string, string][] = [
+    ['U+115F', '\u115F'],
+    ['U+1160', '\u1160'],
+    ['U+3164', '\u3164'],
+    ['U+FFA0', '\uFFA0'],
+  ]
+  const GROUPS = ['5550', '0123', '4567', '8901']
+
+  it.each(FILLERS)('#312: a 16-digit number split by %s is masked, as one split by spaces is', (_name, filler) => {
+    expect(cleanLabel(GROUPS.join(filler), FALLBACK)).toBe('####')
+    expect(cleanLabel(`Pay ${GROUPS.join(filler)} now`, FALLBACK)).toBe('Pay #### now')
+    expect(cleanLabel(GROUPS.join(' '), FALLBACK)).toBe('####')
   })
 
-  it('#312 regression: the same number split by spaces is masked today, so only the filler hides it', () => {
-    expect(cleanLabel('5550 0123 4567 8901', FALLBACK)).toBe('####')
+  it.each(FILLERS)('#312: a label of only %s, once or repeated, is the fallback', (_name, filler) => {
+    expect(cleanLabel(filler, FALLBACK)).toBe(FALLBACK)
+    expect(cleanLabel(filler.repeat(3), FALLBACK)).toBe(FALLBACK)
+    expect(cleanLabel(` ${filler} `, FALLBACK)).toBe(FALLBACK)
   })
 
-  it.each([
-    ['one U+3164', '\u3164', '\u1160'],
-    ['three U+3164', '\u3164\u3164\u3164', '\u1160\u1160\u1160'],
-    ['one U+115F', '\u115F', '\u115F'],
-    ['one U+FFA0', '\uFFA0', '\u1160'],
-  ])('#312 regression: a label of only %s is not the fallback today', (_name, input, output) => {
-    expect(cleanLabel(input, FALLBACK)).toBe(output)
-    expect(cleanLabel(input, FALLBACK)).not.toBe(FALLBACK)
+  it.each(FILLERS)('#312: "Shop" with %s before or after it cleans to "Shop"', (_name, filler) => {
+    expect(cleanLabel(`Shop${filler}`, FALLBACK)).toBe(cleanLabel('Shop', FALLBACK))
+    expect(cleanLabel(`${filler}Shop${filler}${filler}`, FALLBACK)).toBe('Shop')
   })
 
-  it('#312 regression: "Shop" and "Shop" plus a U+3164 differ today', () => {
-    const plain = cleanLabel('Shop', FALLBACK)
-    const padded = cleanLabel('Shop\u3164', FALLBACK)
-    expect(plain).toBe('Shop')
-    expect(padded).toBe('Shop\u1160')
-    expect(padded).not.toBe(plain)
+  it.each(FILLERS)('#312: %s inside a word becomes a space, as any disallowed character does', (_name, filler) => {
+    expect(cleanLabel(`Sh${filler}op`, FALLBACK)).toBe('Sh op')
+  })
+
+  // The sweep's digit-escape check, held to what it must see and must not.
+  it('visibleDigitRun sees eight digits through what draws nothing, marks, spaces and hyphens, and not through a dot or a comma', () => {
+    for (const label of [
+      '55500123',
+      '5550\u11600123\u11604567\u11608901',
+      '5550\u31640123',
+      '5550\u200B0123',
+      '5550 0123 4567 8901',
+      '5550-0123-4567-8901',
+      '5\u03015\u03015\u03010\u03010\u03011\u03012\u03013\u0301',
+    ]) {
+      expect(visibleDigitRun(label), JSON.stringify(label)).not.toBeNull()
+    }
+    for (const label of ['1,234,567.89', '5550.0123.4567.8901', '1234567', 'Flight NZ 123 4567', 'Pay #### now']) {
+      expect(visibleDigitRun(label), JSON.stringify(label)).toBeNull()
+    }
   })
 })
 
@@ -1245,6 +1266,18 @@ function markRuleBreak(label: string): string | null {
     if (run > 3) return 'more than three marks on one base'
   }
   return null
+}
+
+// Eight decimal digits a reader would see as one run in a cleaned label, or
+// null (#312). Written apart from cleanLabel, and sharing none of its
+// patterns, so a gap in the mask cannot hide in both: it removes what draws
+// nothing or only decorates a digit (default-ignorable and format characters,
+// marks) and the separators the mask counts through (whitespace and dashes),
+// then looks for eight digits in a row. A dot or a comma is left in, so
+// "1,234,567.89" ends its runs there, as the mask intends.
+function visibleDigitRun(label: string): string | null {
+  const seen = label.replace(/[\p{DI}\p{M}\p{Cf}\p{White_Space}\p{Pd}]/gu, '')
+  return /\p{Nd}{8}/u.exec(seen)?.[0] ?? null
 }
 
 // A label as a chart data value, as prompt.ts writes it.

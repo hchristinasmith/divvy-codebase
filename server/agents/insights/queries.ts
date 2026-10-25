@@ -250,14 +250,21 @@ export function monthsEnding(end: IsoDate, n: number = MONTHLY_MONTHS): string[]
 // names use. Every other character becomes a space, except the combining
 // marks LABEL_MARK allows (below): `:` and `/` (so no URL scheme or path
 // survives), `<` `>` `\` and the backtick (no markup and no way out of a
-// markdown code span), brackets, `*` `|` `~` `!`, and every control, format
-// and bidi character.
-const LABEL_CHAR = /[\p{L}\p{N} &'.,\-+()#@%_]/u
+// markdown code span), brackets, `*` `|` `~` `!`, every control, format
+// and bidi character, and every default-ignorable character, letters
+// included (#312). The Hangul fillers are letters that draw nothing: kept,
+// one between digit groups would end LONG_DIGIT_RUN without showing, and a
+// label of only fillers would look blank instead of being the fallback.
+// NFKC folds some fillers into others before this filter, so the rule is
+// the property, not a list of code points.
+const LABEL_CHAR = /(?!\p{DI})[\p{L}\p{N} &'.,\-+()#@%_]/u
 
 // Combining marks (#304). Scripts such as Devanagari, Thai and Tibetan need
 // them: without them "हिन्दी" would read "ह न द". A mark is kept only on a base,
-// which is a kept letter or number that is not default-ignorable (a Hangul
-// filler draws nothing, so a mark on it would sit on the character before).
+// which is a kept letter or number that is not default-ignorable. LABEL_CHAR
+// already keeps no default-ignorable character; LABEL_BASE excludes them
+// again, so a mark never lands on a character that draws nothing (where it
+// would draw over the character before), even if LABEL_CHAR is widened.
 // A mark straight after a base, or after a mark kept on that base, is kept,
 // up to LABEL_MAX_MARKS_PER_BASE; one past the cap, or one with no base (at
 // the start, or after a space, a punctuation mark or a dropped character),
@@ -296,9 +303,10 @@ const LABEL_MAX_INPUT_UNITS = 400
 // ("12-3456-0123456-00") or a card number, also one with a combining mark on
 // every digit, which would otherwise end the run at each digit and leave the
 // number readable. A digit's marks are masked with it. Run after the filter,
-// so a slash or an invisible character between groups has already become a
-// space and is counted through too. A dot or a comma, which the filter keeps,
-// ends a run: "1,234,567.89" is left as it is.
+// so a slash or a default-ignorable character between groups (a zero-width
+// space, a Hangul filler) has already become a space and is counted through
+// too. A dot or a comma, which the filter keeps, ends a run: "1,234,567.89"
+// is left as it is.
 const LONG_DIGIT_RUN = /\p{Nd}\p{M}*(?:[ -]*\p{Nd}\p{M}*){7,}/gu
 const DIGIT_MASK = '####'
 
