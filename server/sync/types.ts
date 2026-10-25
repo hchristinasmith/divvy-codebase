@@ -3,9 +3,11 @@
 // These are the client's output shapes, not database rows: the rows and
 // their migrations belong to `models/sync.ts` (#19). Every field is flat and
 // snake_case, every amount is integer cents in a `*_cents` field (prd-01
-// Ruling 3), and every text field is verbatim what Akahu sent. A field Akahu
-// may omit is `null` here, never `undefined`, so a consumer cannot mistake a
-// missing key for a missing value.
+// Ruling 3), and every text field is verbatim what Akahu sent, except that a
+// logo or website URL is kept only when it is an absolute https URL; other
+// text there is `null` (issue #193). A field Akahu may omit is `null` here,
+// never `undefined`, so a consumer cannot mistake a missing key for a missing
+// value.
 //
 // A foreign-currency conversion's `rate` (issue #155) is a number that is
 // not money, so it is not cents either. It stays the exact decimal text
@@ -35,7 +37,10 @@ export interface AkahuAccount {
   connection_name: string
   /** Akahu's connection type as sent, e.g. `classic` (issue #155). */
   connection_type: string | null
-  /** The connection's logo URL, verbatim (issue #155). */
+  /**
+   * The connection's logo URL as sent, if it is an absolute https URL; else
+   * null (issue #193).
+   */
   connection_logo: string | null
   /** Akahu's `_authorisation` id for the account (issue #155). */
   authorisation_id: string | null
@@ -63,8 +68,15 @@ export interface TransactionMerchant {
   id: string | null
   name: string | null
   nzbn: string | null
+  /**
+   * The merchant's website URL as sent, if it is an absolute https URL; else
+   * null (issue #193).
+   */
   website: string | null
-  /** The merchant's logo URL, verbatim (issue #155). */
+  /**
+   * The merchant's logo URL as sent, if it is an absolute https URL; else
+   * null (issue #193).
+   */
   logo: string | null
 }
 
@@ -91,6 +103,10 @@ export interface TransactionMeta {
   particulars: string | null
   reference: string | null
   other_account: string | null
+  /**
+   * The logo URL as sent, if it is an absolute https URL; else null (issue
+   * #193).
+   */
   logo: string | null
   /** The card's last digits, as text so a leading zero survives (#155). */
   card_suffix: string | null

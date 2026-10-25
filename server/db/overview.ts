@@ -181,11 +181,12 @@ const NUMERIC_SETTINGS = [
 const WHOLE_NUMBER = /^-?\d+$/
 
 /**
- * The settings safe-to-spend needs. Several rows may hold one key (the
- * table has no uniqueness on it and a `user_id` Divvy no longer has); the
- * one with the newest `updated_at` wins, then the higher `id` (a text
- * column, so compared as text). An absent key takes its default; a present
- * one must be a whole number. Range is left to the shared module.
+ * The settings safe-to-spend needs. `settings` has a UNIQUE `key`
+ * (migration 20261025150000, #46), so a key has at most one row; the query's
+ * ordering (newest `updated_at`, then higher integer `id`) picks between rows
+ * only on a table without that constraint, and is kept as a guard. An absent
+ * key takes its default; a present one must be a whole number. Range is left
+ * to the shared module.
  */
 async function readSettings(db: Db): Promise<Settings> {
   const rows: { key: string; value: unknown }[] = await db('settings')
@@ -213,7 +214,8 @@ async function readSettings(db: Db): Promise<Settings> {
     const key = SETTING_KEYS[field]
     if (!newest.has(key)) continue
     const value = newest.get(key)
-    // A NULL value is a row that is present and says nothing usable.
+    // `value` is NOT NULL (#46), so the type test is a guard; the whole-number
+    // test is live, since stored text such as a blank or a decimal reaches it.
     if (typeof value !== 'string' || !WHOLE_NUMBER.test(value)) {
       throw new OverviewDataError('a stored setting is not valid')
     }
