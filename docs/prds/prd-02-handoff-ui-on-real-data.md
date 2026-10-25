@@ -169,7 +169,7 @@ Unfiled work implied, described not numbered: pixel review pass against the prot
 - How is the Freedom date computed ("when savings cover your costs", `handoff.md:44`)? No formula is given; Habits ships without it until it is. Open, not ruled.
 - Is the profit figure per month, per tax year, or year to date? Changes what "taxRate × profit" means in Ruling 2. — ANSWERED (Hannah, 2026-10-23): year to date, accrual basis, from Xero's P&L (prd-05). Until Xero is connected the Strawb profit input is 0 and the tax hold is driven by the tax pot alone.
 - Which accounts are your Strawb business accounts in Akahu, and is there one at all? Blocks the Strawb scope having content. Open, not ruled.
-- How are Bills, Sync and Privacy reached on the phone? The tab bar has five items and none of them (`handoff.md:14`). Open, not ruled.
+- How are Bills, Sync and Privacy reached on the phone? The tab bar has five items and none of them (`handoff.md:14`). — ANSWERED (Hannah, 2026-10-25): links on the Overview. Bills, Sync and Privacy are reached from cards or a footer row on the Overview, and the tab bar stays at five. The Overview screen (#45) builds the links.
 
 **Not blocking:** Xero, the Advisor chat, the weekly report, the Patterns card text, dark mode.
 
