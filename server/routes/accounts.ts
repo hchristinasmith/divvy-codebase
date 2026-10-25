@@ -17,9 +17,11 @@ import {
 // The responses keep Akahu's envelope, `{ success: true, items }`, so the
 // Dashboard reads them unchanged. Money is integer cents in the database and
 // becomes dollars only here, at the envelope edge (prd-01 Ruling 3), through
-// `centsToDollars`, which parses the number from the whole dollars and the
-// two-digit remainder, never from `cents / 100`. A key whose column is
-// NULL is left out of the item, never sent as 0 or null.
+// `centsToDollars`, the single conversion point. It parses the number from
+// the whole dollars and the two-digit remainder, so the stored value is only
+// ever handled as an integer; for a safe integer this gives the same double
+// as `cents / 100`. A key whose column is NULL is left out of the item,
+// never sent as 0 or null.
 //
 // The category is the effective one with its source (Ruling 4), shaped like
 // Akahu's category object because the Dashboard reads
@@ -102,8 +104,10 @@ export interface TransactionItem {
 
 /**
  * Integer cents to a JSON dollar number: 1250 → 12.5, -5 → -0.05, 0 → 0
- * (never -0). The number is parsed from the cents' own digits, so it is
- * the nearest double to the exact two-decimal amount. Throws on anything
+ * (never -0). The number is parsed from the cents' own digits, which keeps
+ * the stored value integer-only up to this single conversion point (prd-01
+ * Ruling 3); the result is the nearest double to the exact two-decimal
+ * amount, the same one `cents / 100` gives. Throws on anything
  * that is not a safe integer: a fractional or NaN "cents" is corrupt data,
  * not something to round.
  */

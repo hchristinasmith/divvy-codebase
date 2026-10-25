@@ -379,6 +379,7 @@ describe('GET /api/v1/accounts/transactions filters by account', () => {
     ['empty', '?accountIds='],
     ['only commas', '?accountIds=,'],
     ['an object', '?accountIds[x]=y'],
+    ['an array holding an object', '?accountIds[0][x]=y'],
   ])('refuses accountIds that is %s with a 400', async (_why, query) => {
     const res = await api.get(`/api/v1/accounts/transactions${query}`)
 
@@ -652,6 +653,60 @@ describe('a read failure is a 500 with a message, never an empty 200', () => {
     expect(res.body).toStrictEqual({ error: 'Could not read accounts' })
     expect(error.mock.calls).toStrictEqual([
       ['accounts: could not read accounts', 'SyntaxError'],
+    ])
+  })
+
+  // Valid JSON that is not an array of strings: JSON.parse accepts it, so
+  // only the shape check stands between it and a 200 with a string or a
+  // number where the Dashboard expects attribute names.
+  it.each([
+    ['a JSON string', '"x"'],
+    ['an array holding a number', '[1]'],
+  ])('attributes that are %s', async (_why, attributes) => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await insertAccounts({ akahu_id: 'acc_shape', attributes })
+
+    const res = await api.get('/api/v1/accounts')
+
+    expect(res.status).toBe(500)
+    expect(res.body).toStrictEqual({ error: 'Could not read accounts' })
+    expect(error.mock.calls).toStrictEqual([
+      ['accounts: could not read accounts', 'Error'],
+    ])
+  })
+
+  // An Akahu account with a NULL akahu_id is not tested here: the
+  // accounts_akahu_has_akahu_id CHECK refuses to store one.
+
+  it('a settled transaction with no akahu_id', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await insertTransactions(settled('trans_unused', { akahu_id: null }))
+
+    const res = await api.get('/api/v1/accounts/transactions')
+
+    expect(res.status).toBe(500)
+    expect(res.body).toStrictEqual({ error: 'Could not read transactions' })
+    expect(error.mock.calls).toStrictEqual([
+      ['accounts: could not read transactions', 'Error'],
+    ])
+  })
+
+  // The route's own NULL check and centsToDollars's safe-integer check both
+  // refuse this row, so the test pins the 500, not which of them fired.
+  it.each([
+    ['settled', settled('trans_noamount', { amount_cents: null })],
+    ['pending', pending({ amount_cents: null })],
+  ])('a %s transaction with no amount_cents', async (_why, row) => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await insertTransactions(row)
+
+    const res = await api.get('/api/v1/accounts/transactions')
+
+    expect(res.status).toBe(500)
+    expect(res.body).toStrictEqual({ error: 'Could not read transactions' })
+    expect(res.text).not.toMatch(/"amount"/)
+    expect(error.mock.calls).toStrictEqual([
+      ['accounts: could not read transactions', 'Error'],
     ])
   })
 })

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, waitFor } from '@testing-library/react'
+import { act, cleanup, waitFor } from '@testing-library/react'
 import { grabSyncStatus } from '../../../apis/apiClient.ts'
 import SyncPill from '../../Shell/SyncPill.tsx'
 import { renderWithProviders } from '../../Shell/__tests__/renderWithProviders.tsx'
@@ -200,6 +200,11 @@ describe('LastSynced', () => {
     ],
     // superagent gives a non-JSON response a null body.
     ['an HTML page', null],
+    // Otherwise a valid "never synced" body: only the running check refuses it.
+    [
+      'a running that is not a boolean',
+      { running: 'false', lastRun: null, lastSuccessAt: null, nextRunAt: null },
+    ],
   ])(
     'treats a 200 with %s as an error, not "Never synced"',
     async (_why, body) => {
@@ -212,6 +217,41 @@ describe('LastSynced', () => {
       )
     },
   )
+
+  it('asks for the status again once a minute', async () => {
+    // Interval timers faked too, so the minute passes without waiting.
+    // Re-faking over beforeEach's Date-only fake left setInterval real, so
+    // the Date-only fake comes off first.
+    vi.useRealTimers()
+    vi.useFakeTimers({
+      toFake: [
+        'Date',
+        'setTimeout',
+        'clearTimeout',
+        'setInterval',
+        'clearInterval',
+      ],
+    })
+    vi.setSystemTime(NOW)
+    grab.mockResolvedValue(status({ lastSuccessAt: minutesAgo(5) }))
+
+    // act() lets React commit what each advance resolved.
+    const advance = (ms: number) =>
+      act(async () => {
+        await vi.advanceTimersByTimeAsync(ms)
+      })
+
+    renderWithProviders(<LastSynced />)
+    await advance(0)
+    expect(line().getAttribute('data-last-synced')).toBe('synced')
+    expect(grab).toHaveBeenCalledTimes(1)
+
+    await advance(60_000 - 1)
+    expect(grab).toHaveBeenCalledTimes(1)
+
+    await advance(1)
+    expect(grab).toHaveBeenCalledTimes(2)
+  })
 
   it('shares a query client with the header pill without either overwriting the other', async () => {
     // The pill reads /sync/status through fetch and caches a timestamp; this
