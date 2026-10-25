@@ -138,6 +138,18 @@ describe('the goal cards', () => {
     ).toBe('0')
   })
 
+  it("fills each bar to the route's saved share of the target", async () => {
+    setup(goalsResponse([HOLIDAY, LAPTOP, RAINY_DAY]))
+    await loaded()
+
+    const fill = (name: string): string =>
+      (within(card(name)).getByRole('progressbar').firstElementChild as HTMLElement)
+        .style.width
+    expect(fill('Sample Holiday')).toBe('40%')
+    expect(fill('Sample Laptop')).toBe('100%')
+    expect(fill('Sample Rainy Day')).toBe('0%')
+  })
+
   it('says one month in the singular', async () => {
     setup(goalsResponse([goal({ paceCents: 180000, monthsToGo: 1 })]))
     await loaded()
@@ -151,10 +163,16 @@ describe('the goal cards', () => {
     setup(goalsResponse())
     await loaded()
 
-    const main = document.body.textContent ?? ''
-    expect(main).toContain(
-      "Contributions are records of a transfer you make yourself. Divvy doesn't move money, and recording one doesn't change safe-to-spend.",
+    const note = screen.getByText(
+      (_, el) =>
+        el?.tagName === 'P' &&
+        el.textContent ===
+          "Contributions are records of a transfer you make yourself. Divvy doesn't move money, and recording one doesn't change safe-to-spend.",
     )
+    // On screen, not just in the DOM: neither it nor anything around it is
+    // hidden from sight or from a screen reader.
+    expect(note.closest('[hidden], [aria-hidden="true"]')).toBeNull()
+    const main = document.body.textContent ?? ''
     expect(main).not.toContain('Personal · Savings')
     expect(main).not.toContain('Funded from')
     expect(main).not.toContain('with the advisor')
@@ -602,6 +620,22 @@ describe('creating a goal', () => {
     const saveButton = screen.getByRole('button', { name: 'Save' })
     fireEvent.click(saveButton)
     fireEvent.click(saveButton)
+
+    await screen.findByRole('button', { name: 'Saving…' })
+    expect(fx.callsTo('POST', LIST)).toHaveLength(1)
+  })
+
+  it('creates once for two submits in one batch, before Save can disable', async () => {
+    const { fx } = setup(goalsResponse(), { create: () => undefined })
+    await loaded()
+
+    const form = open()
+    type('Name', 'Sample Car')
+    type('Target ($)', '1500')
+    act(() => {
+      fireEvent.submit(form)
+      fireEvent.submit(form)
+    })
 
     await screen.findByRole('button', { name: 'Saving…' })
     expect(fx.callsTo('POST', LIST)).toHaveLength(1)

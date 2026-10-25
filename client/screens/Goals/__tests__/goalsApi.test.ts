@@ -129,6 +129,22 @@ describe('grabGoals', () => {
     expect(Object.keys(body)).toEqual(['items'])
     expect(body.items).toEqual([car, rainy])
   })
+
+  it('names the status when a refusal carries no JSON message', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve(
+          new Response('<html>Bad gateway page</html>', {
+            status: 500,
+            headers: { 'content-type': 'text/html' },
+          }),
+        ),
+      ),
+    )
+
+    await expect(api.grabGoals()).rejects.toThrow(new Error('Server error (500)'))
+  })
 })
 
 describe('addContribution', () => {
