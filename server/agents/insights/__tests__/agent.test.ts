@@ -274,6 +274,16 @@ describe('a run', () => {
     expect(run).toMatchObject({ started_at: NOW.toISOString(), finished_at: later.toISOString() })
   })
 
+  // #305 pins today's behaviour: finished_at is the later of the wall clock
+  // and `now`, so a wall clock behind `now` leaves finished_at at `now`.
+  it('#305 pins today: finishes at now when the wall clock is before it', async () => {
+    await seedLedger()
+    wallClockAt(-3_600_000)
+    await runInsightsAgent('personal', {}, NOW)
+    const [run] = await runRows()
+    expect(run.finished_at).toBe(NOW.toISOString())
+  })
+
   it('takes a weekly trigger and an explicit period', async () => {
     await seedLedger()
     const result = await runInsightsAgent('personal', { period: '2026-W42', trigger: 'weekly' }, NOW)
