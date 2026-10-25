@@ -632,6 +632,10 @@ describe('a sync run after a scope change keeps the scope', () => {
       .put(`/api/v1/settings/accounts/${everyday.id}`)
       .send({ scope: 'strawb' })
     expect(put.status).toBe(200)
+    // Stored before the sync, so a failure below is sync resetting it.
+    expect(
+      (await connection('accounts').where({ id: everyday.id }).first()).scope,
+    ).toBe('strawb')
 
     // A renamed account is one the upsert actually rewrites (an unchanged
     // one is left alone), so this run really writes the row.
