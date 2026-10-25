@@ -8,6 +8,7 @@ import goals from './goals.ts'
 import habits from './habits.ts'
 import overview from './overview.ts'
 import settings from './settings.ts'
+import sync from './sync.ts'
 import transactions from './transactions.ts'
 
 // The /api/v1 route barrel (prd-02 Sequencing, wave 1). `server.ts` mounts
@@ -21,6 +22,7 @@ const router = express.Router()
 router.use('/accounts', akahu)
 router.use('/categories', categories)
 router.use('/transactions', transactions)
+router.use('/sync', sync)
 
 router.use('/overview', overview)
 router.use('/settings', settings)

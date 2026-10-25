@@ -95,7 +95,7 @@ describe('existing routes answer as before', () => {
 })
 
 const PLACEHOLDERS = ['overview', 'settings', 'budgets', 'bills', 'goals', 'habits']
-const EXISTING = ['accounts', 'categories', 'transactions']
+const EXISTING = ['accounts', 'categories', 'transactions', 'sync']
 
 describe('placeholder routes', () => {
   it.each(PLACEHOLDERS)('GET /api/v1/%s answers 501 with a JSON error', async (name) => {
