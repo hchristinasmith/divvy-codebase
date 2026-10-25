@@ -517,6 +517,22 @@ describe('the account fields #155 adds', () => {
     })
   })
 
+  it('stores the attributes in the order Akahu sent them, not sorted', async () => {
+    // The fixture's lists are already sorted, so this one is not.
+    const accounts = replaceOnce(
+      fixture('akahu-accounts.json'),
+      '"attributes": ["PAYMENT_TO", "TRANSACTIONS", "TRANSFER_TO"]',
+      '"attributes": ["TRANSFER_TO", "PAYMENT_TO", "TRANSACTIONS"]',
+    )
+
+    const result = await syncAt(0, { accounts })
+
+    expect(result.outcome).toBe('success')
+    expect((await accountColumns()).acc_fixture0003credit.attributes).toBe(
+      '["TRANSFER_TO","PAYMENT_TO","TRANSACTIONS"]',
+    )
+  })
+
   it('writes nothing to an account on a second run over the same data', async () => {
     await syncAt(0)
     const before = await snapshot()
