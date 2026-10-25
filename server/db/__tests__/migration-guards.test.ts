@@ -82,6 +82,8 @@ const GUARDS: Guard[] = [
     parentRow: (name) => ({ email: `${name}@example.com`, password: 'x' }),
     // `targets` was a child too, until prd-02 Ruling 6 dropped it in
     // 20261025120000; nothing of it is left for a later migration to lose.
+    // So was `settings`, until 20261025150000 (issue 46) dropped its
+    // `user_id`: its rows no longer hang off a user.
     children: [
       {
         table: 'wishlist_items',
@@ -98,13 +100,6 @@ const GUARDS: Guard[] = [
           created_at: AT,
           updated_at: AT,
         },
-      },
-      {
-        table: 'settings',
-        column: 'user_id',
-        onDelete: 'CASCADE',
-        createdBy: '20250619122207_settings.js',
-        row: { id: 'setting_fixture', key: 'currency', value: 'NZD', updated_at: AT },
       },
       {
         table: 'user_challenges',

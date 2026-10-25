@@ -1,35 +1,21 @@
 /**
-/**
+ * Dev seed for the key/value `settings` table (issue 46): one row per key,
+ * no `user_id`, `updated_at` as an ISO-8601 UTC string. `currency` is one
+ * of the `CurrencySymbol` values in shared/contracts.ts; `dark_mode` and
+ * `notifications` are keys nothing reads yet, which the settings route
+ * ignores.
+ *
  * @param { import("knex").Knex } knex
- * @returns { Promise<void> } 
+ * @returns { Promise<void> }
  */
-
 export async function seed(knex) {
   // Deletes ALL existing entries
   await knex('settings').del()
 
-  // Inserts seed entries
+  const updatedAt = new Date().toISOString()
   await knex('settings').insert([
-    {
-      id: 'setting-001',
-      user_id: 1,
-      key: 'dark_mode',
-      value: 'true',
-      updated_at: new Date(),
-    },
-    {
-      id: 'setting-002',
-      user_id: 1,
-      key: 'currency',
-      value: 'NZD',
-      updated_at: new Date(),
-    },
-    {
-      id: 'setting-003',
-      user_id: 2,
-      key: 'notifications',
-      value: 'enabled',
-      updated_at: new Date(),
-    },
+    { key: 'dark_mode', value: 'true', updated_at: updatedAt },
+    { key: 'currency', value: '$', updated_at: updatedAt },
+    { key: 'notifications', value: 'enabled', updated_at: updatedAt },
   ])
 }

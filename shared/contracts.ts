@@ -11,8 +11,9 @@
 // decimal string (M1 #8). Format with `formatCents` from `./money.ts` at the
 // edge; there is no second formatter.
 //
-// No runtime code beyond the settings constants and no runtime imports, so
-// it is safe to import from the client, the server and `mcp/`.
+// No runtime code beyond the settings constants and the closed lists
+// `CURRENCY_SYMBOLS` and `ACCOUNT_ROLES`, and no runtime imports, so it is
+// safe to import from the client, the server and `mcp/`.
 
 import type { BillRepeat } from '../models/planning.ts'
 import type { CategorySource } from '../models/transactions.ts'
@@ -113,6 +114,52 @@ export interface SettingsResponse {
 
 /** PATCH /api/v1/settings: any subset; omitted keys are unchanged. */
 export type UpdateSettingsRequest = Partial<SettingsResponse>
+
+/**
+ * Every `CurrencySymbol`, for validating a stored or sent value and for the
+ * settings panel's choices. `shared/__tests__/settings-lists.test.ts` fails
+ * if the type and this list drift apart.
+ */
+export const CURRENCY_SYMBOLS: readonly CurrencySymbol[] = ['$', 'NZ$', '£']
+
+/**
+ * Every `AccountRole`, for validating a sent role and for the settings
+ * panel's choices; the same values the migration constrains
+ * `account_settings.role` to. `shared/__tests__/settings-lists.test.ts`
+ * fails if the type and this list drift apart.
+ */
+export const ACCOUNT_ROLES: readonly AccountRole[] = [
+  'current',
+  'savings',
+  'tax_pot',
+  'credit_card',
+]
+
+/**
+ * One account as the settings panel lists it: who owns it and what it is
+ * for. A display name only, never an account number or a balance.
+ */
+export interface AccountSettingsRow {
+  id: string
+  name: string
+  scope: RowScope
+  /** null: no role, and not liquid. */
+  role: AccountRole | null
+}
+
+/** GET /api/v1/settings/accounts */
+export interface SettingsAccountsResponse {
+  items: AccountSettingsRow[]
+}
+
+/**
+ * PUT /api/v1/settings/accounts/:id. `null` removes the role (no role, not
+ * liquid). Responds with the updated `AccountSettingsRow`. The scope is not
+ * editable here.
+ */
+export interface SetAccountRoleRequest {
+  role: AccountRole | null
+}
 
 // ---------------------------------------------------------------------------
 // Safe to spend (the overview hero)

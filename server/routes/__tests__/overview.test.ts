@@ -89,7 +89,7 @@ function tx(
 }
 
 function setting(id: string, key: string, value: string | null): Row {
-  return { id, user_id: 1, key, value, updated_at: STAMP }
+  return { key, value, updated_at: STAMP }
 }
 
 async function insertUser() {
