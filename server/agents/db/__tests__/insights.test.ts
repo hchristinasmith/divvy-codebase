@@ -270,3 +270,41 @@ describe('dismissInsight and listInsights', () => {
     expect((await getInsight(id))?.dismissed_at).toBeNull()
   })
 })
+
+// knex's error message holds the SQL with its bound values, and a title, a
+// body or a chart label can be merchant text. A test-only trigger refuses the
+// write, the way a constraint would, after the accessor's own checks pass.
+describe('a refused write throws without the row', () => {
+  const SENTINEL = 'Fixture Merchant 4419'
+
+  async function refuse(event: 'insert' | 'update'): Promise<void> {
+    await connection.raw(
+      `create trigger fixture_refusal before ${event} on insights begin select raise(abort, 'fixture refusal'); end`,
+    )
+  }
+
+  it('insertInsight', async () => {
+    await refuse('insert')
+    const attempt = insertInsight(
+      insight({
+        kind: 'chart',
+        title: SENTINEL,
+        body_md: `Most of the week went to ${SENTINEL}.`,
+        chart_spec: spec({ data: { values: [{ merchant: SENTINEL, total: 1250 }] } }),
+      }),
+      NOW,
+    )
+    await expect(attempt).rejects.toThrow(/^insertInsight failed: SQLITE_CONSTRAINT: fixture refusal$/)
+    await expect(attempt).rejects.not.toThrow(SENTINEL)
+    expect(await storedRows()).toEqual([])
+  })
+
+  it('dismissInsight', async () => {
+    const id = await inserted(insight({ title: SENTINEL }))
+    await refuse('update')
+    await expect(dismissInsight(id, LATER)).rejects.toThrow(
+      /^dismissInsight failed: SQLITE_CONSTRAINT: fixture refusal$/,
+    )
+    expect((await getInsight(id))?.dismissed_at).toBeNull()
+  })
+})

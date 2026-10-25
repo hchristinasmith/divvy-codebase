@@ -6,17 +6,22 @@
 // goes to the server log; there is no column for it.
 //
 // Ruling 5's polling stands on `sync_run_id` and `cursor`. A run triggered
-// by a sync names that `sync_runs` row, and `lastProcessedSyncRunId` is the
-// highest one a successful run of the agent named, so the next poll starts
-// after it. A failed run does not count: its sync run is picked up again,
-// and the retry is safe because a second insert of a proposal is a no-op.
+// by a sync names that `sync_runs` row, and `processedSyncRunIds` is the set
+// of sync runs a successful run of the agent named. The poller takes the sync
+// runs outside it, so one whose only run failed is picked up again however
+// many later sync runs have succeeded, and the retry is safe because a second
+// insert of a proposal is a no-op. This module never reads `sync_runs`; the
+// poller does the difference.
 // `cursor` is the agent's own opaque place in a backlog sweep.
 //
 // The row type and value lists live here, not in models/, until a follow-up
 // moves them (out of #31's fence). The migration repeats the lists, and
 // agent-runs.test.ts pins them to it.
+//
+// A refused write throws SQLite's words without the row (`scrubbed`).
 import type { IsoTimestamp } from '../../../models/sync.ts'
 import connection from '../../db/connection.ts'
+import { scrubbed } from './proposals.ts'
 
 export const AGENT_KINDS = ['category', 'insights'] as const
 export type AgentKind = (typeof AGENT_KINDS)[number]
@@ -74,7 +79,10 @@ export async function startRun(
     sync_run_id: syncRunId,
     cursor: null,
   }
-  const [stored]: AgentRun[] = await db('agent_runs').insert(row).returning('*')
+  const [stored]: AgentRun[] = await scrubbed(
+    'startRun',
+    db('agent_runs').insert(row).returning('*'),
+  )
   return stored
 }
 
@@ -114,9 +122,12 @@ export async function finishRun(
     written_count: count(finish.writtenCount, 'writtenCount'),
   }
   if (finish.cursor !== undefined) changes.cursor = finish.cursor
-  const updated = await db('agent_runs')
-    .where({ id, outcome: 'running' satisfies AgentRunOutcome })
-    .update(changes)
+  const updated = await scrubbed(
+    'finishRun',
+    db('agent_runs')
+      .where({ id, outcome: 'running' satisfies AgentRunOutcome })
+      .update(changes),
+  )
   return updated > 0
 }
 
@@ -135,19 +146,20 @@ export async function latestRun(
 }
 
 /**
- * The highest sync run a successful run of `kind` processed, or null when
- * none has. Running and failed runs are not counted.
+ * Every sync run a successful run of `kind` processed, ascending, each once.
+ * Running and failed runs are not counted, so a sync run whose only run
+ * failed stays outside the set until a run for it succeeds.
  */
-export async function lastProcessedSyncRunId(
+export async function processedSyncRunIds(
   kind: AgentKind,
   db = connection,
-): Promise<number | null> {
-  const row = await db('agent_runs')
+): Promise<number[]> {
+  const rows: { sync_run_id: number }[] = await db('agent_runs')
     .where({ kind, outcome: 'success' satisfies AgentRunOutcome })
     .whereNotNull('sync_run_id')
-    .max<{ id: number | null }>('sync_run_id as id')
-    .first()
-  return row?.id ?? null
+    .distinct('sync_run_id')
+    .orderBy('sync_run_id', 'asc')
+  return rows.map((r) => r.sync_run_id)
 }
 
 export interface RunFilter {
@@ -161,6 +173,11 @@ export async function listRuns(
   filter: RunFilter = {},
   db = connection,
 ): Promise<AgentRun[]> {
+  // SQLite reads a negative limit as none, and knex drops a NaN one.
+  const limit = filter.limit ?? 50
+  if (!Number.isSafeInteger(limit) || limit < 1) {
+    throw new Error('limit must be a positive integer')
+  }
   const query = db('agent_runs')
   if (filter.kind !== undefined) query.where({ kind: filter.kind })
   return query
@@ -168,5 +185,5 @@ export async function listRuns(
       { column: 'started_at', order: 'desc' },
       { column: 'id', order: 'desc' },
     ])
-    .limit(filter.limit ?? 50)
+    .limit(limit)
 }

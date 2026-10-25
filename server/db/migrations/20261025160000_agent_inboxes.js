@@ -25,9 +25,9 @@
 // at the next sync.
 //
 // agent_runs.sync_run_id is NO ACTION (no `onDelete`). Nothing deletes or
-// rebuilds `sync_runs`. SET NULL would silently erase the poller's record of
-// the last sync run it processed, so the next poll would reprocess every
-// run; NO ACTION makes such a delete fail loudly instead.
+// rebuilds `sync_runs`. SET NULL would silently erase a run's record of the
+// sync run it processed, which is what the poller reads to know which sync
+// runs are done; NO ACTION makes such a delete fail loudly instead.
 //
 // From here on, never rebuild `transactions` or `sync_runs` (knex
 // `dropColumn`, `.alter()`, or anything that recreates the table): the

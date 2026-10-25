@@ -1,4 +1,6 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
+import { sep } from 'node:path'
+import ts from 'typescript'
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 
 import connection from '../../../db/connection.ts'
@@ -8,6 +10,7 @@ import {
   getProposal,
   insertProposal,
   listProposals,
+  scrubbed,
   setStatus,
   type NewProposal,
 } from '../proposals.ts'
@@ -212,6 +215,57 @@ describe('insertProposal', () => {
     )
     expect(await rows()).toEqual([])
   })
+
+  // knex's error message holds the SQL with its bound values, reason and all.
+  it('lets the foreign key refuse it without echoing the reason', async () => {
+    const txId = await transaction('a')
+    const attempt = insertProposal(proposal(txId + 1000, { reason: SENTINEL }), NOW)
+    await expect(attempt).rejects.toThrow(
+      /^insertProposal failed: SQLITE_CONSTRAINT: FOREIGN KEY constraint failed$/,
+    )
+    await expect(attempt).rejects.not.toThrow(SENTINEL)
+  })
+})
+
+// The shared write wrapper on its own, for the errors no table here can raise.
+describe('scrubbed', () => {
+  const SECRET = 'Fixture Merchant 6603'
+  const refusal = (message: string, code?: string) => () =>
+    Promise.reject(Object.assign(new Error(message), code === undefined ? {} : { code }))
+  const CASES: [name: string, write: () => Promise<never>, message: string][] = [
+    [
+      "SQLite's text after the last ` - `, past a value holding one",
+      refusal(
+        `insert into x values ('${SECRET} - Ltd') - SQLITE_CONSTRAINT: NOT NULL constraint failed: x.a`,
+        'SQLITE_CONSTRAINT',
+      ),
+      'op failed: SQLITE_CONSTRAINT: NOT NULL constraint failed: x.a',
+    ],
+    [
+      "the code alone when the message's tail is not SQLite's",
+      refusal(`insert into x values ('${SECRET}')`, 'SQLITE_BUSY'),
+      'op failed: SQLITE_BUSY',
+    ],
+    [
+      'a fixed word when there is no code',
+      refusal(`Undefined binding(s) detected: '${SECRET}'`),
+      'op failed: database error',
+    ],
+    ['a fixed word for a thrown non-error', () => Promise.reject(SECRET), 'op failed: database error'],
+  ]
+
+  it.each(CASES)('keeps %s', async (_, write, message) => {
+    const thrown: unknown = await scrubbed('op', write()).catch((e: unknown) => e)
+    expect(thrown).toBeInstanceOf(Error)
+    expect((thrown as Error).message).toBe(message)
+    // A logger prints a cause, and the original holds the SQL.
+    expect(Object.keys(thrown as Error)).toEqual([])
+    expect('cause' in (thrown as Error)).toBe(false)
+  })
+
+  it('passes a write that succeeds straight through', async () => {
+    expect(await scrubbed('op', Promise.resolve([7]))).toEqual([7])
+  })
 })
 
 describe('setStatus', () => {
@@ -242,6 +296,19 @@ describe('setStatus', () => {
       setStatus(id, 'pending' as unknown as Exclude<ProposalStatus, 'pending'>),
     ).rejects.toThrow(/^status must be accepted or rejected$/)
     expect((await getProposal(id))?.status).toBe('rejected')
+  })
+
+  // A test-only trigger refuses the update, the way a constraint would.
+  it('throws without the SQL when the database refuses the update', async () => {
+    const txId = await transaction('a')
+    const id = await inserted(proposal(txId))
+    await connection.raw(
+      "create trigger fixture_refusal before update on category_proposals begin select raise(abort, 'fixture refusal'); end",
+    )
+    await expect(setStatus(id, 'rejected')).rejects.toThrow(
+      /^setStatus failed: SQLITE_CONSTRAINT: fixture refusal$/,
+    )
+    expect((await getProposal(id))?.status).toBe('pending')
   })
 
   it("runs inside the caller's transaction: rolled back it leaves the proposal pending", async () => {
@@ -296,31 +363,94 @@ describe('getProposal and listProposals', () => {
   })
 })
 
-// Done-when 2 and #31: the accessor modules name only the inbox tables.
-describe('the accessor modules touch only the three inbox tables', () => {
-  const FILES = ['proposals.ts', 'insights.ts', 'agent-runs.ts'] as const
-  const OWN_TABLE: Record<(typeof FILES)[number], string> = {
-    'proposals.ts': 'category_proposals',
-    'insights.ts': 'insights',
-    'agent-runs.ts': 'agent_runs',
+// Done-when 2 and #31: no module under server/agents/ names a table outside
+// the inbox, writes raw SQL, or imports past its directory's allow-list. The
+// modules are parsed with the TypeScript compiler rather than grepped, so a
+// comment is never code and a string is never a comment.
+//
+// A table name built at run time (`'trans' + 'actions'`, or one read from a
+// variable) is out of reach of any source check, this one included. The sound
+// guard is an eslint rule on server/agents/**, which lives in package.json,
+// outside #31's fence, and is a follow-up.
+describe('every module under server/agents/ touches only the inbox tables', () => {
+  const ROOT = new URL('../../', import.meta.url)
+  const OWN_TABLE: Record<string, string> = {
+    'db/proposals.ts': 'category_proposals',
+    'db/insights.ts': 'insights',
+    'db/agent-runs.ts': 'agent_runs',
   }
   const INBOX = Object.values(OWN_TABLE)
-  const IMPORTS = [
-    'knex',
-    '../../db/connection.ts',
-    '../contracts.ts',
-    '../../../models/insights.ts',
-    '../../../models/sync.ts',
-    './proposals.ts',
-    './insights.ts',
-    './agent-runs.ts',
-  ]
+  // Per directory under server/agents/, exactly what its modules import. A
+  // module in a directory with no entry fails, and so does an entry nothing
+  // imports, so the list cannot drift wider than the code.
+  const IMPORTS: Record<string, string[]> = {
+    '.': ['../../models/sync.ts', '../db/categories.ts'],
+    db: [
+      '../../../models/insights.ts',
+      '../../../models/sync.ts',
+      '../../db/connection.ts',
+      '../contracts.ts',
+      './proposals.ts',
+    ],
+  }
   const NAMED = /\b(transactions|category_corrections|budgets|bills|goals|settings)\b/
+  const RAW = /\.raw\b|[a-z]Raw\b/
 
-  const source = (file: string) => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8')
+  // Every non-test module under server/agents/, relative to it.
+  const modules = (): string[] =>
+    readdirSync(ROOT, { recursive: true, encoding: 'utf8' })
+      .filter((f) => /\.[cm]?[jt]sx?$/.test(f))
+      .filter((f) => !f.split(sep).includes('__tests__') && !/\.test\.[cm]?[jt]sx?$/.test(f))
+      .map((f) => f.split(sep).join('/'))
+      .sort()
+  const source = (file: string) => readFileSync(new URL(file, ROOT), 'utf8')
+
+  const parse = (text: string, name = 'fixture.ts') =>
+    ts.createSourceFile(name, text, ts.ScriptTarget.Latest, true)
+  // The module as code, with every comment gone and every string kept.
   const stripComments = (text: string) =>
-    text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
-  const code = (file: string) => stripComments(source(file))
+    ts.createPrinter({ removeComments: true }).printFile(parse(text))
+
+  // Every string the module holds, template text included.
+  function strings(text: string): string[] {
+    const found: string[] = []
+    const visit = (node: ts.Node): void => {
+      if (ts.isStringLiteralLike(node) || ts.isTemplateLiteralToken(node)) found.push(node.text)
+      ts.forEachChild(node, visit)
+    }
+    visit(parse(text))
+    return found
+  }
+
+  // What a module imports, and every way of reaching a module or a query that
+  // the allow-list cannot see.
+  function imports(text: string): { specifiers: string[]; problems: string[] } {
+    const specifiers: string[] = []
+    const problems: string[] = []
+    const visit = (node: ts.Node): void => {
+      if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+        const spec = node.moduleSpecifier
+        if (spec !== undefined && ts.isStringLiteral(spec)) {
+          specifiers.push(spec.text)
+          if (ts.isImportDeclaration(node) && node.importClause === undefined) {
+            problems.push(`side-effect import of ${spec.text}`)
+          }
+        }
+      } else if (ts.isImportEqualsDeclaration(node)) {
+        problems.push('import = require')
+      } else if (ts.isCallExpression(node)) {
+        if (node.expression.kind === ts.SyntaxKind.ImportKeyword) problems.push('dynamic import(')
+        if (ts.isIdentifier(node.expression) && node.expression.text === 'require') {
+          problems.push('require(')
+        }
+      } else if (ts.isElementAccessExpression(node) && !ts.isNumericLiteral(node.argumentExpression)) {
+        problems.push(`computed member access [${node.argumentExpression.getText()}]`)
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(parse(text))
+    return { specifiers, problems }
+  }
 
   // Every table but ours, from the migrated schema.
   async function otherTables(): Promise<string[]> {
@@ -329,7 +459,27 @@ describe('the accessor modules touch only the three inbox tables', () => {
   }
   const anyOf = (names: string[]) => new RegExp(`\\b(${names.join('|')})\\b`)
 
-  it('the patterns catch a table named in code, and not its look-alikes', async () => {
+  // Everything wrong with one module's text.
+  function problems(text: string, allowed: string[], others: string[]): string[] {
+    const code = stripComments(text)
+    const found: string[] = []
+    for (const pattern of [NAMED, anyOf(others)]) {
+      const m = code.match(pattern)
+      if (m) found.push(`names ${m[1]}`)
+    }
+    if (RAW.test(code)) found.push('raw SQL')
+    const { specifiers, problems: reached } = imports(text)
+    for (const s of specifiers) if (!allowed.includes(s)) found.push(`imports ${s}`)
+    return [...found, ...reached]
+  }
+
+  it('finds the modules, contracts.ts and the accessors among them', () => {
+    expect(modules()).toEqual(
+      expect.arrayContaining(['contracts.ts', ...Object.keys(OWN_TABLE)]),
+    )
+  })
+
+  it('the table patterns catch a table named in code, and not its look-alikes', async () => {
     const others = await otherTables()
     expect(others).toEqual(expect.arrayContaining(['transactions', 'category_corrections', 'sync_runs']))
     for (const pattern of [NAMED, anyOf(others)]) {
@@ -340,27 +490,65 @@ describe('the accessor modules touch only the three inbox tables', () => {
     }
     expect('sync_run_id').not.toMatch(anyOf(others))
     expect("db('sync_runs')").toMatch(anyOf(others))
-    expect(stripComments("a // db('transactions')\nb /* bills */")).toBe('a \nb ')
   })
 
-  it.each(FILES)('%s names no money table and no table outside the inbox', async (file) => {
-    const text = code(file)
-    expect(text).not.toMatch(NAMED)
-    expect(text).not.toMatch(anyOf(await otherTables()))
-    expect(text).toContain(`'${OWN_TABLE[file]}'`)
+  // Each bypass found against the earlier regex guard, and its neighbours.
+  const BYPASSES: [name: string, text: string, problem: string][] = [
+    ['a URL before a table on one line', "const u = 'http://x'; db('transactions')", 'names transactions'],
+    ['a table in a template', 'db(`category_corrections`).insert(row)', 'names category_corrections'],
+    ['a double-quoted import', 'import { upsert } from "../../sync/upsert.ts"', 'imports ../../sync/upsert.ts'],
+    ['a type-only import outside the list', "import type { Knex } from 'knex'", 'imports knex'],
+    ['a re-export', "export * from '../../sync/upsert.ts'", 'imports ../../sync/upsert.ts'],
+    ['a side-effect import', "import '../../db/connection.ts'", 'side-effect import of ../../db/connection.ts'],
+    ['a dynamic import', "await import('../../sync/upsert.ts')", 'dynamic import('],
+    ['a require', "const m = require('../../sync/upsert.ts')", 'require('],
+    ['import = require', "import m = require('../../sync/upsert.ts')", 'import = require'],
+    ["db['raw']", "db['raw']('select 1')", "computed member access ['raw']"],
+    ['db["raw"]', 'db["raw"]("select 1")', 'computed member access ["raw"]'],
+    ['a computed key in a variable', 'db[method]()', 'computed member access [method]'],
+    ['db.raw', "db.raw('select 1')", 'raw SQL'],
+    ['whereRaw', "db('insights').whereRaw('1 = 1')", 'raw SQL'],
+  ]
+
+  it.each(BYPASSES)('catches %s', async (_, text, problem) => {
+    expect(problems(text, IMPORTS.db, await otherTables())).toContain(problem)
   })
 
-  it.each(FILES)('%s writes no raw SQL', (file) => {
-    expect(code(file)).not.toMatch(/\.raw\(|Raw\(/)
+  it('passes code that names only the inbox, and ignores comments', async () => {
+    const text = [
+      "import connection from '../../db/connection.ts'",
+      "// db('transactions'), the 'http://x' kind",
+      "/* bills */ const url = 'http://x' // goals",
+      "await connection('category_proposals').where({ transaction_id: 1 }).first()",
+      'const first = ids[0]',
+    ].join('\n')
+    expect(problems(text, IMPORTS.db, await otherTables())).toEqual([])
+    expect(stripComments("a // db('transactions')\nb /* bills */")).not.toMatch(NAMED)
   })
 
-  it.each(FILES)('%s imports only the contracts, the connection and its siblings', (file) => {
-    const text = source(file)
-    const specifiers = [...text.matchAll(/from\s+'([^']+)'/g)].map((m) => m[1])
-    expect(specifiers.length).toBeGreaterThan(0)
-    for (const s of specifiers) expect(IMPORTS, `${file} imports ${s}`).toContain(s)
-    expect(text).not.toMatch(/\bimport\s*\(|\brequire\s*\(/)
-    // knex is a type only: the module's queries all go through the connection.
-    expect(text).not.toMatch(/import\s+(?!type\b)[^'\n]*from\s+'knex'/)
+  it('each module names no table outside the inbox, writes no raw SQL, and imports within its list', async () => {
+    const others = await otherTables()
+    for (const file of modules()) {
+      const dir = file.includes('/') ? file.slice(0, file.lastIndexOf('/')) : '.'
+      const allowed = IMPORTS[dir]
+      expect(allowed, `server/agents/${dir} has no import allow-list`).toBeDefined()
+      expect(problems(source(file), allowed, others), file).toEqual([])
+    }
+  })
+
+  it('each allow-list is exactly what its directory imports', () => {
+    const used: Record<string, Set<string>> = {}
+    for (const file of modules()) {
+      const dir = file.includes('/') ? file.slice(0, file.lastIndexOf('/')) : '.'
+      used[dir] ??= new Set()
+      for (const s of imports(source(file)).specifiers) used[dir].add(s)
+    }
+    for (const [dir, allowed] of Object.entries(IMPORTS)) {
+      expect([...(used[dir] ?? [])].sort(), dir).toEqual([...allowed].sort())
+    }
+  })
+
+  it.each(Object.entries(OWN_TABLE))('%s names its own table, %s', (file, table) => {
+    expect(strings(source(file))).toContain(table)
   })
 })

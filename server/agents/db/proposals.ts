@@ -13,7 +13,9 @@
 // touches the transaction the proposal is about.
 //
 // A refused input throws an error naming the field, never its value: a
-// reason carries merchant text.
+// reason carries merchant text. So does a refused write: knex puts the SQL,
+// bound values and all, in its error message, and `scrubbed` rethrows it as
+// SQLite's own words alone.
 import {
   PROPOSAL_ORIGINS,
   parseProposedCategory,
@@ -22,6 +24,28 @@ import {
   type ProposalStatus,
 } from '../contracts.ts'
 import connection from '../../db/connection.ts'
+
+/**
+ * Runs a write and, if the database refuses it, throws `<operation> failed:`
+ * and SQLite's text after knex's ` - ` (`SQLITE_CONSTRAINT: FOREIGN KEY
+ * constraint failed`), or only the error's code when there is no such text.
+ * Never the SQL, and never the original error as a `cause`, because both
+ * carry the row's values. The inbox accessors wrap every write in it.
+ */
+export async function scrubbed<T>(operation: string, write: PromiseLike<T>): Promise<T> {
+  try {
+    return await write
+  } catch (error) {
+    const message = error instanceof Error ? error.message : ''
+    const code = (error as { code?: unknown } | null)?.code
+    const at = message.lastIndexOf(' - ')
+    const sqlite = at === -1 ? message : message.slice(at + 3)
+    if (typeof code === 'string' && sqlite.startsWith(`${code}: `)) {
+      throw new Error(`${operation} failed: ${sqlite}`)
+    }
+    throw new Error(`${operation} failed: ${typeof code === 'string' ? code : 'database error'}`)
+  }
+}
 
 export interface NewProposal {
   transaction_id: number
@@ -74,11 +98,14 @@ export async function insertProposal(
     status: 'pending',
     created_at: now.toISOString(),
   }
-  const ids: { id: number }[] = await db('category_proposals')
-    .insert(row)
-    .onConflict(['transaction_id', 'proposed_category'])
-    .ignore()
-    .returning('id')
+  const ids: { id: number }[] = await scrubbed(
+    'insertProposal',
+    db('category_proposals')
+      .insert(row)
+      .onConflict(['transaction_id', 'proposed_category'])
+      .ignore()
+      .returning('id'),
+  )
   if (ids.length === 0) return { inserted: false, reason: 'duplicate' }
   return { inserted: true, id: ids[0].id }
 }
@@ -128,8 +155,11 @@ export async function setStatus(
   if (status !== 'accepted' && status !== 'rejected') {
     throw new Error('status must be accepted or rejected')
   }
-  const updated = await db('category_proposals')
-    .where({ id, status: 'pending' satisfies ProposalStatus })
-    .update({ status })
+  const updated = await scrubbed(
+    'setStatus',
+    db('category_proposals')
+      .where({ id, status: 'pending' satisfies ProposalStatus })
+      .update({ status }),
+  )
   return updated > 0
 }

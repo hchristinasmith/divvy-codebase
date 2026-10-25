@@ -12,7 +12,8 @@
 // `Insight.mermaid` (Ruling 3) has no column. A `mermaid` key on the input is
 // ignored, and a read row has no `mermaid` key.
 //
-// A refused input throws an error naming the field, never its value.
+// A refused input throws an error naming the field, never its value, and a
+// refused write throws SQLite's words without the row (`scrubbed`).
 import {
   INSIGHT_KINDS,
   parseChartSpecJson,
@@ -23,6 +24,7 @@ import {
   type InsightScope,
 } from '../../../models/insights.ts'
 import connection from '../../db/connection.ts'
+import { scrubbed } from './proposals.ts'
 
 // A Record so that TypeScript refuses this file if `InsightScope` changes.
 const SCOPES: Record<InsightScope, true> = { personal: true, strawb: true }
@@ -85,7 +87,10 @@ export async function insertInsight(
     created_at: now.toISOString(),
     dismissed_at: null,
   }
-  const [{ id }]: { id: number }[] = await db('insights').insert(row).returning('id')
+  const [{ id }]: { id: number }[] = await scrubbed(
+    'insertInsight',
+    db('insights').insert(row).returning('id'),
+  )
   return { ok: true, id }
 }
 
@@ -150,9 +155,9 @@ export async function dismissInsight(
   now: Date = new Date(),
   db = connection,
 ): Promise<boolean> {
-  const updated = await db('insights')
-    .where({ id })
-    .whereNull('dismissed_at')
-    .update({ dismissed_at: now.toISOString() })
+  const updated = await scrubbed(
+    'dismissInsight',
+    db('insights').where({ id }).whereNull('dismissed_at').update({ dismissed_at: now.toISOString() }),
+  )
   return updated > 0
 }

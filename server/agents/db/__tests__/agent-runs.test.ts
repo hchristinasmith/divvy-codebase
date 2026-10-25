@@ -7,9 +7,9 @@ import {
   AGENT_RUN_OUTCOMES,
   AGENT_TRIGGERS,
   finishRun,
-  lastProcessedSyncRunId,
   latestRun,
   listRuns,
+  processedSyncRunIds,
   startRun,
   type AgentRun,
   type FinishRun,
@@ -120,7 +120,7 @@ describe('startRun', () => {
     }
     await expect(
       startRun({ kind: 'category', trigger: 'sync', syncRunId: syncRunId + 1000 }, NOW),
-    ).rejects.toThrow(/FOREIGN KEY constraint failed$/)
+    ).rejects.toThrow(/^startRun failed: SQLITE_CONSTRAINT: FOREIGN KEY constraint failed$/)
     expect(await connection('agent_runs').pluck('id')).toEqual([run.id])
   })
 
@@ -212,9 +212,26 @@ describe('finishRun', () => {
   })
 })
 
-describe('lastProcessedSyncRunId (Ruling 5)', () => {
-  it('is null until a successful run of the kind has processed a sync run', async () => {
-    expect(await lastProcessedSyncRunId('category')).toBeNull()
+// knex's error message holds the SQL with its bound values, and a cursor is
+// the agent's own text. A test-only trigger refuses the update, the way a
+// constraint would, after finishRun's own checks pass.
+describe('a refused write throws without the row', () => {
+  it('finishRun, without the cursor', async () => {
+    const SENTINEL = 'Fixture Merchant 5527'
+    const run = await startRun({ kind: 'category', trigger: 'manual' }, NOW)
+    await connection.raw(
+      "create trigger fixture_refusal before update on agent_runs begin select raise(abort, 'fixture refusal'); end",
+    )
+    const attempt = finishRun(run.id, done({ cursor: SENTINEL }), LATER)
+    await expect(attempt).rejects.toThrow(/^finishRun failed: SQLITE_CONSTRAINT: fixture refusal$/)
+    await expect(attempt).rejects.not.toThrow(SENTINEL)
+    expect(await connection('agent_runs')).toStrictEqual([run])
+  })
+})
+
+describe('processedSyncRunIds (Ruling 5)', () => {
+  it('is empty until a successful run of the kind has processed a sync run', async () => {
+    expect(await processedSyncRunIds('category')).toStrictEqual([])
 
     const first = await syncRun(AT)
     const second = await syncRun(LATER.toISOString())
@@ -228,23 +245,44 @@ describe('lastProcessedSyncRunId (Ruling 5)', () => {
     await finishRun(other.id, done(), LATER)
     const manual = await startRun({ kind: 'category', trigger: 'manual' }, NOW)
     await finishRun(manual.id, done(), LATER)
-    expect(await lastProcessedSyncRunId('category')).toBeNull()
-    expect(await lastProcessedSyncRunId('insights')).toBe(third)
+    expect(await processedSyncRunIds('category')).toStrictEqual([])
+    expect(await processedSyncRunIds('insights')).toStrictEqual([third])
 
     const ok = await startRun({ kind: 'category', trigger: 'sync', syncRunId: first }, NOW)
     await finishRun(ok.id, done(), LATER)
-    expect(await lastProcessedSyncRunId('category')).toBe(first)
+    expect(await processedSyncRunIds('category')).toStrictEqual([first])
   })
 
-  it('is the highest sync run processed, whatever order the runs started in', async () => {
+  // A set, not a high-water mark: a later success must not hide a failed sync
+  // run from the poller (#58), or the failed one is never retried.
+  it('leaves out a failed sync run after a later one succeeds, until a run for it succeeds', async () => {
+    const failedFor = await syncRun(AT)
+    const later = await syncRun(LATER.toISOString())
+    const failed = await startRun({ kind: 'category', trigger: 'sync', syncRunId: failedFor }, NOW)
+    await finishRun(failed.id, done({ outcome: 'failed' }), NOW)
+    const ok = await startRun({ kind: 'category', trigger: 'sync', syncRunId: later }, LATER)
+    await finishRun(ok.id, done(), LATER)
+    expect(await processedSyncRunIds('category')).toStrictEqual([later])
+
+    const retry = await startRun({ kind: 'category', trigger: 'sync', syncRunId: failedFor }, LATEST)
+    await finishRun(retry.id, done(), LATEST)
+    expect(await processedSyncRunIds('category')).toStrictEqual([failedFor, later])
+  })
+
+  it('names each sync run once, ascending, whatever order the runs started in', async () => {
     const low = await syncRun(AT)
     const high = await syncRun(LATER.toISOString())
-    const forHigh = await startRun({ kind: 'category', trigger: 'sync', syncRunId: high }, NOW)
-    await finishRun(forHigh.id, done(), LATER)
-    const forLow = await startRun({ kind: 'category', trigger: 'sync', syncRunId: low }, LATEST)
-    await finishRun(forLow.id, done(), LATEST)
+    for (const [syncRunId, at] of [
+      [high, NOW],
+      [low, LATER],
+      [high, LATEST],
+      [low, LATEST],
+    ] as const) {
+      const run = await startRun({ kind: 'category', trigger: 'sync', syncRunId }, at)
+      await finishRun(run.id, done(), at)
+    }
 
-    expect(await lastProcessedSyncRunId('category')).toBe(high)
+    expect(await processedSyncRunIds('category')).toStrictEqual([low, high])
   })
 })
 
@@ -281,5 +319,10 @@ describe('latestRun and listRuns', () => {
     const runs = await listRuns()
     expect(runs).toHaveLength(50)
     expect(runs[0].started_at).toBe(new Date(base + 51 * 60_000).toISOString())
+  })
+
+  it.each([0, -1, 1.5, NaN, Infinity])('listRuns refuses a limit of %s rather than returning every run', async (limit) => {
+    await startRun({ kind: 'insights', trigger: 'manual' }, NOW)
+    await expect(listRuns({ limit })).rejects.toThrow(/^limit must be a positive integer$/)
   })
 })
