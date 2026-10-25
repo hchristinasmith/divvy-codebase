@@ -1,13 +1,15 @@
 import { createContext, useContext, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
+import type { Scope } from '../../shared/contracts.ts'
 
 // The All / Personal / Strawb filter (docs/design/handoff.md "Scope
 // toggle"). Every figure on every screen reads it, so it lives here once and
 // no screen keeps its own copy.
 //
-// Defined locally: shared/** belongs to the safe-to-spend lane (#36), and
-// #45 reconciles this type with the one there.
-export type Scope = 'all' | 'personal' | 'strawb'
+// The type is the API contract's own (shared/contracts.ts), re-exported so
+// the screens that already import it from here keep working; the toggle and
+// the overview route can never disagree on what a scope is.
+export type { Scope } from '../../shared/contracts.ts'
 
 // The toggle's options, in the handoff's order.
 export const SCOPES: readonly { value: Scope; label: string }[] = [

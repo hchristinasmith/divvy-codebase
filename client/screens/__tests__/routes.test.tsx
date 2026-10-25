@@ -63,7 +63,10 @@ describe('the route table', () => {
   })
 
   it('every stub tells you it is not built yet rather than showing numbers', () => {
-    for (const [, path] of HANDOFF.filter(([key]) => key !== 'goals')) {
+    // Goals is mocked above; Overview is built (issue 45).
+    for (const [, path] of HANDOFF.filter(
+      ([key]) => key !== 'goals' && key !== 'overview',
+    )) {
       renderWithProviders(
         <Shell>
           <Routes>{screenRoutes}</Routes>
