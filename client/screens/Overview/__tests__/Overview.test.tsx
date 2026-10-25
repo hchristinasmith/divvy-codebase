@@ -60,6 +60,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
   vi.unstubAllGlobals()
   vi.resetAllMocks()
 })
@@ -135,7 +136,7 @@ describe('the hero shows exactly the safeCents the server sent', () => {
       '$925.00 a day for the next 6 days',
     )
     expect(screen.queryByTestId('hero-short-by')).toBeNull()
-    expect(screen.getByText(/until payday on 3 Nov/)).not.toBeNull()
+    expect(screen.getByText(/until payday on 3 Nov · after tax/)).not.toBeNull()
   })
 
   it('sets the bar to safeCents as a share of liquidCents', async () => {
@@ -437,6 +438,35 @@ describe("a date from another year than today's shows its year", () => {
     expect(within(activityRow('201')).getByText('30 Dec 2025')).not.toBeNull()
     expect(within(activityRow('202')).getByText('20 Oct')).not.toBeNull()
     expect(within(activityRow('203')).getByText('2 Jan 2027')).not.toBeNull()
+  })
+
+  it("takes this year from the server's today, not the browser's clock or the last payday", async () => {
+    // The server's today is in 2027; the browser's clock (pinned here, in
+    // Auckland too) and the last payday are in 2026. An alert and a row
+    // dated in 2026 show their year only if the cards read
+    // safeToSpend.today. Only Date is faked, so react-query keeps real timers.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-27T23:00:00Z'))
+    setup('all', {
+      all: {
+        safeToSpend: {
+          today: '2027-01-04',
+          lastPayday: '2026-12-29',
+          nextPayday: '2027-01-05',
+        },
+        alerts: [BILL_SOON],
+        recentActivity: [CAFE_ROW],
+      },
+    })
+    await hero()
+
+    expect(paydayLine()).toContain('until payday on 5 Jan · after tax')
+    expect(alertText(BILL_SOON.id)).toContain(
+      'Rent Invented ($1,200.00) is due 30 Oct 2026.',
+    )
+    expect(
+      within(activityRow(CAFE_ROW.id)).getByText('21 Oct 2026'),
+    ).not.toBeNull()
   })
 })
 
