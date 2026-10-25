@@ -382,31 +382,74 @@ describe('invisible characters inside a scheme (every input refused today is sti
   })
 })
 
-// #331 regression: pins old behaviour; the build replaces this. Today these
-// are accepted because the hand-written list does not strip them. The build
-// makes isInvisible test /\p{DI}/u, so a default-ignorable character inside a
-// scheme or a leading `//` is stripped before the URL check. Expected to flip
-// to url_in_string: the Hangul filler in `htㅤtp://`, the variation selector in
-// `java<VS16>script:`, the tag character in `java<E0041>script:` and the
-// filler in `/ㅤ/`. Expected to stay accepted: `AㅤB` and `A<VS16>B`, which
-// hold no URL once the character is stripped.
-describe('default-ignorable characters the current list misses', () => {
+// #331: the invisible-character rule is the Unicode property
+// Default_Ignorable_Code_Point (/\p{DI}/u), not a hand-written list, so a
+// default-ignorable character inside a scheme or a leading `//` is stripped
+// before the URL check. Stripping is only for that check: a label holding no
+// URL once the character is gone is accepted and returned as given.
+describe('default-ignorable characters are stripped before the URL check', () => {
+  const HANGUL_FILLER = 'ㅤ'
   const VS16 = '️'
   const TAG_A = '\u{E0041}'
-  const ACCEPTED_TODAY: [string, string][] = [
-    ['a Hangul filler between letters (stays accepted)', 'AㅤB'],
-    ['a variation selector between letters (stays accepted)', `A${VS16}B`],
-    ['a Hangul filler splitting http (flips to url_in_string)', `htㅤtp://${CANARY}.example`],
-    ['a variation selector splitting javascript (flips to url_in_string)', `java${VS16}script:${CANARY}`],
-    ['a tag character splitting javascript (flips to url_in_string)', `java${TAG_A}script:${CANARY}`],
-    ['a Hangul filler splitting a leading // (flips to url_in_string)', `/ㅤ/${CANARY}.example`],
-  ]
+  const isDefaultIgnorable = /\p{DI}/u
 
-  it.each(ACCEPTED_TODAY)('accepts a title with %s', (_name, title) => {
+  it.each([
+    ['a Hangul filler splitting http', `ht${HANGUL_FILLER}tp://${CANARY}.example`],
+    ['a variation selector splitting javascript', `java${VS16}script:${CANARY}`],
+    ['a tag character splitting javascript', `java${TAG_A}script:${CANARY}`],
+    ['a Hangul filler splitting a leading //', `/${HANGUL_FILLER}/${CANARY}.example`],
+    // NFKC runs before the strip; U+FFA0 folds to U+1160, itself
+    // default-ignorable, so the fold does not let it through.
+    ['a halfwidth Hangul filler (U+FFA0) splitting javascript', `javaﾠscript:${CANARY}`],
+  ])('refuses a title with %s', (_name, title) => {
     const spec = base()
     spec.title = title
-    expect(validateChartSpec(spec).ok).toBe(true)
+    const result = validateChartSpec(spec)
+    expect(rejection(result)).toEqual({ reason: 'url_in_string', path: '$.title' })
+    expect(JSON.stringify(result)).not.toContain(CANARY)
   })
+
+  it.each([
+    ['a Hangul filler between letters', `A${HANGUL_FILLER}B`],
+    ['a variation selector between letters', `A${VS16}B`],
+  ])('accepts a title with %s and returns it unchanged', (_name, title) => {
+    const spec = base()
+    spec.title = title
+    const result = validateChartSpec(spec)
+    if (!result.ok) throw new Error(`expected ok, got ${result.reason}`)
+    expect(result.spec.title).toBe(title)
+  })
+
+  // Every default-ignorable code point, at a title and at a data value. One
+  // test per site rather than one per code point, so the sweep stays fast;
+  // a failure lists the code points that got through.
+  const DEFAULT_IGNORABLE: number[] = []
+  for (let code = 0; code <= 0x10ffff; code += 1) {
+    if (code >= 0xd800 && code <= 0xdfff) continue
+    if (isDefaultIgnorable.test(String.fromCodePoint(code))) DEFAULT_IGNORABLE.push(code)
+  }
+
+  it('finds default-ignorable code points to sweep', () => {
+    expect(DEFAULT_IGNORABLE).toContain(0x3164)
+    expect(DEFAULT_IGNORABLE).toContain(0xe0041)
+  })
+
+  it.each(TEXT_SITES.filter(([site]) => site === 'title' || site === 'a data value'))(
+    'refuses every default-ignorable code point inside javascript: at %s',
+    (_site, put, path) => {
+      const wrong: string[] = []
+      for (const code of DEFAULT_IGNORABLE) {
+        const spec = base()
+        put(spec, `java${String.fromCodePoint(code)}script:${CANARY}`)
+        const result = validateChartSpec(spec)
+        const reason = BIDI_TODAY.has(code) ? 'bidi_in_string' : 'url_in_string'
+        if (result.ok || result.reason !== reason || result.path !== path || JSON.stringify(result).includes(CANARY)) {
+          wrong.push(`U+${code.toString(16).toUpperCase().padStart(4, '0')}`)
+        }
+      }
+      expect(wrong).toEqual([])
+    },
+  )
 })
 
 describe('row key hygiene', () => {
