@@ -3,8 +3,7 @@ import { LINK } from './styles.ts'
 
 // The phone's way to the screens the tab bar leaves out (prd-02 Ruling 14):
 // a footer row under the Overview, hidden at desktop width, where the
-// sidebar lists them all. Subscriptions is linked though its screen is not
-// built yet (issue 230).
+// sidebar lists them all.
 const LINKS = [
   { to: '/bills', label: 'Bills' },
   { to: '/subscriptions', label: 'Subscriptions' },

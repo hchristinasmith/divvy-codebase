@@ -14,7 +14,7 @@ vi.mock('../../apis/settings.ts', () => ({
   grabSettings: vi.fn(),
   updateSettings: vi.fn(),
   grabSettingsAccounts: vi.fn(),
-  updateAccountRole: vi.fn(),
+  updateAccount: vi.fn(),
 }))
 
 beforeEach(() => {
