@@ -360,7 +360,9 @@ exit "\${FAKE_${name.toUpperCase()}_EXIT:-0}"
 
 // Litestream 0.5.17 runs its -exec string as a child, not through a shell:
 // it splits it with go-shellwords, starts it with exec.Command, passes on the
-// signal it gets, and exits once the child has. This does the same, and
+// signal it gets, and exits once the child has. Before that it copies its
+// credential into the AWS_ names, unless they are set already, so the child
+// would inherit both sets (applyLitestreamEnv). This does the same, and
 // refuses any character outside single quotes that shellwords and sh might
 // read differently (shellwords stops at an unquoted & or ;, dropping the rest).
 // The sh wrapper records the call and the pid, then execs node, which keeps it.
@@ -368,6 +370,12 @@ const FAKE_LITESTREAM_JS = `
 const fs = require('node:fs')
 const { spawn } = require('node:child_process')
 const dir = __dirname
+for (const [from, to] of [
+  ['LITESTREAM_ACCESS_KEY_ID', 'AWS_ACCESS_KEY_ID'],
+  ['LITESTREAM_SECRET_ACCESS_KEY', 'AWS_SECRET_ACCESS_KEY'],
+]) {
+  if (from in process.env && !(to in process.env)) process.env[to] = process.env[from]
+}
 fs.writeFileSync(dir + '/litestream.env', Object.entries(process.env).map(([k, v]) => k + '=' + v).join('\\n'))
 const at = process.argv.indexOf('-exec')
 const line = at === -1 ? '' : process.argv[at + 1] ?? ''
@@ -780,6 +788,61 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
     expect(run.stderr).not.toContain('ERROR')
     expect(ran(run.calls, 'litestream replicate ')).toBe(true)
   })
+
+  // Litestream needs the credential and the replica URL; the app does not,
+  // and the credential can delete every backup. Secrets can be set while the
+  // image lacks the config, so the backups-OFF branch must drop them too.
+  it.each([
+    ['under litestream', true],
+    ['backups OFF', false],
+  ])(
+    'keeps the backup credential out of npm and the server, %s',
+    (_label, backups) => {
+      const credential = {
+        LITESTREAM_ACCESS_KEY_ID: 'not-a-real-secret-key-id',
+        LITESTREAM_SECRET_ACCESS_KEY: 'not-a-real-secret-access-key',
+        LITESTREAM_REPLICA_URL: 'file:///not-a-real-replica',
+        AWS_SESSION_TOKEN: 'not-a-real-secret-session-token',
+      }
+      const appSecret = 'not-a-real-secret-sentinel-3'
+      if (backups) writeFileSync(join(tmp, 'litestream.yml'), 'dbs: []\n')
+      const run = runStart({
+        env: { ...credential, AKAHU_USER_TOKEN: appSecret },
+      })
+
+      expect(run.status).toBe(0)
+      if (backups) {
+        const litestreamEnv = dump('litestream')
+        for (const [name, value] of Object.entries(credential)) {
+          expect(litestreamEnv).toMatch(new RegExp(`^${name}=${value}$`, 'm'))
+        }
+        expect(litestreamEnv).toMatch(
+          new RegExp(`^AWS_ACCESS_KEY_ID=${credential.LITESTREAM_ACCESS_KEY_ID}$`, 'm'),
+        )
+      }
+      for (const name of ['npm', 'node']) {
+        const env = dump(name)
+        expect(env).not.toBe('')
+        const names = env
+          .split('\n')
+          .filter(Boolean)
+          .map((line) => line.slice(0, line.indexOf('=')))
+        // LITESTREAM_CONFIG is the config's path, which every run here sets
+        // (runStart), not a credential.
+        expect(
+          names.filter(
+            (n) => /^(LITESTREAM|AWS)_/.test(n) && n !== 'LITESTREAM_CONFIG',
+          ),
+        ).toEqual([])
+        for (const value of Object.values(credential)) {
+          expect(env).not.toContain(value)
+        }
+      }
+      expect(dump('node')).toMatch(
+        new RegExp(`^AKAHU_USER_TOKEN=${appSecret}$`, 'm'),
+      )
+    },
+  )
 
   it('never hands the auth key to tailscaled, npm, node or litestream, and never prints it', () => {
     const plain = runStart()
