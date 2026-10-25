@@ -197,5 +197,10 @@ describe('design tokens match the handoff as update 2 changes it', () => {
     expect([...theme.vars.keys()].filter((k) => k.includes('shadow'))).toEqual(
       [],
     )
+    // noHardcodedStyle.test.ts allows every `--shadow-*` in the file, so a
+    // soft one declared in any other block would pass there.
+    expect(
+      [...css.matchAll(/--(shadow-[\w-]+):/g)].map(([, n]) => n).sort(),
+    ).toEqual(['shadow-card', 'shadow-pill', 'shadow-tile'])
   })
 })
