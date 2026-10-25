@@ -17,9 +17,9 @@ export default function MerchantRow({
   return (
     <li
       data-merchant={`${merchant.scope}:${merchant.merchantKey}`}
-      className="grid grid-cols-[1fr_auto_auto] items-center gap-4 border-t border-divider py-3"
+      className="grid grid-cols-[1fr_auto_auto] items-center gap-4 border-b border-divider py-3.5"
     >
-      <div className="flex min-w-0 flex-col gap-0.5">
+      <div className="flex min-w-0 flex-col gap-[3px]">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-body-15 font-semibold text-ink">{merchant.name}</span>
           <SideChip scope={merchant.scope} />
@@ -28,7 +28,7 @@ export default function MerchantRow({
           {`Last charged ${formatDay(merchant.lastChargedOn)} · ${plural(merchant.chargeCount, 'charge')}`}
         </span>
       </div>
-      <div className="flex flex-col items-end gap-0.5">
+      <div className="flex flex-col items-end">
         <span className="font-mono text-body-15 text-ink">
           {formatCents(merchant.amountCents)}
         </span>

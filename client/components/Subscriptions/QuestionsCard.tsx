@@ -17,7 +17,7 @@ export default function QuestionsCard({
   return (
     <section
       aria-labelledby="questions-heading"
-      className={`${CARD} flex flex-col gap-3 p-6`}
+      className={`${CARD} flex flex-col gap-3.5 p-6`}
     >
       <h2 id="questions-heading" className={CARD_TITLE}>
         Is this a subscription?

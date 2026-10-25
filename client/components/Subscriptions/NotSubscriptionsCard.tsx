@@ -16,7 +16,7 @@ export default function NotSubscriptionsCard({
   return (
     <section
       aria-labelledby="not-subscriptions-heading"
-      className={`${CARD} flex flex-col gap-3 p-6`}
+      className={`${CARD} flex flex-col gap-3.5 p-6`}
     >
       <h2 id="not-subscriptions-heading" className={CARD_TITLE}>
         Not subscriptions

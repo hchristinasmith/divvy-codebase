@@ -10,7 +10,7 @@ export default function AdvisorBanner() {
   return (
     <p
       data-testid="advisor-banner"
-      className="m-0 rounded-summary bg-blush px-5 py-4 text-body-14 text-rose"
+      className="m-0 rounded-summary bg-blush px-5 py-4 text-body-14 leading-[1.45] text-rose"
     >
       <strong>Advisor:</strong> Not sure what to cancel? Ask Claude.{' '}
       <a href={CLAUDE_DESKTOP_URL} className={LINK}>

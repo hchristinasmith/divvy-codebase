@@ -18,11 +18,16 @@ export const MUTED = 'm-0 text-body-14 text-ink-muted'
 
 export const ERROR = 'm-0 text-body-13 text-danger'
 
-// Blush: a lesser action such as "Try again", "No" or "Undo".
-export const SECONDARY_BUTTON = `cursor-pointer rounded-pill bg-blush px-4 py-2 text-body-13 font-semibold text-rose hover:bg-blush-hover disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS}`
+// A pill button's size and states, the design's row button (padding 7px
+// 14px, 12px semibold, no wrap). The colours are the caller's.
+export const PILL_BUTTON = `cursor-pointer whitespace-nowrap rounded-pill px-3.5 py-[7px] text-body-12 font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS}`
 
-// Pink: the answer that adds something, "Yes".
-export const PRIMARY_BUTTON = `cursor-pointer rounded-pill bg-pink px-4 py-2 text-body-13 font-semibold text-surface hover:bg-pink-hover disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS}`
+// Blush: a lesser action such as "Cancel", "Try again", "No" or "Undo".
+export const SECONDARY_BUTTON = `${PILL_BUTTON} bg-blush text-rose hover:bg-blush-hover`
+
+// Pink: the answer that adds something, "Yes". Pink buttons carry the
+// theme's small offset.
+export const PRIMARY_BUTTON = `${PILL_BUTTON} bg-pink text-surface shadow-pill hover:bg-pink-hover`
 
 // A link as an action. The size is the caller's.
 export const LINK = `font-semibold text-deep hover:text-rose hover:underline ${FOCUS}`

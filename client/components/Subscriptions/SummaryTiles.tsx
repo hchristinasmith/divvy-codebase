@@ -34,7 +34,7 @@ function Tile({
   cents: number
 }) {
   return (
-    <div className="flex flex-col gap-2 rounded-summary bg-surface p-5 shadow-card">
+    <div className="flex flex-col gap-1 rounded-summary bg-surface p-5 shadow-card">
       <span className="text-body-12 text-ink-muted">{label}</span>
       <span
         data-testid={testId}

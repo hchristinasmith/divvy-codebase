@@ -75,7 +75,7 @@ export default function Subscriptions() {
 function SubscriptionsBody({ data }: { data: SubscriptionsResponse }) {
   const actions = useSubscriptionActions()
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-4">
       <SummaryTiles totals={data.totals} />
       {actions.error !== null && (
         <p role="alert" className={ERROR}>

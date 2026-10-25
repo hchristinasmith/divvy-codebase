@@ -2,7 +2,7 @@ import { formatCents } from '../../../shared/money.ts'
 import type { SubscriptionRow } from '../../../shared/contracts.ts'
 import SideChip from './SideChip.tsx'
 import { cadenceLabel, cycleLabel, formatDay, plural } from './format.ts'
-import { FOCUS } from './styles.ts'
+import { FOCUS, PILL_BUTTON, SECONDARY_BUTTON } from './styles.ts'
 import type { SubscriptionActions } from './useSubscriptionActions.ts'
 
 // One subscription row (docs/design/handoff.md Screen 3): the name and
@@ -37,8 +37,6 @@ function metaLine(row: SubscriptionRow): string {
 
 const TEXT_BUTTON = `self-start cursor-pointer bg-transparent p-0 text-body-12 font-semibold text-deep hover:text-rose hover:underline disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS}`
 
-const TOGGLE = `cursor-pointer rounded-pill px-3.5 py-[7px] text-body-12 font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS}`
-
 export default function SubscriptionItem({
   row,
   actions,
@@ -52,11 +50,11 @@ export default function SubscriptionItem({
   return (
     <li
       data-merchant={`${row.scope}:${row.merchantKey}`}
-      className={`grid grid-cols-[1fr_auto_auto] items-center gap-4 border-b border-divider py-3.5 last:border-b-0 ${
+      className={`grid grid-cols-[1fr_auto_auto] items-center gap-4 border-b border-divider py-3.5 ${
         cancelled ? 'opacity-55' : ''
       }`}
     >
-      <div className="flex min-w-0 flex-col gap-0.5">
+      <div className="flex min-w-0 flex-col gap-[3px]">
         <div className="flex flex-wrap items-center gap-2">
           <span
             data-testid="subscription-name"
@@ -101,7 +99,7 @@ export default function SubscriptionItem({
           )
         )}
       </div>
-      <div className="flex flex-col items-end gap-0.5">
+      <div className="flex flex-col items-end">
         <span data-testid="subscription-amount" className="font-mono text-body-15 text-ink">
           {formatCents(row.amountCents)}
         </span>
@@ -110,7 +108,7 @@ export default function SubscriptionItem({
       {cancelled ? (
         <button
           type="button"
-          className={`${TOGGLE} bg-surface text-ink-muted`}
+          className={`${PILL_BUTTON} bg-surface text-ink-muted hover:bg-blush-hover`}
           aria-label={`Cancelled ${row.name}, undo`}
           disabled={actions.isPending}
           onClick={() => actions.uncancel(target)}
@@ -120,7 +118,7 @@ export default function SubscriptionItem({
       ) : (
         <button
           type="button"
-          className={`${TOGGLE} bg-blush text-rose hover:bg-blush-hover`}
+          className={SECONDARY_BUTTON}
           aria-label={`Cancel ${row.name}`}
           disabled={actions.isPending}
           onClick={() => actions.cancel(target)}
