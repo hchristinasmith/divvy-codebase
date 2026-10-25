@@ -35,7 +35,16 @@ describe('freshApp', () => {
   })
 
   it('starts every call from an empty database', async () => {
-    await freshApp()
+    // Setup needs a migrated schema, not a full rollback: only the later
+    // freshApp() call is under test. Rolling everything back in setup as
+    // well made this test the slowest in the file, and it timed out under
+    // load, where every SQLite query waits on a shared thread pool (#368,
+    // #367).
+    // latest() does nothing once an earlier test has migrated, and migrates
+    // from scratch when this test runs alone. The guard comes first, as in
+    // freshApp(), so setup never writes to a database on disk.
+    assertInMemory(connection)
+    await connection.migrate.latest()
     await connection('transactions').insert({ description: 'left over' })
     expect(await connection('transactions').count({ n: '*' })).toEqual([
       { n: 1 },
