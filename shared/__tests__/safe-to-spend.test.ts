@@ -1198,6 +1198,104 @@ describe('budgetSpentCents', () => {
   })
 })
 
+// Regression (#264, before drawings): money leaving a Strawb account and the
+// same amount arriving in a personal account the next day. Whatever drawings
+// later exclude, a Strawb outflow with an ordinary category is that
+// category's spend, and money in is never a credit to a budget.
+describe('a Strawb outflow and an equal personal inflow (#264 regression)', () => {
+  const CONTRACTORS: SafeToSpendBudget = {
+    id: 'contractors',
+    scope: 'strawb',
+    category: 'Contractors',
+    limitCents: 50000,
+  }
+  const OUT: SafeToSpendTransaction = {
+    accountId: 's-cur',
+    date: '2026-10-21',
+    amountCents: -30000,
+    category: 'Contractors',
+    status: 'settled',
+  }
+  const IN: SafeToSpendTransaction = {
+    accountId: 'p-cur',
+    date: '2026-10-22',
+    amountCents: 30000,
+    category: 'Groceries',
+    status: 'settled',
+  }
+  const input = (scope: 'all' | 'personal' | 'strawb'): SafeToSpendInput =>
+    base({
+      scope,
+      budgets: [...BUDGETS, CONTRACTORS],
+      transactions: [...TRANSACTIONS, OUT, IN],
+    })
+
+  it('the Strawb outflow counts toward the Strawb budget on its category', () => {
+    expect(
+      budgetSpentCents({
+        accounts: ACCOUNTS,
+        transactions: [OUT, IN],
+        scope: 'strawb',
+        category: 'Contractors',
+        from: '2026-10-20',
+        to: '2026-10-23',
+      }),
+    ).toBe(30000)
+  })
+
+  it('the personal inflow never credits a personal budget on its category', () => {
+    // Groceries alone: 1000 spent; crediting the 30000 inflow would give 0.
+    expect(
+      budgetSpentCents({
+        accounts: ACCOUNTS,
+        transactions: [
+          { ...OUT, category: 'Groceries' },
+          IN,
+          { ...IN, amountCents: -1000, date: '2026-10-21' },
+        ],
+        scope: 'personal',
+        category: 'Groceries',
+        from: '2026-10-20',
+        to: '2026-10-23',
+      }),
+    ).toBe(1000)
+  })
+
+  it('Strawb: Contractors is 30000 spent and the safe figure falls by its remaining 20000', () => {
+    // Base Strawb safe is −90000 (the fixed table). Contractors spent 30000,
+    //   remaining 50000 − 30000 = 20000, so −90000 − 20000 = −110000. Not
+    //   counting the outflow would leave 50000 remaining: −140000.
+    const result = safeToSpend(input('strawb'))
+    const line = result.budgets.find((b) => b.id === 'contractors')
+    expect(line).toBeDefined()
+    expect(Object.keys(line ?? {}).sort()).toEqual([...BUDGET_LINE_KEYS].sort())
+    expect(line).toStrictEqual({
+      id: 'contractors',
+      scope: 'strawb',
+      category: 'Contractors',
+      limitCents: 50000,
+      spentCents: 30000,
+      remainingCents: 20000,
+      overCents: 0,
+    })
+    expect(result.remainingBudgetCents).toBe(20000)
+    expect(result.safeCents).toBe(-110000)
+  })
+
+  it('Personal: Groceries is still 46000 spent and the safe figure is the base 174000', () => {
+    // The 30000 inflow in Groceries changes nothing: crediting it would make
+    //   Groceries 16000 spent, remaining 44000 and safe 144000.
+    const result = safeToSpend(input('personal'))
+    expect(result.budgets).toStrictEqual([GROCERIES])
+    expect(result.remainingBudgetCents).toBe(14000)
+    expect(result.safeCents).toBe(174000)
+  })
+
+  it('All: Personal plus Strawb, 174000 + (−110000) = 64000', () => {
+    expect(safeToSpend(input('all')).safeCents).toBe(64000)
+  })
+})
+
 describe('paydays', () => {
   it.each<[string, number, string, string, number]>([
     // today (its weekday), payday weekday (0 Sunday … 6 Saturday),

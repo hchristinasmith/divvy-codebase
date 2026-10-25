@@ -1422,6 +1422,143 @@ describe('readOverview: pending spend', () => {
   })
 })
 
+// Regression (#264, before drawings): transfers between the two scopes that
+// are not a Strawb-out, personal-in pair of one amount count exactly as any
+// other row does today. In the main fixture Strawb's Software budget has
+// 2500 spent of 10000 and Strawb's safe figure is 380500; personal
+// Groceries has 9500 spent of 20000 and personal safe is 28500.
+describe('readOverview: transfers that are not drawings (#264 regression)', () => {
+  // 05:00 UTC on the 27th is 18:00 NZ on payday; 20:00 UTC on the 27th is
+  // 09:00 NZ on the 28th, today. Both are in the window.
+  const OUT_AT = '2026-10-27T05:00:00.000Z'
+  const NEXT_DAY = '2026-10-27T20:00:00.000Z'
+
+  const SOFTWARE = {
+    id: '3',
+    scope: 'strawb',
+    category: 'Software',
+    limitCents: 10000,
+  } as const
+
+  async function strawbOutflowWith(partner: Row[]) {
+    await seedMain()
+    await connection('transactions').insert([
+      tx(AKAHU.trading, OUT_AT, -30000, {
+        id: 101,
+        category: 'Software',
+        description: 'Invented transfer out',
+      }),
+      ...partner,
+    ])
+  }
+
+  it.each<[string, Row[]]>([
+    ['with no partner inflow', []],
+    [
+      'with a personal inflow 1 cent short',
+      [tx(AKAHU.everyday, NEXT_DAY, 29999, { id: 102, description: 'Invented transfer in' })],
+    ],
+    [
+      'with a personal inflow 1 cent over',
+      [tx(AKAHU.everyday, NEXT_DAY, 30001, { id: 102, description: 'Invented transfer in' })],
+    ],
+  ])(
+    'a strawb outflow %s counts toward Strawb spending as today',
+    async (_why, partner) => {
+      await strawbOutflowWith(partner)
+
+      const strawb = await readOverview('strawb', NOW, connection)
+      const all = await readOverview('all', NOW, connection)
+
+      // Software spent 2500 + 30000 = 32500, 22500 over, 0 remaining, so
+      // Strawb's remaining budget falls from 7500 to 0 and its safe figure
+      // rises by 7500: 380500 + 7500 = 388000. All: 409000 + 7500.
+      const software = strawb.safeToSpend.budgets.find((b) => b.id === '3')
+      expect(Object.keys(software ?? {}).sort()).toStrictEqual(
+        [
+          'id',
+          'scope',
+          'category',
+          'limitCents',
+          'spentCents',
+          'remainingCents',
+          'overCents',
+        ].sort(),
+      )
+      expect(software).toStrictEqual({
+        ...SOFTWARE,
+        spentCents: 32500,
+        remainingCents: 0,
+        overCents: 22500,
+      })
+      expect(strawb.safeToSpend.remainingBudgetCents).toBe(0)
+      expect(strawb.safeToSpend.safeCents).toBe(388000)
+      expect(all.safeToSpend.safeCents).toBe(416500)
+
+      // Shown with its stored category, not anything derived.
+      expect(
+        all.recentActivity.find((r) => r.id === '101'),
+      ).toMatchObject({ category: 'Software', categorySource: 'akahu' })
+      if (partner.length > 0) {
+        expect(
+          all.recentActivity.find((r) => r.id === '102'),
+        ).toMatchObject({ category: null, categorySource: 'akahu' })
+      }
+    },
+  )
+
+  it('a personal outflow and an equal strawb inflow the next day count as today', async () => {
+    await seedMain()
+    await connection('transactions').insert([
+      tx(AKAHU.everyday, OUT_AT, -3000, {
+        id: 101,
+        category: 'Groceries',
+        description: 'Invented money put in',
+      }),
+      tx(AKAHU.trading, NEXT_DAY, 3000, {
+        id: 102,
+        category: 'Software',
+        description: 'Invented money received',
+      }),
+    ])
+
+    const personal = await readOverview('personal', NOW, connection)
+    const strawb = await readOverview('strawb', NOW, connection)
+
+    // Personal Groceries 9500 + 3000 = 12500 spent, 7500 remaining; the
+    // personal remaining budget falls from 10500 to 7500 and the safe figure
+    // rises by 3000: 28500 + 3000 = 31500.
+    expect(personal.safeToSpend.budgets.find((b) => b.id === '1')).toStrictEqual(
+      {
+        id: '1',
+        scope: 'personal',
+        category: 'Groceries',
+        limitCents: 20000,
+        spentCents: 12500,
+        remainingCents: 7500,
+        overCents: 0,
+      },
+    )
+    expect(personal.safeToSpend.remainingBudgetCents).toBe(7500)
+    expect(personal.safeToSpend.safeCents).toBe(31500)
+    // The strawb inflow is money in: Software is still 2500 spent.
+    expect(strawb.safeToSpend.budgets.find((b) => b.id === '3')).toStrictEqual({
+      ...SOFTWARE,
+      spentCents: 2500,
+      remainingCents: 7500,
+      overCents: 0,
+    })
+    expect(strawb.safeToSpend.safeCents).toBe(380500)
+
+    expect(
+      personal.recentActivity.find((r) => r.id === '101'),
+    ).toMatchObject({ category: 'Groceries', categorySource: 'akahu' })
+    expect(
+      strawb.recentActivity.find((r) => r.id === '102'),
+    ).toMatchObject({ category: 'Software', categorySource: 'akahu' })
+  })
+})
+
 describe('readOverview: dataAsOf', () => {
   const run = (
     id: number,

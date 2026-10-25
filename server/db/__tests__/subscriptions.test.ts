@@ -317,6 +317,75 @@ describe('readSubscriptions: scope', () => {
   })
 })
 
+// Regression (#264, before drawings): a recurring Strawb outflow that has no
+// personal inflow of the same amount beside it is an ordinary charge, and is
+// detected as a subscription exactly as any other.
+describe('readSubscriptions: a recurring strawb outflow (#264 regression)', () => {
+  const payee = {
+    merchant_id: 'merchant_fixture_payee',
+    merchant_name: 'Example Payee',
+    description: 'EXAMPLE PAYEE 7731',
+  }
+  // The day after each MONTHLY charge, at noon NZST.
+  const NEXT_DAYS = [
+    '2026-07-02T00:00:00.000Z',
+    '2026-08-01T00:00:00.000Z',
+    '2026-08-31T00:00:00.000Z',
+  ]
+
+  it.each<[string, Row[]]>([
+    ['with no personal inflow at all', []],
+    [
+      'with a personal inflow 1 cent short the next day',
+      NEXT_DAYS.map((date) => tx(EVERYDAY, date, 29999)),
+    ],
+    [
+      'with an equal inflow the next day on another strawb account',
+      NEXT_DAYS.map((date) => tx('acc_sentinel_spot', date, 30000)),
+    ],
+  ])('is detected %s', async (_why, partners) => {
+    await seedAccounts()
+    await connection('accounts').insert(
+      account({
+        id: 4,
+        akahu_id: 'acc_sentinel_spot',
+        name: 'Sentinel Strawb pot',
+        scope: 'strawb',
+      }),
+    )
+    await insertTxs([
+      ...MONTHLY.map((date) => tx(TRADING, date, -30000, payee)),
+      ...partners,
+    ])
+
+    const { subscriptions } = await readSubscriptions('strawb')
+
+    expect(
+      subscriptions.map((r) => [
+        r.scope,
+        r.merchantKey,
+        r.name,
+        r.chargeCount,
+        r.amountCents,
+        r.cadence,
+        r.detected,
+        r.status,
+      ]),
+    ).toStrictEqual([
+      [
+        'strawb',
+        'm:merchant_fixture_payee',
+        'Example Payee',
+        3,
+        30000,
+        'monthly',
+        true,
+        'active',
+      ],
+    ])
+  })
+})
+
 describe('her mark wins after the next sync', () => {
   it('a detected merchant marked No stays No when every row is replaced and a fourth charge lands', async () => {
     await seedAccounts()
