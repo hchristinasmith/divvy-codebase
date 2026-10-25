@@ -610,6 +610,21 @@ describe('the settled window (Ruling 2, amended by Ruling 10)', () => {
     })
   })
 
+  it("skips an ISO start toISOString() never writes, such as '2999-01-01T00:00:00Z' (#206)", async () => {
+    // Date.parse reads it and it ends in Z, but it has no milliseconds:
+    // ranked, it would beat every real start, and the window would start 30
+    // days before now instead of 30 days before the real last success.
+    expect(
+      await windowAfter([
+        { started_at: at(-15 * MINUTE_MS).toISOString(), outcome: 'success' },
+        { started_at: '2999-01-01T00:00:00Z', outcome: 'success' },
+      ]),
+    ).toEqual({
+      start: at(-30 * DAY_MS - 15 * MINUTE_MS).toISOString(),
+      end: NOW.toISOString(),
+    })
+  })
+
   it('follows the most recent success, not the oldest or the first inserted', async () => {
     // The recent success has the lower id, so neither ascending start order
     // nor descending id order alone finds it.
