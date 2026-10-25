@@ -14,13 +14,19 @@
 // duplicates nor resurrects one (and does not refresh its numbers).
 //
 // Logs name the draft's kind and the validator's reason and path, or a thrown
-// error's message; never a label, an amount or a row.
+// error's class; never a label, an amount or a row, and never an error's
+// message, which for a database error can hold its SQL and bound values.
 import type { ChartSpecRejection, InsightKind, InsightScope } from '../../../models/insights.ts'
 import connection from '../../db/connection.ts'
 import { finishRun, startRun, type StartRun } from '../db/agent-runs.ts'
 import { insertInsight, listInsights } from '../db/insights.ts'
 import { buildDrafts } from './prompt.ts'
 import { collectAggregates, lastCompleteWeek, weekRange } from './queries.ts'
+
+// The class of what was thrown, as the routes log it.
+function errorClass(err: unknown): string {
+  return err instanceof Error ? err.constructor.name : typeof err
+}
 
 export interface InsightsRunOptions {
   // An ISO week label; the last complete NZ week before `now` when absent.
@@ -85,7 +91,7 @@ export async function runInsightsAgent(
     if (rejected.length > 0) outcome = 'failed'
   } catch (err) {
     outcome = 'failed'
-    console.error('insights agent: run failed', err instanceof Error ? err.message : 'a non-Error was thrown')
+    console.error('insights agent: run failed', errorClass(err))
   } finally {
     // Never before `now`, which a caller may have set.
     const finishedAt = new Date(Math.max(Date.now(), now.getTime()))

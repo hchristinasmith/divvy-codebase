@@ -2,11 +2,25 @@
 // #47). Ruling 7: the agent makes no model call, so every insight is these
 // fixed queries, folded in code and filled into a template (./prompt.ts).
 //
-// One read reaches the database, `loadLedger`, and it reads only settled
-// Akahu rows on stored Akahu accounts of one scope. It never selects a
-// transaction's id, description, reference, particulars or code, so nothing
-// an insight says can carry them. Everything after it is a pure fold over
+// The ledger read, `loadLedger`, reads only settled Akahu rows on stored
+// Akahu accounts of one scope. It never selects a transaction's description,
+// reference, particulars or code, so nothing an insight says can carry them.
+// It selects a row's id and category source only to lay drawings over the
+// rows; neither leaves this module. Everything after it is a pure fold over
 // the loaded rows, which the tests check against a hand-written query.
+//
+// Drawings (prd-02 Ruling 15) are never spending. A row whose effective
+// category (shared/drawings.ts) is Drawings is dropped at load, in both
+// scopes, before transfers are paired: a half of a drawing that Hannah has
+// not categorised by hand, or any row whose category is Drawings. A half she
+// categorised by hand stays and counts under her category. Finding the halves
+// needs both scopes' rows, so a `strawb` run makes one more read: every
+// candidate half, all-time, as server/db/drawings.ts reads them, taking only
+// id, scope, date and amount (so a personal inflow's merchant, category and
+// description are never read). A `personal` run never makes that read and
+// reads no strawb row: a personal half is an inflow, which is never spend.
+// server/db/drawings.ts is not imported because it imports
+// server/db/overview.ts, which writes.
 //
 // Days are Pacific/Auckland calendar days (YYYY-MM-DD), bucketed here in JS:
 // SQL date functions would need raw SQL, which nothing under server/agents/
@@ -21,6 +35,14 @@
 // load, by `cleanLabel`, and only cleaned labels leave this module. Errors
 // name the field, never its value.
 import type { InsightScope } from '../../../models/insights.ts'
+import type { CategorySource } from '../../../models/transactions.ts'
+import type { RowScope } from '../../../shared/contracts.ts'
+import {
+  effectiveCategory,
+  findDrawingIds,
+  isDrawingCategory,
+  type DrawingCandidate,
+} from '../../../shared/drawings.ts'
 import { sumCents } from '../../../shared/money.ts'
 import connection from '../../db/connection.ts'
 
@@ -234,18 +256,66 @@ export function cleanLabel(text: string | null, fallback: string): string {
 // The one read
 // ---------------------------------------------------------------------------
 
+// The only date shape the shared drawings matcher accepts.
+const NZ_DAY = /^\d{4}-\d{2}-\d{2}$/
+
+interface CandidateRow {
+  id: number
+  scope: RowScope
+  date: string
+  amount_cents: number
+}
+
+// The ids of both halves of every drawing in the database. Mirrors
+// `loadDrawingIds` (server/db/drawings.ts) row for row: all-time, so no
+// window edge changes the greedy pairing; Akahu rows on stored Akahu
+// accounts, settled and pending; strawb outflows and personal inflows. A row
+// the matcher cannot place (an unparseable date, a year past 9999, an amount
+// that is not whole cents) is skipped, as there.
+async function readDrawingIds(db: typeof connection): Promise<Set<number>> {
+  const rows: CandidateRow[] = await db('transactions as t')
+    .join('accounts as a', 'a.akahu_id', 't.account_id')
+    .where('t.source', 'akahu')
+    .where('a.source', 'akahu')
+    .whereNotNull('t.date')
+    .where((q) =>
+      q
+        .where((out) => out.where('a.scope', 'strawb').where('t.amount_cents', '<', 0))
+        .orWhere((into) => into.where('a.scope', 'personal').where('t.amount_cents', '>', 0)),
+    )
+    .select('t.id', 'a.scope', 't.date', 't.amount_cents')
+  const candidates: DrawingCandidate[] = []
+  for (const row of rows) {
+    const at = new Date(row.date)
+    if (Number.isNaN(at.getTime())) continue
+    const date = nzCalendarDate(at)
+    if (!NZ_DAY.test(date) || !Number.isSafeInteger(row.amount_cents)) continue
+    candidates.push({ id: row.id, scope: row.scope, date, amountCents: row.amount_cents })
+  }
+  return findDrawingIds(candidates)
+}
+
 interface StoredRow {
+  id: number
   account_id: string
   date: string
   amount_cents: number
   category: string | null
+  category_source: CategorySource
   merchant_name: string | null
+}
+
+interface Ledger {
+  rows: LedgerRow[]
+  // The NZ days of the rows dropped as drawings. Only their count leaves
+  // this module, in `ledgerRowCount`.
+  drawingDays: IsoDate[]
 }
 
 /**
  * Settled Akahu transactions on the scope's stored Akahu accounts whose NZ
- * day is `from` to `to` inclusive. A row with no date, an unparseable date
- * or a non-integer amount is dropped.
+ * day is `from` to `to` inclusive, drawings left out (prd-02 Ruling 15). A
+ * row with no date, an unparseable date or a non-integer amount is dropped.
  */
 export async function loadLedger(
   scope: InsightScope,
@@ -253,9 +323,21 @@ export async function loadLedger(
   to: IsoDate,
   db = connection,
 ): Promise<LedgerRow[]> {
+  return (await readLedger(scope, from, to, db)).rows
+}
+
+async function readLedger(
+  scope: InsightScope,
+  from: IsoDate,
+  to: IsoDate,
+  db: typeof connection,
+): Promise<Ledger> {
   if (typeof scope !== 'string' || !Object.prototype.hasOwnProperty.call(SCOPES, scope)) {
     throw new Error('scope must be personal or strawb')
   }
+  // A personal run never reads the candidates, which hold strawb rows; a
+  // hand-set Drawings category still drops a personal row below.
+  const drawingIds = scope === 'strawb' ? await readDrawingIds(db) : new Set<number>()
   // `date` is stored as UTC ISO-8601 text. The SQL bounds are whole UTC
   // days padded past the NZ offset either way; the exact NZ day is applied
   // below, after conversion.
@@ -268,23 +350,33 @@ export async function loadLedger(
     .whereNotNull('t.amount_cents')
     .where('t.date', '>=', lowerDay)
     .where('t.date', '<', upperDay)
-    .select('t.account_id', 't.date', 't.amount_cents', 't.category', 't.merchant_name')
+    .select('t.id', 't.account_id', 't.date', 't.amount_cents', 't.category', 't.category_source', 't.merchant_name')
 
   const rows: LedgerRow[] = []
+  const drawingDays: IsoDate[] = []
   for (const row of stored) {
     const at = new Date(row.date)
     if (Number.isNaN(at.getTime()) || !Number.isSafeInteger(row.amount_cents)) continue
     const date = nzCalendarDate(at)
     if (date < from || date > to) continue
+    // The raw effective category, before cleaning: only an exact Drawings is one.
+    const effective = effectiveCategory(
+      { category: row.category, categorySource: row.category_source },
+      drawingIds.has(row.id),
+    )
+    if (isDrawingCategory(effective.category)) {
+      drawingDays.push(date)
+      continue
+    }
     rows.push({
       date,
       accountId: row.account_id,
       amountCents: row.amount_cents,
-      category: cleanLabel(row.category, UNCATEGORISED),
+      category: cleanLabel(effective.category, UNCATEGORISED),
       merchant: cleanLabel(row.merchant_name, UNKNOWN_MERCHANT),
     })
   }
-  return rows.sort(
+  rows.sort(
     (a, b) =>
       compareText(a.date, b.date) ||
       compareText(a.accountId, b.accountId) ||
@@ -292,6 +384,7 @@ export async function loadLedger(
       compareText(a.merchant, b.merchant) ||
       compareText(a.category, b.category),
   )
+  return { rows, drawingDays }
 }
 
 // ---------------------------------------------------------------------------
@@ -326,7 +419,8 @@ function push<K>(map: Map<K, number[]>, key: K, value: number): void {
  * than TRANSFER_WINDOW_DAYS apart, the nearest first, a tie going to the
  * earlier inflow (then the lower account id). Each leg pairs at most once,
  * and both legs of a pair are dropped. Only the rows given are seen, so a
- * leg in another scope (an owner's drawings) is never paired (#264).
+ * leg in another scope is never paired; drawings, which cross scopes, are
+ * dropped at load, before this runs (prd-02 Ruling 15).
  */
 export function excludeTransfers(rows: readonly LedgerRow[]): LedgerRow[] {
   const inflows = new Map<number, LedgerRow[]>()
@@ -586,7 +680,9 @@ export interface Aggregates {
   months: string[]
   // The week's Sunday: nothing after it is counted.
   asOf: IsoDate
-  // Rows read for the analysis window, transfers included.
+  // Rows read for the analysis window. Like transfer legs, drawing halves
+  // and rows categorised Drawings are counted here though no fold sees them:
+  // this is what the run considered, not what it counted as spend.
   ledgerRowCount: number
   topMerchants: MerchantSpend[]
   wow: WeekOverWeek
@@ -614,7 +710,7 @@ export async function collectAggregates(
   const lookbackStart = addDays(range.start, -7 * UNUSUAL_LOOKBACK_WEEKS)
   const windowStart = monthStart < lookbackStart ? monthStart : lookbackStart
 
-  const loaded = await loadLedger(
+  const { rows: loaded, drawingDays } = await readLedger(
     scope,
     addDays(windowStart, -TRANSFER_WINDOW_DAYS),
     addDays(range.end, TRANSFER_WINDOW_DAYS),
@@ -622,12 +718,13 @@ export async function collectAggregates(
   )
   const inWindow = (r: LedgerRow) => inRange(r, windowStart, range.end)
   const kept = excludeTransfers(loaded).filter(inWindow)
+  const drawingsInWindow = drawingDays.filter((d) => d >= windowStart && d <= range.end).length
 
   return {
     week: range.label,
     months,
     asOf: range.end,
-    ledgerRowCount: loaded.filter(inWindow).length,
+    ledgerRowCount: loaded.filter(inWindow).length + drawingsInWindow,
     topMerchants: topMerchants(kept, range.label),
     wow: weekOverWeek(kept, range.label),
     unusual: unusualSpends(kept, range.label),

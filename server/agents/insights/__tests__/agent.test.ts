@@ -23,6 +23,16 @@ const hooks = vi.hoisted(() => ({
   insertCalls: 0,
 }))
 
+// A thrown query error whose message carries SQL and a bound value, as a
+// knex error's does. Only its class may be logged.
+const QUERY_FAILURE = vi.hoisted(() => {
+  class FixtureQueryError extends Error {}
+  return {
+    FixtureQueryError,
+    message: "select * from transactions where merchant_name = 'Sentinel Bound Value'",
+  }
+})
+
 vi.mock('../prompt.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../prompt.ts')>()
   return {
@@ -39,7 +49,7 @@ vi.mock('../queries.ts', async (importOriginal) => {
   return {
     ...actual,
     collectAggregates: async (...args: Parameters<typeof actual.collectAggregates>) => {
-      if (hooks.failQuery) throw new Error('fixture query failure')
+      if (hooks.failQuery) throw new QUERY_FAILURE.FixtureQueryError(QUERY_FAILURE.message)
       return actual.collectAggregates(...args)
     },
   }
@@ -352,6 +362,27 @@ describe('scope', () => {
   })
 })
 
+describe('drawings (prd-02 Ruling 15)', () => {
+  it('a strawb run stores nothing from a drawing, and counts its rows as considered', async () => {
+    await seedLedger()
+    const before = (await collectAggregates('strawb', WEEK)).ledgerRowCount
+    // Out of Strawb on Tuesday, into personal on Wednesday: a drawing.
+    await tx('acc_s1', day('2026-10-20'), -31415, 'Owner Pay Fixture', 'Owner Pay Category')
+    await tx('acc_p1', day('2026-10-21'), 31415, 'Owner Pay Fixture', 'Owner Pay Category')
+    const result = await runInsightsAgent('strawb', {}, NOW)
+    expect(result).toMatchObject({ outcome: 'success', written: 3 })
+    // The strawb half is read and considered, though no insight counts it.
+    expect(result.considered).toBe(before + 1)
+    const rows = await insightRows()
+    expect(rows).toHaveLength(3)
+    const text = rows.map((r) => [r.title, r.body_md, r.chart_spec_json].join('\n')).join('\n')
+    for (const sentinel of ['Owner Pay Fixture', 'Owner Pay Category', '31415', '$314.15']) {
+      expect(text, sentinel).not.toContain(sentinel)
+    }
+    expect(text).toContain(STRAWB.merchant)
+  })
+})
+
 describe('hostile merchant text', () => {
   const HOSTILE = [
     'http://evil.example/x',
@@ -459,7 +490,7 @@ describe('a refused spec', () => {
 })
 
 describe('failure and repeat', () => {
-  it('a query that throws logs a failed run with nothing considered or written', async () => {
+  it('a query that throws logs a failed run with nothing considered or written, and logs its class, not its SQL', async () => {
     await seedLedger()
     hooks.failQuery = true
     const result = await runInsightsAgent('personal', {}, NOW)
@@ -468,7 +499,10 @@ describe('failure and repeat', () => {
     const [run] = await runRows()
     expect(run).toMatchObject({ outcome: 'failed', considered_count: 0, written_count: 0 })
     expect(run.finished_at).not.toBeNull()
-    expect(errors).toHaveBeenCalledWith('insights agent: run failed', 'fixture query failure')
+    expect(errors).toHaveBeenCalledWith('insights agent: run failed', 'FixtureQueryError')
+    const logged = JSON.stringify(errors.mock.calls)
+    expect(logged).not.toContain('Sentinel Bound Value')
+    expect(logged).not.toContain('select')
   })
 
   it('a second run for the same period writes nothing and skips all three', async () => {

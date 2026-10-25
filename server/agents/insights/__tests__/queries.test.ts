@@ -71,6 +71,7 @@ interface Tx {
   category?: string | null
   status?: 'settled' | 'pending'
   source?: 'akahu' | 'xero'
+  categorySource?: 'akahu' | 'user'
 }
 
 let seq = 0
@@ -84,6 +85,7 @@ async function tx(t: Tx): Promise<number> {
     amount_cents: t.cents,
     merchant_name: t.merchant ?? null,
     category: t.category ?? null,
+    category_source: t.categorySource ?? 'akahu',
     status: t.status ?? 'settled',
     source: t.source ?? 'akahu',
     description: 'SENTINEL DESC card 1234',
@@ -161,6 +163,47 @@ async function seedLedger(): Promise<number[]> {
   return transferIds
 }
 
+// Drawings (prd-02 Ruling 15), laid over seedLedger: strawb outflows and
+// the personal inflows that match them. Returns the ids the oracle leaves
+// out: both halves of every drawing and every row categorised Drawings.
+async function seedDrawings(): Promise<number[]> {
+  const excluded: number[] = []
+  const owner = { merchant: 'Owner Pay Fixture', category: 'Transfers' }
+  // Owner Pay Fixture's strawb history: three small outflows no personal
+  // inflow matches, so its drawing this week would be unusual if counted.
+  for (const at of ['2026-09-01', '2026-09-08', '2026-09-15']) {
+    await tx({ account: 'acc_s1', at: day(at), cents: -1000, ...owner })
+  }
+  // A drawing in the week: out on Tuesday, in on Wednesday.
+  excluded.push(await tx({ account: 'acc_s1', at: day('2026-10-20'), cents: -30000, ...owner }))
+  excluded.push(await tx({ at: day('2026-10-21'), cents: 30000, ...owner }))
+  // The week before, the in half four days after the out half: past
+  // DRAWING_DAYS_AFTER, so not a drawing, and the outflow is strawb spend.
+  await tx({ account: 'acc_s1', at: day('2026-10-14'), cents: -40000, ...owner })
+  await tx({ at: day('2026-10-18'), cents: 40000, ...owner })
+  // A drawing whose strawb half Hannah categorised by hand: it counts, under
+  // her category.
+  await tx({ account: 'acc_s1', at: day('2026-10-22'), cents: -35000, merchant: 'Hand Sorted Fixture', category: 'Equipment', categorySource: 'user' })
+  excluded.push(await tx({ at: day('2026-10-22'), cents: 35000, merchant: 'Hand Sorted Fixture', category: 'Transfers' }))
+  // A drawing whose in half is still pending: the matcher reads pending rows.
+  excluded.push(await tx({ account: 'acc_s1', at: day('2026-10-23'), cents: -12345, merchant: 'Pending Partner Fixture', category: 'Transfers' }))
+  excluded.push(await tx({ at: day('2026-10-24'), cents: 12345, merchant: 'Pending Partner Fixture', status: 'pending' }))
+  // A drawing out on the Sunday whose in half lands three days later, past
+  // the ledger's read window: only an all-time candidate read finds it.
+  excluded.push(await tx({ account: 'acc_s1', at: day('2026-10-25'), cents: -45600, merchant: 'Edge Partner Fixture', category: 'Transfers' }))
+  excluded.push(await tx({ at: day('2026-10-28'), cents: 45600, merchant: 'Edge Partner Fixture' }))
+  // Rows Hannah categorised Drawings by hand, with no partner: never spend.
+  excluded.push(await tx({ at: day('2026-10-20'), cents: -2700, merchant: 'Hand Drawings Fixture', category: 'Drawings', categorySource: 'user' }))
+  excluded.push(await tx({ account: 'acc_s1', at: day('2026-10-21'), cents: -1900, merchant: 'Hand Drawings Strawb', category: 'Drawings', categorySource: 'user' }))
+  return excluded
+}
+
+// seedLedger and seedDrawings together; the ids the oracle leaves out.
+async function seedWithDrawings(): Promise<number[]> {
+  const transferIds = await seedLedger()
+  return [...transferIds, ...(await seedDrawings())]
+}
+
 // ---- The oracle: hand-written knex, explicit UTC instants ----
 
 // NZ midnight at the start of each day named, as a UTC instant.
@@ -176,22 +219,23 @@ const NZ_MONTHS: [string, string, string][] = [
   ['2026-10', '2026-09-30T11:00:00.000Z', '2026-10-25T10:59:59.999Z'],
 ]
 
-function personalSpend(from: string, to: string, transferIds: number[]) {
+function scopeSpend(scope: 'personal' | 'strawb', from: string, to: string, excludedIds: number[]) {
   return connection('transactions as t')
     .join('accounts as a', 't.account_id', 'a.akahu_id')
-    .where({ 'a.scope': 'personal', 'a.source': 'akahu', 't.source': 'akahu', 't.status': 'settled' })
+    .where({ 'a.scope': scope, 'a.source': 'akahu', 't.source': 'akahu', 't.status': 'settled' })
     .where('t.amount_cents', '<', 0)
     .whereBetween('t.date', [from, to])
-    .whereNotIn('t.id', transferIds)
+    .whereNotIn('t.id', excludedIds)
 }
 
 async function oracleBy(
   column: 'merchant_name' | 'category',
   from: string,
   to: string,
-  transferIds: number[],
+  excludedIds: number[],
+  scope: 'personal' | 'strawb' = 'personal',
 ): Promise<Map<string, { spend: number; count: number }>> {
-  const rows: { label: string | null; total: number; n: number }[] = await personalSpend(from, to, transferIds)
+  const rows: { label: string | null; total: number; n: number }[] = await scopeSpend(scope, from, to, excludedIds)
     .select({ label: `t.${column}` })
     .sum({ total: 't.amount_cents' })
     .count({ n: 't.id' })
@@ -205,9 +249,9 @@ const bySpend = <T extends { spend: number; label: string }>(a: T, b: T) =>
 
 describe('collectAggregates against the hand-written oracle', () => {
   it('top merchants equal the oracle to the cent', async () => {
-    const transferIds = await seedLedger()
+    const excludedIds = await seedWithDrawings()
     const a = await collectAggregates('personal', WEEK)
-    const oracle = [...(await oracleBy('merchant_name', NZ_WEEK.start, NZ_WEEK.end, transferIds))]
+    const oracle = [...(await oracleBy('merchant_name', NZ_WEEK.start, NZ_WEEK.end, excludedIds))]
       .map(([label, v]) => ({ label, ...v }))
       .sort(bySpend)
       .map((m) => ({ merchant: m.label, spendCents: m.spend, count: m.count }))
@@ -220,10 +264,10 @@ describe('collectAggregates against the hand-written oracle', () => {
   })
 
   it('week over week equals the oracle to the cent, per category and in total', async () => {
-    const transferIds = await seedLedger()
+    const excludedIds = await seedWithDrawings()
     const a = await collectAggregates('personal', WEEK)
-    const now = await oracleBy('category', NZ_WEEK.start, NZ_WEEK.end, transferIds)
-    const then = await oracleBy('category', NZ_LAST_WEEK.start, NZ_LAST_WEEK.end, transferIds)
+    const now = await oracleBy('category', NZ_WEEK.start, NZ_WEEK.end, excludedIds)
+    const then = await oracleBy('category', NZ_LAST_WEEK.start, NZ_LAST_WEEK.end, excludedIds)
     const categories = [...new Set([...now.keys(), ...then.keys()])]
     const expected = categories
       .map((category) => {
@@ -247,11 +291,11 @@ describe('collectAggregates against the hand-written oracle', () => {
   })
 
   it('monthly spend per category equals the oracle to the cent, over NZ months', async () => {
-    const transferIds = await seedLedger()
+    const excludedIds = await seedWithDrawings()
     const a = await collectAggregates('personal', WEEK)
     const expected: { month: string; category: string; spendCents: number }[] = []
     for (const [month, from, to] of NZ_MONTHS) {
-      const cells = [...(await oracleBy('category', from, to, transferIds))]
+      const cells = [...(await oracleBy('category', from, to, excludedIds))]
         .map(([label, v]) => ({ label, spend: v.spend }))
         .sort(bySpend)
       for (const c of cells) expected.push({ month, category: c.label, spendCents: c.spend })
@@ -302,6 +346,152 @@ describe('collectAggregates against the hand-written oracle', () => {
     await seedLedger()
     const a = await collectAggregates('personal', WEEK)
     expect(a.topMerchants).toContainEqual({ merchant: 'Placeholder Cafe', spendCents: 2500, count: 1 })
+  })
+})
+
+describe('drawings (prd-02 Ruling 15)', () => {
+  // Every SQL statement run while `fn` runs, with its bindings.
+  async function queriesDuring(fn: () => Promise<unknown>): Promise<{ sql: string; bindings: unknown[] }[]> {
+    const seen: { sql: string; bindings: unknown[] }[] = []
+    const listener = (q: { sql: string; bindings?: unknown[] }) => seen.push({ sql: q.sql, bindings: q.bindings ?? [] })
+    connection.on('query', listener)
+    try {
+      await fn()
+    } finally {
+      connection.removeListener('query', listener)
+    }
+    return seen
+  }
+
+  it('strawb top merchants, week over week and monthly equal the oracle with drawings left out, to the cent', async () => {
+    const excludedIds = await seedWithDrawings()
+    const a = await collectAggregates('strawb', WEEK)
+
+    const merchants = [...(await oracleBy('merchant_name', NZ_WEEK.start, NZ_WEEK.end, excludedIds, 'strawb'))]
+      .map(([label, v]) => ({ label, ...v }))
+      .sort(bySpend)
+      .map((m) => ({ merchant: m.label, spendCents: m.spend, count: m.count }))
+    expect(a.topMerchants).toStrictEqual(merchants)
+    expect(a.topMerchants).toStrictEqual([
+      { merchant: STRAWB_SENTINEL.merchant, spendCents: STRAWB_SENTINEL.cents, count: 1 },
+      { merchant: 'Hand Sorted Fixture', spendCents: 35000, count: 1 },
+    ])
+
+    const now = await oracleBy('category', NZ_WEEK.start, NZ_WEEK.end, excludedIds, 'strawb')
+    const then = await oracleBy('category', NZ_LAST_WEEK.start, NZ_LAST_WEEK.end, excludedIds, 'strawb')
+    const sum = (m: Map<string, { spend: number }>) => [...m.values()].reduce((t, v) => t + v.spend, 0)
+    expect([a.wow.thisWeekCents, a.wow.lastWeekCents]).toEqual([sum(now), sum(then)])
+    expect([a.wow.thisWeekCents, a.wow.lastWeekCents]).toEqual([90555, 40000])
+
+    const monthly: { month: string; category: string; spendCents: number }[] = []
+    for (const [month, from, to] of NZ_MONTHS) {
+      const cells = [...(await oracleBy('category', from, to, excludedIds, 'strawb'))]
+        .map(([label, v]) => ({ label, spend: v.spend }))
+        .sort(bySpend)
+      for (const c of cells) monthly.push({ month, category: c.label, spendCents: c.spend })
+    }
+    expect(a.monthly).toStrictEqual(monthly)
+  })
+
+  it('a strawb outflow matched by a personal inflow of equal cents is not strawb spend, nor unusual', async () => {
+    await seedWithDrawings()
+    const a = await collectAggregates('strawb', WEEK)
+    expect(a.topMerchants.map((m) => m.merchant)).not.toContain('Owner Pay Fixture')
+    // Transfers this week are only drawings; last week's is the unmatched 40000.
+    expect(a.wow.byCategory).toContainEqual({ category: 'Transfers', thisCents: 0, lastCents: 40000, changeCents: -40000 })
+    expect(a.monthly).toContainEqual({ month: '2026-10', category: 'Transfers', spendCents: 40000 })
+    // Owner Pay Fixture has three 1000 outflows of history: the 30000 drawing
+    // would be flagged if it were spend.
+    expect(a.unusual).toEqual([])
+  })
+
+  it('an in half further from the out half than the drawing window allows leaves the outflow as spend', async () => {
+    await seedWithDrawings()
+    const a = await collectAggregates('strawb', '2026-W42')
+    expect(a.topMerchants).toContainEqual({ merchant: 'Owner Pay Fixture', spendCents: 40000, count: 1 })
+  })
+
+  it('a drawing half Hannah categorised by hand counts, under her category', async () => {
+    await seedWithDrawings()
+    const a = await collectAggregates('strawb', WEEK)
+    expect(a.topMerchants).toContainEqual({ merchant: 'Hand Sorted Fixture', spendCents: 35000, count: 1 })
+    expect(a.wow.byCategory).toContainEqual({ category: 'Equipment', thisCents: 35000, lastCents: 0, changeCents: 35000 })
+  })
+
+  it('a pending in half still makes a drawing, as the matcher reads pending rows', async () => {
+    await seedWithDrawings()
+    const a = await collectAggregates('strawb', WEEK)
+    expect(a.topMerchants.map((m) => m.merchant)).not.toContain('Pending Partner Fixture')
+  })
+
+  it('an in half past the ledger read window still makes a drawing: the candidates are all-time', async () => {
+    await seedWithDrawings()
+    const a = await collectAggregates('strawb', WEEK)
+    expect(a.topMerchants.map((m) => m.merchant)).not.toContain('Edge Partner Fixture')
+  })
+
+  it('a row categorised Drawings by hand is never spend, in either scope', async () => {
+    await seedWithDrawings()
+    const personal = await collectAggregates('personal', WEEK)
+    const strawb = await collectAggregates('strawb', WEEK)
+    expect(personal.topMerchants.map((m) => m.merchant)).not.toContain('Hand Drawings Fixture')
+    expect(strawb.topMerchants.map((m) => m.merchant)).not.toContain('Hand Drawings Strawb')
+    const ledger = await loadLedger('personal', '2026-10-19', '2026-10-25')
+    expect(ledger.map((r) => r.merchant)).not.toContain('Hand Drawings Fixture')
+    expect(ledger.map((r) => r.category)).not.toContain('Drawings')
+  })
+
+  it('a drawing is dropped before transfers pair, so it never takes a same-scope leg', async () => {
+    await seedWithDrawings()
+    // A second strawb account, and an inflow on it equal to the drawing's out
+    // half the same day: had the out half reached the pairing, both would go.
+    await connection('accounts').insert({
+      akahu_id: 'acc_s2',
+      source: 'akahu',
+      scope: 'strawb',
+      name: 'Invented account',
+      created_at: STAMP,
+      updated_at: STAMP,
+    })
+    await tx({ account: 'acc_s2', at: day('2026-10-20'), cents: 30000, merchant: 'Strawb Refund Fixture', category: 'Sales' })
+    const rows = excludeTransfers(await loadLedger('strawb', '2026-10-19', '2026-10-25'))
+    expect(rows.map((r) => r.amountCents)).toContain(30000)
+    expect(rows.map((r) => r.amountCents)).not.toContain(-30000)
+  })
+
+  it('ledgerRowCount counts drawing rows, as it counts transfer legs', async () => {
+    await seedWithDrawings()
+    for (const scope of ['personal', 'strawb'] as const) {
+      const a = await collectAggregates(scope, WEEK)
+      const [{ n }] = await connection('transactions as t')
+        .join('accounts as a', 't.account_id', 'a.akahu_id')
+        .where({ 'a.scope': scope, 'a.source': 'akahu', 't.source': 'akahu', 't.status': 'settled' })
+        .whereNotNull('t.amount_cents')
+        .whereBetween('t.date', ['2026-04-30T12:00:00.000Z', NZ_WEEK.end])
+        .count({ n: '*' })
+      expect(a.ledgerRowCount, scope).toBe(Number(n))
+    }
+  })
+
+  it('a personal run makes no read that names strawb, and no drawings candidate read', async () => {
+    await seedWithDrawings()
+    const seen = await queriesDuring(() => collectAggregates('personal', WEEK))
+    expect(seen.length).toBeGreaterThan(0)
+    for (const q of seen) {
+      expect(q.bindings, q.sql).not.toContain('strawb')
+      expect(q.sql).not.toContain('strawb')
+      expect(q.bindings, q.sql).toContain('personal')
+    }
+  })
+
+  it('a strawb run reads personal rows only for id, scope, date and amount', async () => {
+    await seedWithDrawings()
+    const seen = await queriesDuring(() => collectAggregates('strawb', WEEK))
+    const personal = seen.filter((q) => q.bindings.includes('personal'))
+    expect(personal).toHaveLength(1)
+    const [{ sql }] = personal
+    const selected = sql.slice(sql.indexOf('select') + 'select'.length, sql.indexOf(' from ')).trim()
+    expect(selected).toBe('`t`.`id`, `a`.`scope`, `t`.`date`, `t`.`amount_cents`')
   })
 })
 
