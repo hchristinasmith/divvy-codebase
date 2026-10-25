@@ -9,12 +9,15 @@
 // 20261023120000_money_as_cents.js, 20261024100004_category_corrections.js
 // and 20261025120000_prd02_budgets_bills_goals_roles_dismissals.js.
 //
-// One guard per parent. Each seeds the parent and a row in every child table
-// in the schema left by the migration that created the parent's last child,
-// and runs every later migration over them, so it also covers migrations not
-// written yet. A parent whose last child came from the newest migration has
-// nothing after it to check yet; its guard is skipped until a migration
-// lands after that point, and runs from then on without anyone editing it.
+// One guard per parent. Each writes the parent in the schema left by the
+// migration that created its first child, then steps up one migration at a
+// time and writes a row in each child table in the schema left by the
+// migration that created that child. Every migration after a child's creation
+// runs over that child's row, including one that creates a later child and
+// rebuilds the parent at once, and so do migrations not written yet. A parent
+// whose first child came from the newest migration has nothing after it to
+// check yet; its guard is skipped until a migration lands after that point,
+// and runs from then on without anyone editing it.
 //
 // Each canary runs the same flow with one extra in-test migration that
 // rebuilds that parent, and expects the guard's own check to fail: proof that
@@ -22,13 +25,14 @@
 // for the parents whose guard is skipped today.
 //
 // The first test pins GUARDS against the schema: a new CASCADE or SET NULL
-// foreign key with no guard fails it.
+// foreign key with no guard fails it. Each guard also pins every child's
+// `createdBy`, so a child cannot be seeded later than its table exists.
 import { readdirSync } from 'node:fs'
 import * as Path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import knex, { Knex } from 'knex'
 import config from '../knexfile.js'
-import { migrateThrough } from './migrateToJustBefore.ts'
+import { migrateThrough, migrateToJustBefore } from './migrateToJustBefore.ts'
 
 const AT = '2026-10-25T03:00:00.000Z'
 
@@ -39,16 +43,17 @@ type Child = {
   // The column holding the parent's id. The guard writes it.
   column: string
   onDelete: 'CASCADE' | 'SET NULL'
-  // A valid row in the schema the guard seeds in, without `column`.
+  // The migration that creates `table`. The guard writes the child's row in
+  // the schema it leaves.
+  createdBy: string
+  // A valid row in that schema, without `column`.
   row: Row
 }
 
 type Guard = {
   parent: string
-  // The migration that created the last of the parent's children. The seed
-  // is written in the schema it leaves.
-  seededAfter: string
-  // A valid parent row, distinct for each `name`.
+  // A valid parent row, distinct for each `name`, in the schema left by the
+  // migration that creates the first child.
   parentRow: (name: string) => Row
   children: Child[]
 }
@@ -56,7 +61,6 @@ type Guard = {
 const GUARDS: Guard[] = [
   {
     parent: 'transactions',
-    seededAfter: '20261024100004_category_corrections.js',
     parentRow: (name) => ({
       akahu_id: `trans_fixture_${name}`,
       account_id: 'acc_fixture_everyday',
@@ -67,13 +71,13 @@ const GUARDS: Guard[] = [
         table: 'category_corrections',
         column: 'transaction_id',
         onDelete: 'CASCADE',
+        createdBy: '20261024100004_category_corrections.js',
         row: { from_category: null, to_category: 'Bakeries', corrected_at: AT, source: 'user' },
       },
     ],
   },
   {
     parent: 'users',
-    seededAfter: '20250619122214_challenges.js',
     parentRow: (name) => ({ email: `${name}@example.com`, password: 'x' }),
     // `targets` was a child too, until prd-02 Ruling 6 dropped it in
     // 20261025120000; nothing of it is left for a later migration to lose.
@@ -82,6 +86,7 @@ const GUARDS: Guard[] = [
         table: 'wishlist_items',
         column: 'user_id',
         onDelete: 'CASCADE',
+        createdBy: '20250619122157_wishlist_items.js',
         row: {
           name: 'Bike',
           target_amt: 120000,
@@ -97,12 +102,14 @@ const GUARDS: Guard[] = [
         table: 'settings',
         column: 'user_id',
         onDelete: 'CASCADE',
+        createdBy: '20250619122207_settings.js',
         row: { id: 'setting_fixture', key: 'currency', value: 'NZD', updated_at: AT },
       },
       {
         table: 'user_challenges',
         column: 'user_id',
         onDelete: 'CASCADE',
+        createdBy: '20250619122214_challenges.js',
         row: {
           id: 'challenge_fixture',
           challenge_id: 'no_spend_week',
@@ -116,7 +123,6 @@ const GUARDS: Guard[] = [
   },
   {
     parent: 'accounts',
-    seededAfter: '20261025120000_prd02_budgets_bills_goals_roles_dismissals.js',
     parentRow: (name) => ({
       akahu_id: `acc_fixture_${name}`,
       name,
@@ -128,12 +134,14 @@ const GUARDS: Guard[] = [
         table: 'account_settings',
         column: 'account_id',
         onDelete: 'CASCADE',
+        createdBy: '20261025120000_prd02_budgets_bills_goals_roles_dismissals.js',
         row: { role: 'credit_card', updated_at: AT },
       },
       {
         table: 'bills',
         column: 'account_id',
         onDelete: 'SET NULL',
+        createdBy: '20261025120000_prd02_budgets_bills_goals_roles_dismissals.js',
         row: {
           scope: 'personal',
           name: 'Power',
@@ -148,7 +156,6 @@ const GUARDS: Guard[] = [
   },
   {
     parent: 'bills',
-    seededAfter: '20261025120000_prd02_budgets_bills_goals_roles_dismissals.js',
     parentRow: (name) => ({
       scope: 'personal',
       name,
@@ -163,19 +170,20 @@ const GUARDS: Guard[] = [
         table: 'bill_payments',
         column: 'bill_id',
         onDelete: 'CASCADE',
+        createdBy: '20261025120000_prd02_budgets_bills_goals_roles_dismissals.js',
         row: { due_date: '2026-10-31', amount_cents: 18450, paid_at: AT },
       },
     ],
   },
   {
     parent: 'goals',
-    seededAfter: '20261025120000_prd02_budgets_bills_goals_roles_dismissals.js',
     parentRow: (name) => ({ name, target_cents: 120000, created_at: AT, updated_at: AT }),
     children: [
       {
         table: 'goal_contributions',
         column: 'goal_id',
         onDelete: 'CASCADE',
+        createdBy: '20261025120000_prd02_budgets_bills_goals_roles_dismissals.js',
         row: { amount_cents: 5000, contributed_at: AT },
       },
     ],
@@ -199,9 +207,14 @@ afterEach(async () => {
   db = undefined
 })
 
+// Children whose table does not exist yet are left out.
 async function survivors(db: Knex, guard: Guard, parentId: number): Promise<Survivors> {
   const children: Record<string, Row[]> = {}
-  for (const child of guard.children) children[child.table] = await db(child.table).orderBy('id')
+  for (const child of guard.children) {
+    if (await db.schema.hasTable(child.table)) {
+      children[child.table] = await db(child.table).orderBy('id')
+    }
+  }
   const seq = await db('sqlite_sequence').where({ name: guard.parent }).first('seq')
   return {
     children,
@@ -210,31 +223,48 @@ async function survivors(db: Knex, guard: Guard, parentId: number): Promise<Surv
   }
 }
 
-// A parent with one row in every child table, plus a later parent that was
-// inserted and deleted, so the AUTOINCREMENT high-water mark sits above every
-// live id. A rebuild copies the live rows into a new table, whose counter
-// then restarts at the highest live id.
+function firstChildMigration(guard: Guard): string {
+  return guard.children.map((child) => child.createdBy).sort()[0]
+}
+
+// Steps up through the migration that creates the parent's first child and
+// writes the parent there, plus a later parent that is inserted and deleted,
+// so the AUTOINCREMENT high-water mark sits above every live id (a rebuild
+// copies the live rows into a new table, whose counter then restarts at the
+// highest live id). Then steps up one migration at a time, writing each
+// child's row as soon as the migration that creates its table has run.
+// `before` holds the parent and each child as they were when written.
 async function seed(db: Knex, guard: Guard): Promise<{ parentId: number; before: Survivors }> {
+  let applied = firstChildMigration(guard)
+  await migrateThrough(db, applied)
+
   const [parentId] = await db(guard.parent).insert(guard.parentRow('kept'))
   const [deletedId] = await db(guard.parent).insert(guard.parentRow('deleted'))
   await db(guard.parent).where({ id: deletedId }).delete()
-  for (const child of guard.children) {
-    await db(child.table).insert({ ...child.row, [child.column]: parentId })
-  }
-
   const before = await survivors(db, guard, parentId)
   // The seed itself, so a guard over an empty table cannot pass, and every
   // SET NULL column starts out set.
-  for (const child of guard.children) {
-    expect(before.children[child.table], child.table).toHaveLength(1)
-    expect(before.children[child.table][0], child.table).toMatchObject({
-      ...child.row,
-      [child.column]: parentId,
-    })
-  }
   expect(before.parentIds).toEqual([parentId])
   expect(before.parentSequence).toBe(deletedId)
-  return { parentId, before }
+
+  let waiting = guard.children
+  for (;;) {
+    for (const child of waiting.filter((c) => c.createdBy === applied)) {
+      await db(child.table).insert({ ...child.row, [child.column]: parentId })
+      before.children[child.table] = await db(child.table).orderBy('id')
+      expect(before.children[child.table], child.table).toHaveLength(1)
+      expect(before.children[child.table][0], child.table).toMatchObject({
+        ...child.row,
+        [child.column]: parentId,
+      })
+    }
+    waiting = waiting.filter((c) => c.createdBy !== applied)
+    if (waiting.length === 0) return { parentId, before }
+
+    const [, log] = (await db.migrate.up()) as [number, string[]]
+    expect(log, `stepping up towards ${waiting[0].createdBy}`).toHaveLength(1)
+    applied = log[0]
+  }
 }
 
 // The guard's check, shared with the canary so the canary exercises it
@@ -315,16 +345,16 @@ it('guards every ON DELETE CASCADE or SET NULL foreign key in the latest schema'
   expect(guarded.sort()).toEqual(actual.sort())
 })
 
-describe.each(GUARDS)('migrations after the last child of $parent (#134, #165)', (guard) => {
-  const vacuous = nothingRunsAfter(guard.seededAfter)
+describe.each(GUARDS)('migrations over the children of $parent (#134, #165)', (guard) => {
+  const first = firstChildMigration(guard)
+  const vacuous = nothingRunsAfter(first)
 
   it.skipIf(vacuous)(
     `leave every child of ${guard.parent}, the parent row and its id counter untouched${
-      vacuous ? ` (skipped: no migration runs after ${guard.seededAfter} yet)` : ''
+      vacuous ? ` (skipped: no migration runs after ${first} yet)` : ''
     }`,
     async () => {
       db = knex(config.test)
-      await migrateThrough(db, guard.seededAfter)
       const { parentId, before } = await seed(db, guard)
 
       await db.migrate.latest()
@@ -332,6 +362,14 @@ describe.each(GUARDS)('migrations after the last child of $parent (#134, #165)',
       await expectSurvivedLatest(db, guard, parentId, before)
     },
   )
+
+  it.each(guard.children)('$table is created by $createdBy, and not before', async (child) => {
+    db = knex(config.test)
+    await migrateToJustBefore(db, child.createdBy)
+    expect(await db.schema.hasTable(child.table), 'before').toBe(false)
+    await db.migrate.up()
+    expect(await db.schema.hasTable(child.table), 'after').toBe(true)
+  })
 
   // knex's directory source also loads `.ts` and `.cjs` files; the canary's
   // `.js` filter would silently skip one, so the two lists are pinned equal.
@@ -344,7 +382,6 @@ describe.each(GUARDS)('migrations after the last child of $parent (#134, #165)',
 
   it(`canary: a migration that rebuilds ${guard.parent} takes its children, and the guard catches it`, async () => {
     db = knex({ ...config.test, migrations: { migrationSource: withRebuild(guard.parent) } })
-    await migrateThrough(db, guard.seededAfter)
     const { parentId, before } = await seed(db, guard)
 
     await db.migrate.latest()
