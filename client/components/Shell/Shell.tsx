@@ -12,7 +12,7 @@ export default function Shell({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen bg-canvas font-sans leading-[normal] text-ink antialiased">
       <ShellSidebar />
-      <main className="flex min-w-0 max-w-page flex-1 flex-col gap-7 px-4 pt-5 pb-24 shell:px-10 shell:pt-9">
+      <main className="flex min-w-0 flex-1 flex-col gap-7 px-4 pt-5 pb-24 shell:px-10 shell:pt-9">
         {children}
       </main>
       <TabBar />
