@@ -332,6 +332,14 @@ const NO_SOCKET_WAIT_SECS = 2
 // Above the wait, so a slow socket fails on start.sh's own message, not on
 // spawnSync killing it. A test that runs start.sh twice gets two of these.
 const RUN_TIMEOUT_MS = (SOCKET_WAIT_SECS + 15) * 1000
+// The boot runs get more. On 2026-10-26 the sidecars boot hit RUN_TIMEOUT_MS
+// under load and failed as `expected null to be +0` (#369): spawnSync killed
+// start.sh and returned no status. Measured the same day with the 1-minute
+// load at 130-210 (the suite was not run with extra load), boot runs took
+// 5.3-13.2s, so this is about four and a half times the slowest. spawnSync is
+// synchronous, so vitest cannot time the test out during it: this limit is
+// the one that ends a hang, and it sits under the describe block's 70s.
+const BOOT_RUN_TIMEOUT_MS = 60 * 1000
 const SERVE_OK = '|-- / proxy http://127.0.0.1:3005\n'
 
 // tailscaled is node so it can hold a real unix socket. It is wrapped in sh
@@ -543,6 +551,8 @@ interface RunOptions {
   // The shell that runs start.sh itself; `sh` (bash on macOS, dash in the
   // image) unless a test names another.
   shell?: string
+  // How long spawnSync lets start.sh run before it kills it (#369).
+  timeoutMs?: number
 }
 
 // The environment is built from scratch so nothing from the developer's shell
@@ -554,6 +564,7 @@ function runStart({
   tailscaled,
   tailscaleExit = {},
   shell = 'sh',
+  timeoutMs = RUN_TIMEOUT_MS,
 }: RunOptions = {}): Run {
   if (serveStatus !== undefined)
     writeFileSync(join(fakeDir, 'serve-status'), serveStatus)
@@ -571,11 +582,22 @@ function runStart({
     DATABASE_PATH: join(tmp, 'data', 'divvy.sqlite3'),
   }
   if (authkey !== null) base.TS_AUTHKEY = authkey
+  const started = Date.now()
   const result = spawnSync(shell, [startScript], {
     env: { ...base, ...env },
     encoding: 'utf8',
-    timeout: RUN_TIMEOUT_MS,
+    timeout: timeoutMs,
   })
+  // No status means a signal ended start.sh, or it never ran. The usual one is
+  // spawnSync's own timeout (SIGTERM, ETIMEDOUT). A Run with a null status
+  // would pass `not.toBe(0)`, so a timed-out refusal would read as a refusal:
+  // throw instead, and say which signal it was (#369).
+  if (result.status === null) {
+    const code = (result.error as NodeJS.ErrnoException | undefined)?.code
+    throw new Error(
+      `start.sh ended on ${result.signal ?? 'no signal'} (${code ?? 'no spawn error'}) after ${Date.now() - started} ms, with no exit status`,
+    )
+  }
   const log = join(fakeDir, 'calls.log')
   return {
     pid: result.pid,
@@ -872,11 +894,25 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
     mkdirSync(dirname(db))
     for (const suffix of files) writeFileSync(`${db}${suffix}`, '')
     writeFileSync(join(tmp, 'litestream.yml'), 'dbs: []\n')
-    const run = runStart()
+    const run = runStart({ timeoutMs: BOOT_RUN_TIMEOUT_MS })
 
     expect(run.status).toBe(0)
     expect(run.stderr).not.toContain('ERROR')
     expect(ran(run.calls, 'litestream replicate ')).toBe(true)
+  })
+
+  // A run killed at its timeout must fail as a kill, not as a refusal: the
+  // refusal tests above assert `not.toBe(0)`, which null passes (#369). The
+  // timeout is short here. The stall is the poll's `sleep 1` with no socket,
+  // so start.sh is still running when the timeout kills it.
+  it('names the signal that ended a run past its timeout, not a null status', () => {
+    expect(() =>
+      runStart({
+        tailscaled: 'no-socket',
+        env: { TS_WAIT_SECS: String(NO_SOCKET_WAIT_SECS) },
+        timeoutMs: 500,
+      }),
+    ).toThrow(/start\.sh ended on SIGTERM \(ETIMEDOUT\) after \d+ ms/)
   })
 
   // Litestream needs the credential and the replica URL; the app does not,
