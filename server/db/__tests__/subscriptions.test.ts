@@ -23,6 +23,14 @@ import {
   uncancelSubscription,
   type SubscriptionMarkRow,
 } from '../subscriptions.ts'
+import * as drawings from '../drawings.ts'
+
+// The real drawing loader, behind a spy, so a test can make it throw what
+// the shared matcher throws.
+vi.mock('../drawings.ts', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../drawings.ts')>()
+  return { ...real, loadDrawingIds: vi.fn(real.loadDrawingIds) }
+})
 
 // The subscriptions data module (prd-02 Ruling 14, issue #229), against a
 // fresh in-memory database. Every value below is invented. The clock is
@@ -315,6 +323,155 @@ describe('readSubscriptions: scope', () => {
       ['personal', 'Example Stream'],
     ])
   })
+})
+
+// Regression (#264, before drawings): a recurring Strawb outflow that has no
+// personal inflow of the same amount beside it is an ordinary charge, and is
+// detected as a subscription exactly as any other.
+describe('readSubscriptions: a recurring strawb outflow (#264 regression)', () => {
+  const payee = {
+    merchant_id: 'merchant_fixture_payee',
+    merchant_name: 'Example Payee',
+    description: 'EXAMPLE PAYEE 7731',
+  }
+  // The day after each MONTHLY charge, at noon NZST.
+  const NEXT_DAYS = [
+    '2026-07-02T00:00:00.000Z',
+    '2026-08-01T00:00:00.000Z',
+    '2026-08-31T00:00:00.000Z',
+  ]
+
+  it.each<[string, Row[]]>([
+    ['with no personal inflow at all', []],
+    [
+      'with a personal inflow 1 cent short the next day',
+      NEXT_DAYS.map((date) => tx(EVERYDAY, date, 29999)),
+    ],
+    [
+      'with an equal inflow the next day on another strawb account',
+      NEXT_DAYS.map((date) => tx('acc_sentinel_spot', date, 30000)),
+    ],
+  ])('is detected %s', async (_why, partners) => {
+    await seedAccounts()
+    await connection('accounts').insert(
+      account({
+        id: 4,
+        akahu_id: 'acc_sentinel_spot',
+        name: 'Sentinel Strawb pot',
+        scope: 'strawb',
+      }),
+    )
+    await insertTxs([
+      ...MONTHLY.map((date) => tx(TRADING, date, -30000, payee)),
+      ...partners,
+    ])
+
+    const { subscriptions } = await readSubscriptions('strawb')
+
+    expect(
+      subscriptions.map((r) => [
+        r.scope,
+        r.merchantKey,
+        r.name,
+        r.chargeCount,
+        r.amountCents,
+        r.cadence,
+        r.detected,
+        r.status,
+      ]),
+    ).toStrictEqual([
+      [
+        'strawb',
+        'm:merchant_fixture_payee',
+        'Example Payee',
+        3,
+        30000,
+        'monthly',
+        true,
+        'active',
+      ],
+    ])
+  })
+})
+
+// Drawings (prd-02 Ruling 15, issue #264): the regression block above with
+// an equal personal inflow the day after each charge. Every charge is a half
+// of a drawing, so nothing is detected, and no mark can be written for it.
+describe('readSubscriptions: drawings (prd-02 Ruling 15)', () => {
+  const payee = {
+    merchant_id: 'merchant_fixture_payee',
+    merchant_name: 'Example Payee',
+    description: 'EXAMPLE PAYEE 7731',
+  }
+  const NEXT_DAYS = [
+    '2026-07-02T00:00:00.000Z',
+    '2026-08-01T00:00:00.000Z',
+    '2026-08-31T00:00:00.000Z',
+  ]
+
+  async function seedDrawings(chargeFields: Record<string, unknown> = {}) {
+    await seedAccounts()
+    await insertTxs([
+      ...MONTHLY.map((date) =>
+        tx(TRADING, date, -30000, { ...payee, ...chargeFields }),
+      ),
+      ...NEXT_DAYS.map((date) => tx(EVERYDAY, date, 30000)),
+    ])
+  }
+
+  it('a monthly strawb outflow paired with equal personal inflows is not a subscription (DW2)', async () => {
+    await seedDrawings()
+    for (const scope of ['all', 'strawb'] as const) {
+      const result = await readSubscriptions(scope)
+      expect(result.subscriptions, scope).toStrictEqual([])
+      expect(result.questions, scope).toStrictEqual([])
+    }
+    expect(
+      await setAnswer(
+        { scope: 'strawb', merchantKey: 'm:merchant_fixture_payee' },
+        'subscription',
+      ),
+    ).toBe('not_found')
+    expect(await connection('subscription_marks').select()).toStrictEqual([])
+  })
+
+  it('charges Hannah categorised by hand are detected again (DW4)', async () => {
+    await seedDrawings({
+      category: 'Business software and cloud services',
+      category_source: 'user',
+    })
+    const { subscriptions } = await readSubscriptions('strawb')
+    expect(
+      subscriptions.map((r) => [r.merchantKey, r.chargeCount]),
+    ).toStrictEqual([['m:merchant_fixture_payee', 3]])
+  })
+
+  it.each([
+    ['a RangeError', new RangeError('candidate 7 appears twice')],
+    [
+      'a TypeError',
+      new TypeError(
+        'amountCents of candidate 7 must be an integer number of cents, got 1.5',
+      ),
+    ],
+  ])(
+    'the drawing matcher throwing %s is a fixed-text error, not its message',
+    async (_why, thrown) => {
+      await seedAccounts()
+      await seedStream()
+      vi.mocked(drawings.loadDrawingIds).mockClear()
+      vi.mocked(drawings.loadDrawingIds).mockRejectedValueOnce(thrown)
+
+      const err: unknown = await readSubscriptions('personal').then(
+        () => undefined,
+        (e: unknown) => e,
+      )
+
+      expect(err).toBeInstanceOf(SubscriptionsDataError)
+      expect((err as Error).message).toMatch(/^subscription input invalid$/)
+      expect(vi.mocked(drawings.loadDrawingIds)).toHaveBeenCalledTimes(1)
+    },
+  )
 })
 
 describe('her mark wins after the next sync', () => {

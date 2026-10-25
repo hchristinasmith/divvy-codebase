@@ -157,9 +157,10 @@ how the code consumes it on 2026-10-25:
   name (below), while a name cannot be derived from a group.
 - `client/components/Dashboard/TxAnalysis.tsx:5` groups by `category.name`;
   `client/components/Dashboard/Txs.tsx:39` shows `category.name`.
-- `PATCH /api/v1/transactions/:id` accepts only names listed in
-  `data/cats.js` (`server/routes/transactions.ts:34`,
-  `server/db/categories.ts:18`). A user's choice is therefore always a name.
+- `PATCH /api/v1/transactions/:id` accepts only names that
+  `GET /api/v1/categories` lists: `data/cats.js` plus Divvy's own
+  **Drawings** (`isSelectableCategory` in `server/db/categories.ts`; prd-02
+  Ruling 15). A user's choice is therefore always a name.
 - `20261023130000_transaction_effective_category.js` backfilled `category`
   from `category_name`, and the seed writes `category` from
   `category.name` (`server/db/seeds/transactions.js:68`).
@@ -170,7 +171,9 @@ how the code consumes it on 2026-10-25:
 
 `data/cats.js` maps each group to its category names, and every name
 appears under exactly one group (checked 2026-10-25), so a name always
-determines its group. Akahu's side: a category's `groups` is an object keyed
+determines its group. (Drawings, which Divvy derives or Hannah picks, is
+not in `data/cats.js` and has no Akahu group; `server/routes/accounts.ts`
+sends it with none.) Akahu's side: a category's `groups` is an object keyed
 by grouping, so it holds at most one `personal_finance` entry; Akahu offers
 that grouping "on all enriched transactions"
 ([The transaction model][model], [Get categories][ref-categories], read on

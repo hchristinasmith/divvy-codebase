@@ -582,6 +582,78 @@ describe('the category is the effective one, with its source', () => {
   })
 })
 
+// prd-02 Ruling 15 (#264): a half of a drawing is sent as Drawings, set by
+// rule, and keeps every other key of its item.
+describe('a drawing is sent as Drawings', () => {
+  const strawbOut = (fields: Row = {}) =>
+    settled('trans_out', {
+      id: 1,
+      account_id: 'acc_s',
+      amount_cents: -30000,
+      date: '2026-10-20T00:00:00.000Z',
+      ...fields,
+    })
+  const personalIn = settled('trans_in', {
+    id: 2,
+    account_id: 'acc_p',
+    amount_cents: 30000,
+    date: '2026-10-21T00:00:00.000Z',
+    category: null,
+  })
+
+  async function items(): Promise<Row[]> {
+    const res = await api.get('/api/v1/accounts/transactions')
+    expect(res.status).toBe(200)
+    return res.body.items
+  }
+
+  beforeEach(async () => {
+    await insertAccounts(
+      { akahu_id: 'acc_s', scope: 'strawb' },
+      { akahu_id: 'acc_p', scope: 'personal' },
+    )
+  })
+
+  it('both halves show Drawings with no group, and the item keys do not change', async () => {
+    await insertTransactions(strawbOut())
+    const [alone] = await items()
+    await insertTransactions(personalIn)
+    const paired = await items()
+    const out = paired.find((i) => i._id === 'trans_out')
+    const into = paired.find((i) => i._id === 'trans_in')
+
+    expect(out?.category).toStrictEqual({ name: 'Drawings' })
+    expect(out?.category_source).toBe('rule')
+    expect(into?.category).toStrictEqual({ name: 'Drawings' })
+    expect(into?.category_source).toBe('rule')
+    expect(sortedKeys(out ?? {})).toStrictEqual(sortedKeys(alone))
+    expect({ ...out, category: null, category_source: null }).toStrictEqual({
+      ...alone,
+      category: null,
+      category_source: null,
+    })
+  })
+
+  it('a half Hannah categorised keeps her category and its group', async () => {
+    await insertTransactions(
+      strawbOut({ category: 'Bakeries', category_source: 'user' }),
+      personalIn,
+    )
+    const paired = await items()
+    expect(paired.find((i) => i._id === 'trans_out')).toMatchObject({
+      category: {
+        name: 'Bakeries',
+        groups: { personal_finance: { name: 'Food' } },
+      },
+      category_source: 'user',
+    })
+    expect(paired.find((i) => i._id === 'trans_in')).toMatchObject({
+      category: { name: 'Drawings' },
+      category_source: 'rule',
+    })
+  })
+})
+
 describe('order', () => {
   it('is newest first, with the higher id first on one date', async () => {
     const day = '2026-10-10T00:00:00.000Z'

@@ -27,7 +27,9 @@ import {
   type SafeToSpendBudget,
   type SafeToSpendTransaction,
 } from '../../shared/safe-to-spend.ts'
+import { effectiveCategory } from '../../shared/drawings.ts'
 import connection from './connection.ts'
+import { loadDrawingIds } from './drawings.ts'
 import { listAccounts } from './synced.ts'
 
 // The overview's data module (prd-02, issue #44): every read behind
@@ -43,6 +45,12 @@ import { listAccounts } from './synced.ts'
 // occurrence, budget and window transaction, whatever the scope asked for;
 // it applies the scope itself. A Xero row (prd-01 Ruling 9) is never read:
 // prd-02 Ruling 4 keeps Xero receivables out of safe-to-spend.
+//
+// Categories are effective ones with drawings laid over them (prd-02 Ruling
+// 15): the drawing ids are loaded once per read (server/db/drawings.ts) and
+// a half of a drawing that Hannah has not categorised by hand is handed to
+// `safeToSpend` and shown in the activity as Drawings, set by `rule`, which
+// the shared module never counts as spent.
 //
 // Bills (#35 option C, as ruled on #151, option A): every unpaid occurrence
 // of a bill due on or before the next payday is its own input, overdue ones
@@ -249,6 +257,21 @@ function guard<T>(fn: () => T): T {
   }
 }
 
+/**
+ * The drawing ids, with the shared matcher's RangeError or TypeError (whose
+ * messages name ids and values) turned into the fixed text.
+ */
+async function loadDrawings(db: Db): Promise<Set<number>> {
+  try {
+    return await loadDrawingIds(db)
+  } catch (err) {
+    if (err instanceof RangeError || err instanceof TypeError) {
+      throw new OverviewDataError('safe-to-spend input invalid')
+    }
+    throw err
+  }
+}
+
 interface Settings {
   taxRateBasisPoints: number
   profitCents: number
@@ -330,10 +353,12 @@ interface BillRow {
 }
 
 interface WindowTransactionRow {
+  id: number
   account_id: string | null
   date: string | null
   amount_cents: number | null
   category: string | null
+  category_source: CategorySource
   status: TransactionStatus
 }
 
@@ -349,6 +374,8 @@ interface Inputs {
   occurrences: BillOccurrence[]
   budgets: SafeToSpendBudget[]
   transactions: SafeToSpendTransaction[]
+  /** Both halves of every drawing (prd-02 Ruling 15), loaded once per read. */
+  drawingIds: Set<number>
 }
 
 async function loadInputs(now: Date, db: Db): Promise<Inputs> {
@@ -444,7 +471,15 @@ async function loadInputs(now: Date, db: Db): Promise<Inputs> {
   // silently left out of spent.
   const windowStart = guard(() => addDaysIso(last, -1))
   const windowRows: WindowTransactionRow[] = await db('transactions')
-    .select('account_id', 'date', 'amount_cents', 'category', 'status')
+    .select(
+      'id',
+      'account_id',
+      'date',
+      'amount_cents',
+      'category',
+      'category_source',
+      'status',
+    )
     .where({ source: 'akahu' })
     .where((q) => q.where('date', '>=', windowStart).orWhereNull('date'))
   const accountIdByAkahuId = new Map<string, string>()
@@ -452,6 +487,7 @@ async function loadInputs(now: Date, db: Db): Promise<Inputs> {
     if (row.akahu_id !== null)
       accountIdByAkahuId.set(row.akahu_id, String(row.id))
   }
+  const drawingIds = await loadDrawings(db)
   const transactions: SafeToSpendTransaction[] = []
   for (const row of windowRows) {
     // A row on an account that is not stored has no scope to count in.
@@ -467,7 +503,10 @@ async function loadInputs(now: Date, db: Db): Promise<Inputs> {
       accountId,
       date: nzCalendarDate(new Date(row.date)),
       amountCents: row.amount_cents,
-      category: row.category,
+      category: effectiveCategory(
+        { category: row.category, categorySource: row.category_source },
+        drawingIds.has(row.id),
+      ).category,
       status: row.status,
     })
   }
@@ -482,6 +521,7 @@ async function loadInputs(now: Date, db: Db): Promise<Inputs> {
     occurrences,
     budgets,
     transactions,
+    drawingIds,
   }
 }
 
@@ -638,6 +678,10 @@ export async function readOverview(
     ) {
       throw new OverviewDataError('a transaction is incomplete')
     }
+    const shown = effectiveCategory(
+      { category: row.category, categorySource: row.category_source },
+      inputs.drawingIds.has(row.id),
+    )
     return {
       // The row id, pending or settled; `status` says which. A pending
       // row's id changes on every sync (prd-01 Ruling 1).
@@ -648,8 +692,8 @@ export async function readOverview(
       scope: account.scope,
       accountName: account.name,
       status: row.status,
-      category: row.category,
-      categorySource: row.category_source,
+      category: shown.category,
+      categorySource: shown.categorySource,
     }
   })
 

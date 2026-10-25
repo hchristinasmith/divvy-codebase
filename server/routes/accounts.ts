@@ -3,6 +3,7 @@ import express from 'express'
 import type { Account } from '../../models/sync.ts'
 import type { CategorySource } from '../../models/transactions.ts'
 import { getCategoryGroups } from '../db/categories.ts'
+import { applyDrawings, loadDrawingIds } from '../db/drawings.ts'
 import {
   listAccounts,
   listTransactions,
@@ -27,7 +28,9 @@ import {
 // Akahu's category object because the Dashboard reads
 // `category.groups.personal_finance.name`. The group is looked up from the
 // category's name in data/cats.js, never from Akahu's stored group
-// (docs/akahu-pending-semantics.md §4).
+// (docs/akahu-pending-semantics.md §4). A half of a drawing shows Drawings,
+// set by `rule`, unless Hannah categorised it by hand (prd-02 Ruling 15);
+// Drawings is not in data/cats.js, so it is sent with no groups.
 //
 // There is deliberately no `/:id` route: `/:id/transactions` was the proxy
 // path, and an unmatched path must stay the app's JSON 404.
@@ -326,7 +329,10 @@ router.get('/transactions', async (req, res) => {
     return
   }
   try {
-    const rows = await listTransactions(accountIds)
+    const rows = applyDrawings(
+      await listTransactions(accountIds),
+      await loadDrawingIds(),
+    )
     const body: AccountsEnvelope<TransactionItem> = {
       success: true,
       items: rows.map(toTransactionItem),

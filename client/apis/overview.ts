@@ -78,8 +78,8 @@ export async function grabCategoryGroups(): Promise<CategoryGroup[]> {
   return body.items
 }
 
-// The category list is a fixed file on the server (data/cats.js), so it is
-// read once per session. Its key lives here rather than in ./queryKeys.ts
+// The category list is fixed on the server (data/cats.js plus Divvy's own
+// Drawings group), so it is read once per session. Its key lives here rather than in ./queryKeys.ts
 // because that file is not this issue's to edit; move it there when a
 // second screen reads categories.
 export const categoriesQuery = queryOptions({

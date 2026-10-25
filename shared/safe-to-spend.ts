@@ -19,7 +19,10 @@
 // - remaining budget: over in-scope budgets, `max(0, limit − spent)`; spent
 //   is effective-category outflow, settled and pending, since the last
 //   payday (`budgetSpentCents`). Payday is weekly (Ruling 9), so a limit is
-//   a weekly amount. Spend on a credit card counts like any other.
+//   a weekly amount. Spend on a credit card counts like any other. A row
+//   whose effective category is Drawings is never spent, in any budget
+//   (prd-02 Ruling 15): a drawing is Hannah paying herself, and the caller
+//   hands each half over with Drawings as its category.
 // - tax hold: each scope holds its own, against its own pot (Ruling 11).
 //   - Strawb: `max(0, taxRate × profit − (Strawb tax pots − buffer))`: the
 //     money the pot keeps for Strawb's bills is not tax set aside (Ruling
@@ -58,6 +61,7 @@ import type {
   Scope,
   TransactionStatus,
 } from './contracts.ts'
+import { isDrawingCategory } from './drawings.ts'
 import { sumCents } from './money.ts'
 
 export interface SafeToSpendAccount {
@@ -303,7 +307,9 @@ function strawbTaxOwed(taxRateBasisPoints: number, profitCents: Cents): Cents {
  * How much of a budget has been spent: the outflow of `scope`'s accounts in
  * `category` (the effective category) dated from `from` to `to`, both
  * included, as a positive number of cents. Pending rows count like settled
- * ones. Money in (income, a refund) is not spend and never offsets it.
+ * ones. Money in (income, a refund) is not spend and never offsets it. A
+ * row in Drawings is never spend, even for a budget named Drawings (prd-02
+ * Ruling 15).
  *
  * `safeToSpend` calls this with the last payday and today; the budgets
  * route reads the result off `SafeToSpendResult.budgets` rather than
@@ -328,6 +334,7 @@ export function budgetSpentCents(args: {
     if (accountScope === undefined) {
       throw new RangeError(`transaction on unknown account "${tx.accountId}"`)
     }
+    if (isDrawingCategory(tx.category)) continue
     if (accountScope !== args.scope) continue
     if (tx.category !== args.category) continue
     if (tx.amountCents >= 0) continue
