@@ -20,6 +20,15 @@ import {
   SETTINGS_DEFAULTS,
   type SettingsResponse,
 } from '../../../shared/contracts.ts'
+import { runSync } from '../../sync/run.ts'
+import {
+  MINUTE_MS,
+  NOW as SYNC_NOW,
+  at,
+  fakeAkahu,
+  fixture,
+  replaceOnce,
+} from '../../sync/__tests__/harness.ts'
 
 // /api/v1/settings (issue 46; prd-02 Rulings 2, 9, 10, 11): the settings
 // panel's reads and writes, and account roles, on the real app over an
@@ -288,6 +297,29 @@ describe('GET /api/v1/settings/accounts', () => {
   })
 })
 
+const SCOPE_ERROR = 'scope must be personal or strawb'
+const EMPTY_BODY_ERROR = 'Body must set role, scope, or both'
+
+// Every row of a table, in id order.
+function rows(table: string): Promise<Row[]> {
+  return connection(table).orderBy('id').select()
+}
+
+type Row = Record<string, unknown>
+
+function invented(accountId: string, date: string, amountCents: number): Row {
+  return {
+    account_id: accountId,
+    date,
+    amount_cents: amountCents,
+    description: 'Invented purchase',
+    status: 'settled',
+    source: 'akahu',
+    category: null,
+    category_source: 'akahu',
+  }
+}
+
 describe('PUT /api/v1/settings/accounts/:id', () => {
   it('sets, changes and clears a role, and never changes the account', async () => {
     const id = await insertAccount({ akahu_id: 'acc_inv_1', name: 'Card H' })
@@ -364,12 +396,12 @@ describe('PUT /api/v1/settings/accounts/:id', () => {
     'role must be one of current, savings, tax_pot, credit_card, or null'
 
   it.each([
-    [{}, ROLE],
+    [{}, EMPTY_BODY_ERROR],
     [{ role: 'Tax pot' }, ROLE],
     [{ role: 'credit card' }, ROLE],
     [{ role: 'CURRENT' }, ROLE],
     [{ role: 1 }, ROLE],
-    [{ role: 'current', scope: 'strawb' }, 'Unknown field: scope'],
+    [{ role: 'current', extra: 'strawb' }, 'Unknown field: extra'],
     [[{ role: 'current' }], 'Body must be a JSON object'],
   ])(
     'refuses the body %j with 400 and changes nothing',
@@ -387,6 +419,250 @@ describe('PUT /api/v1/settings/accounts/:id', () => {
       )
     },
   )
+})
+
+// prd-01 Ruling 8 (dated note 2026-10-25): the scope is set here. A scope
+// change touches that account's `scope` and `updated_at` and nothing else.
+describe('PUT /api/v1/settings/accounts/:id with a scope', () => {
+  it("sets only that account's scope: its role, the other account and every transaction are unchanged", async () => {
+    const id = await insertAccount({
+      akahu_id: 'acc_inv_1',
+      name: 'Everyday Invented',
+    })
+    const other = await insertAccount({
+      akahu_id: 'acc_inv_2',
+      name: 'Savings Invented',
+    })
+    await connection('account_settings').insert([
+      { account_id: id, role: 'current', updated_at: NOW },
+      { account_id: other, role: 'savings', updated_at: NOW },
+    ])
+    await connection('transactions').insert([
+      invented('acc_inv_1', '2026-10-26T12:00:00.000Z', -8000),
+      invented('acc_inv_2', '2026-10-26T13:00:00.000Z', 4000),
+    ])
+    const accountsBefore = await rows('accounts')
+    const settingsBefore = await rows('account_settings')
+    const transactionsBefore = await rows('transactions')
+
+    const res = await api
+      .put(`/api/v1/settings/accounts/${id}`)
+      .send({ scope: 'strawb' })
+
+    expect(res.status).toBe(200)
+    expect(Object.keys(res.body).sort()).toEqual([
+      'id',
+      'name',
+      'role',
+      'scope',
+    ])
+    expect(res.body).toStrictEqual({
+      id: String(id),
+      name: 'Everyday Invented',
+      scope: 'strawb',
+      role: 'current',
+    })
+
+    const accountsAfter = await rows('accounts')
+    const before = accountsBefore.find((row) => row.id === id)
+    const after = accountsAfter.find((row) => row.id === id)
+    expect(after?.scope).toBe('strawb')
+    expect(String(after?.updated_at) > NOW).toBe(true)
+    expect({
+      ...after,
+      scope: before?.scope,
+      updated_at: before?.updated_at,
+    }).toStrictEqual(before)
+    expect(accountsAfter.filter((row) => row.id !== id)).toStrictEqual(
+      accountsBefore.filter((row) => row.id !== id),
+    )
+    expect(await rows('account_settings')).toStrictEqual(settingsBefore)
+    expect(await rows('transactions')).toStrictEqual(transactionsBefore)
+  })
+
+  it('sets a role and a scope together in one request', async () => {
+    const id = await insertAccount({ akahu_id: 'acc_inv_1', name: 'Pot Invented' })
+
+    const res = await api
+      .put(`/api/v1/settings/accounts/${id}`)
+      .send({ role: 'savings', scope: 'strawb' })
+
+    expect(res.status).toBe(200)
+    expect(res.body).toStrictEqual({
+      id: String(id),
+      name: 'Pot Invented',
+      scope: 'strawb',
+      role: 'savings',
+    })
+    expect((await api.get('/api/v1/settings/accounts')).body.items).toStrictEqual(
+      [res.body],
+    )
+  })
+
+  it.each(['personal', 'strawb'])('accepts the scope %s', async (scope) => {
+    const id = await insertAccount({ akahu_id: 'acc_inv_1' })
+
+    const res = await api
+      .put(`/api/v1/settings/accounts/${id}`)
+      .send({ scope })
+
+    expect(res.status).toBe(200)
+    expect(res.body.scope).toBe(scope)
+  })
+
+  it.each([
+    [{ scope: 'business' }, SCOPE_ERROR],
+    [{ scope: null }, SCOPE_ERROR],
+    [{ scope: 'all' }, SCOPE_ERROR],
+    [{ role: 'savings', scope: 'business' }, SCOPE_ERROR],
+    [{ scope: 'strawb', extra: 1 }, 'Unknown field: extra'],
+    [{}, EMPTY_BODY_ERROR],
+  ])(
+    'refuses %j with 400, and the accounts and account_settings tables are byte-identical afterwards',
+    async (body, error) => {
+      const id = await insertAccount({ akahu_id: 'acc_inv_1' })
+      await connection('account_settings').insert({
+        account_id: id,
+        role: 'current',
+        updated_at: NOW,
+      })
+      const accountsBefore = JSON.stringify(await rows('accounts'))
+      const settingsBefore = JSON.stringify(await rows('account_settings'))
+
+      const res = await api.put(`/api/v1/settings/accounts/${id}`).send(body)
+
+      expect(res.status).toBe(400)
+      expect(res.body).toStrictEqual({ error })
+      expect(JSON.stringify(await rows('accounts'))).toBe(accountsBefore)
+      expect(JSON.stringify(await rows('account_settings'))).toBe(
+        settingsBefore,
+      )
+    },
+  )
+
+  it('answers 404 for a scope change on an unknown account and on a Xero account, and changes nothing', async () => {
+    const xero = await insertAccount({ source: 'xero', akahu_id: null })
+    const accountsBefore = JSON.stringify(await rows('accounts'))
+
+    for (const id of [999999, xero]) {
+      const res = await api
+        .put(`/api/v1/settings/accounts/${id}`)
+        .send({ scope: 'strawb' })
+      expect(res.status).toBe(404)
+      expect(res.body).toStrictEqual({ error: 'Account not found' })
+    }
+    expect(JSON.stringify(await rows('accounts'))).toBe(accountsBefore)
+    expect(await connection('account_settings')).toEqual([])
+  })
+})
+
+// The Overview counts an account in the scope it has now (prd-02 Ruling 11).
+describe('moving an account to Business moves its balance and activity on the Overview', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime('2026-10-27T23:30:00.000Z')
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('leaves Personal and appears in Business', async () => {
+    const id = await insertAccount({
+      akahu_id: 'acc_inv_1',
+      name: 'Everyday Invented',
+      balance_cents: 250000,
+    })
+    await connection('account_settings').insert({
+      account_id: id,
+      role: 'current',
+      updated_at: NOW,
+    })
+    await connection('transactions').insert(
+      invented('acc_inv_1', '2026-10-26T12:00:00.000Z', -8000),
+    )
+
+    const before = await api.get('/api/v1/overview?scope=personal')
+    expect(before.body.accounts.map((a: Row) => a.name)).toEqual([
+      'Everyday Invented',
+    ])
+    expect(before.body.safeToSpend.liquidCents).toBe(250000)
+
+    const put = await api
+      .put(`/api/v1/settings/accounts/${id}`)
+      .send({ scope: 'strawb' })
+    expect(put.status).toBe(200)
+
+    const personal = await api.get('/api/v1/overview?scope=personal')
+    expect(personal.body.accounts).toStrictEqual([])
+    expect(personal.body.safeToSpend.liquidCents).toBe(0)
+    expect(personal.body.recentActivity).toStrictEqual([])
+
+    const business = await api.get('/api/v1/overview?scope=strawb')
+    expect(business.body.accounts).toStrictEqual([
+      {
+        id: String(id),
+        name: 'Everyday Invented',
+        scope: 'strawb',
+        role: 'current',
+        balanceCents: 250000,
+      },
+    ])
+    expect(business.body.safeToSpend.liquidCents).toBe(250000)
+    expect(business.body.recentActivity.map((r: Row) => r.description)).toEqual(
+      ['Invented purchase'],
+    )
+  })
+})
+
+// A re-sync keeps a scope set through the API (prd-01 Ruling 8: sync never
+// writes it). The sync harness is imported, not edited.
+describe('a sync run after a scope change keeps the scope', () => {
+  it('leaves the scope strawb after runSync updates the same account', async () => {
+    const first = await runSync({
+      client: fakeAkahu().client,
+      db: connection,
+      now: () => SYNC_NOW,
+    })
+    expect(first.outcome).toBe('success')
+    const everyday = await connection('accounts')
+      .where({ akahu_id: 'acc_fixture0001everyday' })
+      .first()
+
+    const put = await api
+      .put(`/api/v1/settings/accounts/${everyday.id}`)
+      .send({ scope: 'strawb' })
+    expect(put.status).toBe(200)
+
+    // A renamed account is one the upsert actually rewrites (an unchanged
+    // one is left alone), so this run really writes the row.
+    const accounts = replaceOnce(
+      fixture('akahu-accounts.json'),
+      '"Fixture Everyday"',
+      '"Fixture Everyday Renamed"',
+    )
+    const later = at(15 * MINUTE_MS)
+    const second = await runSync({
+      client: fakeAkahu({ accounts }).client,
+      db: connection,
+      now: () => later,
+    })
+    expect(second.outcome).toBe('success')
+
+    const after = await connection('accounts')
+      .where({ id: everyday.id })
+      .first()
+    expect(after.name).toBe('Fixture Everyday Renamed')
+    expect(after.updated_at).toBe(later.toISOString())
+    expect(after.scope).toBe('strawb')
+    expect((await api.get('/api/v1/settings/accounts')).body.items).toContainEqual(
+      {
+        id: String(everyday.id),
+        name: 'Fixture Everyday Renamed',
+        scope: 'strawb',
+        role: null,
+      },
+    )
+  })
 })
 
 it('an unlisted settings path is the JSON 404', async () => {
@@ -421,7 +697,7 @@ describe('a failing database', () => {
     {
       route: 'PUT /api/v1/settings/accounts/:id',
       table: 'account_settings',
-      label: 'Error setting account role:',
+      label: 'Error updating account settings:',
       send: async () => {
         const id = await insertAccount({ akahu_id: 'acc_inv_1' })
         return api

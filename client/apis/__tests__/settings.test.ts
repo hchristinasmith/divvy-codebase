@@ -73,7 +73,7 @@ describe('account roles', () => {
   it('round-trips a PUT through grabSettingsAccounts', async () => {
     const id = await insertAccount()
 
-    const row = await api.updateAccountRole(id, 'tax_pot')
+    const row = await api.updateAccount(id, { role: 'tax_pot' })
 
     expect(row).toStrictEqual({
       id,
@@ -83,12 +83,26 @@ describe('account roles', () => {
     })
     expect(await api.grabSettingsAccounts()).toStrictEqual({ items: [row] })
 
-    expect((await api.updateAccountRole(id, null)).role).toBeNull()
+    expect((await api.updateAccount(id, { role: null })).role).toBeNull()
+  })
+
+  it('sets the scope through the real app and reads it back', async () => {
+    const id = await insertAccount()
+
+    const row = await api.updateAccount(id, { scope: 'personal' })
+
+    expect(row).toStrictEqual({
+      id,
+      name: 'Invented pot',
+      scope: 'personal',
+      role: null,
+    })
+    expect(await api.grabSettingsAccounts()).toStrictEqual({ items: [row] })
   })
 
   it('rejects an unknown account with Account not found', async () => {
-    await expect(api.updateAccountRole('999999', 'current')).rejects.toThrow(
-      new Error('Account not found'),
-    )
+    await expect(
+      api.updateAccount('999999', { role: 'current' }),
+    ).rejects.toThrow(new Error('Account not found'))
   })
 })

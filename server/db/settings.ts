@@ -7,6 +7,7 @@ import {
   type CurrencySymbol,
   type RowScope,
   type SettingsResponse,
+  type UpdateAccountRequest,
   type UpdateSettingsRequest,
 } from '../../shared/contracts.ts'
 import connection from './connection.ts'
@@ -21,8 +22,9 @@ import connection from './connection.ts'
 // that fails its rule, so the route only ever stores what reading accepts.
 //
 // An account's role is its `account_settings` row; no row is no role (not
-// liquid). Nothing here writes `accounts`: the scope is not editable from
-// settings, and sync owns everything else on that table.
+// liquid). An account's scope is set from the same panel (prd-01 Ruling 8,
+// dated note 2026-10-25); it is the only column here that writes `accounts`,
+// and sync never writes it.
 
 /** The rule for one setting: what a sent value must be, and how a stored string reads back. */
 interface Rule<T> {
@@ -231,13 +233,17 @@ export async function listAccountRoles(
 }
 
 /**
- * Sets an Akahu account's role, or removes it when `role` is null. Returns
- * the account as listed afterwards, or undefined if there is no such Akahu
- * account. Writes only `account_settings`.
+ * Updates an Akahu account's role and/or scope, in one transaction. A `role`
+ * key sets the role, or removes it when `role` is null; a `scope` key sets
+ * the scope. Keys absent from `patch` are left alone, so a scope-only patch
+ * leaves the role as it was. Returns the account as listed afterwards, or
+ * undefined if there is no such Akahu account (nothing is written then).
+ * Writes `account_settings` for the role and, for the scope, only `scope` and
+ * `updated_at` on `accounts`.
  */
-export async function setAccountRole(
+export async function updateAccountSettings(
   accountId: number,
-  role: AccountRole | null,
+  patch: UpdateAccountRequest,
   db = connection,
 ): Promise<AccountSettingsRow | undefined> {
   return db.transaction(async (trx) => {
@@ -246,17 +252,29 @@ export async function setAccountRole(
       .first('id')
     if (account === undefined) return undefined
 
-    if (role === null) {
-      await trx('account_settings').where({ account_id: accountId }).delete()
-    } else {
-      await trx('account_settings')
-        .insert({
-          account_id: accountId,
-          role,
-          updated_at: new Date().toISOString(),
-        })
-        .onConflict('account_id')
-        .merge(['role', 'updated_at'])
+    if ('role' in patch) {
+      const { role } = patch
+      if (role === undefined) {
+        throw new RangeError('role must be an account role or null')
+      }
+      if (role === null) {
+        await trx('account_settings').where({ account_id: accountId }).delete()
+      } else {
+        await trx('account_settings')
+          .insert({
+            account_id: accountId,
+            role,
+            updated_at: new Date().toISOString(),
+          })
+          .onConflict('account_id')
+          .merge(['role', 'updated_at'])
+      }
+    }
+
+    if (patch.scope !== undefined) {
+      await trx('accounts')
+        .where({ id: accountId })
+        .update({ scope: patch.scope, updated_at: new Date().toISOString() })
     }
 
     const row = await accountRoles(trx).where('accounts.id', accountId).first()
