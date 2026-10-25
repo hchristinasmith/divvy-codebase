@@ -34,11 +34,13 @@ export default function Advisor() {
         </h2>
         <p className={CARD_TITLE}>There is no chat box here</p>
         {/* Basis: D3 (the advisor is Claude desktop over MCP); prd-04
-            Ruling 7 (no paid API); package.json has no AI SDK. */}
+            Ruling 7 (no paid API); package.json has no AI SDK. "will be": the
+            read-only connection (prd-03) is not live yet; change to "is" when
+            it is. */}
         <p className={PARAGRAPH}>
-          The advisor is Claude, in the Claude desktop app. Divvy does not run
-          an AI model or call an AI service, so there is nothing to type into on
-          this screen.
+          The advisor will be Claude, in the Claude desktop app. Divvy does not
+          run an AI model or call an AI service, so there is nothing to type
+          into on this screen.
         </p>
         {/* Basis: prd-03 Ruling 1 (strictly read-only, fixed tools).
             Conditional ("When ... is connected") because the mcp/ tools are
@@ -51,7 +53,7 @@ export default function Advisor() {
             conversation and so leave your server). */}
         <p className={PARAGRAPH}>
           What Claude reads goes into your Claude conversation. See{' '}
-          <Link to="/privacy" className={LINK}>
+          <Link to="/privacy" className={`${LINK} underline`}>
             Privacy
           </Link>
           .

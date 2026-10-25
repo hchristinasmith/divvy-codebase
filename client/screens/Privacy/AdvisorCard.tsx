@@ -8,9 +8,10 @@ export default function AdvisorCard() {
     <ClaimCard heading="Advisor" title="Claude, not a model on your server">
       {/* Basis: D3 (the advisor is Claude desktop over MCP); prd-04 Ruling 7
           (no paid API, background agents are rules only); package.json has
-          no AI SDK. */}
+          no AI SDK. "will be": the read-only connection (prd-03) is not live
+          yet; change to "is" when it is. */}
       <p className={CLAIM}>
-        Divvy has no AI of its own and calls no AI service. The advisor is
+        Divvy has no AI of its own and calls no AI service. The advisor will be
         Claude, in the Claude desktop app.
       </p>
       {/* Basis: prd-03 Ruling 1 (read-only, fixed tools) and Ruling 5 (tool

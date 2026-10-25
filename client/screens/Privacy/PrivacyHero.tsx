@@ -31,7 +31,9 @@ export default function PrivacyHero() {
           (server/index.ts). Config, not a confirmed live deploy: keep "set
           up to" until the deploy is verified. Also depends on the tailnet
           policy (docs/deploy.md section 2). */}
-      <p className="m-0 max-w-[560px] text-body-15 leading-normal text-pretty text-blush">
+      {/* Colour: body is white rather than the design's blush, for contrast
+          on the pink-hover background. Still below AA at 15px; flagged for Hannah. */}
+      <p className="m-0 max-w-[560px] text-body-15 leading-normal text-pretty text-surface">
         Divvy is set up to run on a single server that only your Tailscale
         network can reach. The cards below say where your data goes.
       </p>
