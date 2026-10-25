@@ -4,7 +4,10 @@ import connection from '../../../db/connection.ts'
 import { assertInMemory } from '../../../test-utils/app.ts'
 import { validateChartSpec } from '../../../../models/insights.ts'
 import {
+  MONTHLY_MONTHS,
   OTHER_CATEGORIES,
+  TRANSFER_WINDOW_DAYS,
+  UNUSUAL_LOOKBACK_WEEKS,
   cleanLabel,
   collectAggregates,
   excludeOwnAccountTransfers,
@@ -19,7 +22,7 @@ import {
   weekRange,
   type LedgerRow,
 } from '../queries.ts'
-import { nzCalendarDate } from '../../../../shared/nz-dates.ts'
+import { addDaysIso, nzCalendarDate } from '../../../../shared/nz-dates.ts'
 
 // The insights agent's typed queries (#47; prd-04 Rulings 3, 7 and 8). Each
 // test starts from an empty, freshly migrated in-memory database and inserts
@@ -340,6 +343,26 @@ describe('collectAggregates against the hand-written oracle', () => {
     // Read for the week alone, the same outflow has no partner.
     const narrow = excludeOwnAccountTransfers(await loadLedger('personal', '2026-10-19', '2026-10-25'))
     expect(topMerchants(narrow, WEEK, 50).map((m) => m.merchant)).toContain('Invented Transfer')
+  })
+
+  // The start side of the same read padding. The monthly months set the
+  // window's start here, not the unusual-spend lookback, so the window opens
+  // on the first day of the first monthly month.
+  it('a transfer leg posted just before the window start still pairs, because the ledger is read wider', async () => {
+    await seedAccounts()
+    const range = weekRange(WEEK)
+    const windowStart = `${monthsEnding(range.end, MONTHLY_MONTHS)[0]}-01`
+    // Precondition: the monthly months, not the lookback, decide the start.
+    expect(windowStart < addDaysIso(range.start, -7 * UNUSUAL_LOOKBACK_WEEKS)).toBe(true)
+    const inflowDay = addDaysIso(windowStart, -TRANSFER_WINDOW_DAYS)
+    await tx({ at: day(windowStart), cents: -8800, merchant: 'Invented Transfer Early', category: 'Transfers' })
+    await tx({ account: 'acc_p2', at: day(inflowDay), cents: 8800, merchant: 'Invented Transfer Early', category: 'Transfers' })
+    await tx({ at: day(windowStart), cents: -1500, merchant: 'Fixture Bakery', category: 'Cafes' })
+    const a = await collectAggregates('personal', WEEK)
+    expect(a.monthly).toStrictEqual([{ month: windowStart.slice(0, 7), category: 'Cafes', spendCents: 1500 }])
+    // Read from the window start alone, the same outflow has no partner.
+    const narrow = excludeOwnAccountTransfers(await loadLedger('personal', windowStart, range.end))
+    expect(narrow.map((r) => r.merchant)).toContain('Invented Transfer Early')
   })
 
   it('a strawb inflow of equal cents does not cancel a personal outflow', async () => {
