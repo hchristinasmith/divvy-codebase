@@ -66,11 +66,7 @@ router.patch('/:id', async (req, res) => {
           'Transaction is still pending; its category can be changed once it settles',
       })
     }
-    const row = await db.getTransactionRow(id)
-    if (row === undefined) {
-      return res.status(404).json({ error: 'Transaction not found' })
-    }
-    const body: UpdateTransactionCategoryResponse = { transaction: row }
+    const body: UpdateTransactionCategoryResponse = { transaction }
     res.json(body)
   } catch (error) {
     console.error('Error setting transaction category:', errorClass(error))

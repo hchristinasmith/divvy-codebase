@@ -3,13 +3,10 @@ import connection from '../connection.ts'
 import { assertInMemory } from '../../test-utils/app.ts'
 import {
   getTransactionCategory,
-  getTransactionRow,
-  getTxns,
   searchTxns,
   setUserCategory,
 } from '../transactions.ts'
-import { TRANSACTION_COLUMNS } from './transactionColumns.ts'
-import type { Transaction } from '../../../models/transactions.ts'
+import type { TransactionRow } from '../../../models/transactions.ts'
 
 // The row's key set (#212), written out here rather than imported from the
 // production column list, so a change to that list fails these tests.
@@ -88,7 +85,7 @@ async function allCorrections() {
 // it was either refusal instead.
 function updatedRow(
   result: Awaited<ReturnType<typeof setUserCategory>>,
-): Transaction {
+): TransactionRow {
   if (result === undefined || result === 'pending') {
     throw new Error(`expected the updated row, got ${String(result)}`)
   }
@@ -109,7 +106,7 @@ const CORRECTION_COLUMNS = [
 const ISO_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
 
 describe('setUserCategory', () => {
-  it('returns the updated row with every transactions column', async () => {
+  it('returns the updated row with exactly the TransactionRow columns', async () => {
     const before = await rowFor('trans_fixture_002')
 
     const row = await setUserCategory(before.id, 'Convenience stores', connection)
@@ -119,9 +116,10 @@ describe('setUserCategory', () => {
       category: 'Convenience stores',
       category_source: 'user',
     })
-    expect(Object.keys(row!).sort()).toEqual([...TRANSACTION_COLUMNS].sort())
-    // The returned row is what is stored, not a hand-built copy.
-    expect(row).toEqual(await rowFor('trans_fixture_002'))
+    expect(Object.keys(row!).sort()).toEqual([...ROW_KEYS].sort())
+    // The returned row is what is stored, projected to the listed keys.
+    const stored = await rowFor('trans_fixture_002')
+    expect(row).toEqual(Object.fromEntries(ROW_KEYS.map((key) => [key, stored[key]])))
   })
 
   it('returns undefined for an id no transaction has and writes nothing', async () => {
@@ -172,8 +170,9 @@ describe('setUserCategory', () => {
 
     const row = await setUserCategory(id, 'Convenience stores', connection)
 
+    // The answer is the TransactionRow columns, which carry no Akahu category.
     for (const column of [...LEGACY_AKAHU_CATEGORY, ...AKAHU_CATEGORY]) {
-      expect(updatedRow(row)[column]).toBe(before[column])
+      expect(updatedRow(row)).not.toHaveProperty(column)
     }
     const stored = await connection('transactions').where({ id }).first()
     for (const column of [...LEGACY_AKAHU_CATEGORY, ...AKAHU_CATEGORY]) {
@@ -189,7 +188,11 @@ describe('setUserCategory', () => {
 
     const row = await setUserCategory(id, 'Bakeries', connection)
 
-    expect(row).toMatchObject({ status: 'settled', source: 'xero' })
+    // `source` is not a TransactionRow column, so the answer omits it; the
+    // stored row keeps both.
+    expect(row).toMatchObject({ status: 'settled' })
+    expect(row).not.toHaveProperty('source')
+    expect(await rowFor('trans_fixture_002')).toMatchObject({ status: 'settled', source: 'xero' })
   })
 
   it('sets a category on a row Akahu never categorised', async () => {
@@ -199,7 +202,7 @@ describe('setUserCategory', () => {
     const row = await setUserCategory(before.id, 'Bakeries', connection)
 
     expect(row).toMatchObject({ category: 'Bakeries', category_source: 'user' })
-    expect(updatedRow(row).category_name).toBeNull()
+    expect((await rowFor('trans_fixture_001')).category_name).toBeNull()
   })
 
   it('works again on a row that is already category_source = user', async () => {
@@ -384,7 +387,7 @@ describe('setUserCategory source', () => {
     // from the same row. The correction's id and timestamp are left out: they
     // differ by construction, not by source.
     async function outcome(source?: 'user') {
-      let seen: { stored: Transaction; correction: Record<string, unknown> } | undefined
+      let seen: { stored: TransactionRow; correction: Record<string, unknown> } | undefined
       await expect(
         connection.transaction(async (trx) => {
           const row = updatedRow(
@@ -429,7 +432,7 @@ describe('setUserCategory source', () => {
     expect(row).toMatchObject({ category: 'Bakeries', category_source: 'rule' })
     const stored = await rowFor('trans_fixture_002')
     expect(stored).toMatchObject({ category: 'Bakeries', category_source: 'rule' })
-    expect(row).toEqual(stored)
+    expect(row).toEqual(Object.fromEntries(ROW_KEYS.map((key) => [key, stored[key]])))
 
     const corrections = await allCorrections()
     expect(corrections).toHaveLength(1)
@@ -521,31 +524,6 @@ describe('getTransactionCategory', () => {
   })
 })
 
-describe('getTransactionRow', () => {
-  it('a known id gives exactly the listed keys, with the stored values', async () => {
-    const stored = await rowFor('trans_fixture_002')
-
-    const row = await getTransactionRow(stored.id, connection)
-
-    expect(Object.keys(row ?? {}).sort()).toEqual([...ROW_KEYS].sort())
-    expect(row).toEqual(Object.fromEntries(ROW_KEYS.map((key) => [key, stored[key]])))
-  })
-
-  it('an unknown id gives undefined', async () => {
-    expect(await getTransactionRow(999_999, connection)).toBeUndefined()
-  })
-
-  it('works on a xero-sourced row, which PATCH also answers', async () => {
-    const { id } = await rowFor('trans_fixture_002')
-    await connection('transactions').where({ id }).update({ source: 'xero' })
-
-    const row = await getTransactionRow(id, connection)
-
-    expect(row?.akahu_id).toBe('trans_fixture_002')
-    expect(Object.keys(row ?? {}).sort()).toEqual([...ROW_KEYS].sort())
-  })
-})
-
 describe('searchTxns', () => {
   it('leaves a xero-sourced row out and pins the key set of every row it returns', async () => {
     const { id } = await rowFor('trans_fixture_002')
@@ -563,22 +541,53 @@ describe('searchTxns', () => {
       expect(Object.keys(row).sort()).toEqual([...ROW_KEYS].sort())
     }
   })
-})
 
-describe('getTxns', () => {
-  it('returns every row with exactly the listed columns, never one outside the list', async () => {
-    const { id } = await rowFor('trans_fixture_002')
-    await connection('transactions')
-      .where({ id })
-      .update({ merchant_nzbn: 'invented-nzbn', posted_date: '2026-01-02' })
-
-    const rows = await getTxns(connection)
-
-    expect(rows.map((r) => r.id).sort((a, b) => a - b)).toEqual(
-      (await allRows()).map((r) => r.id),
-    )
-    for (const row of rows) {
-      expect(Object.keys(row).sort()).toEqual([...ROW_KEYS].sort())
+  // #299 pins. searchTxns escapes `\`, `%` and `_` in the term and declares
+  // the escape character, so each of the three matches itself.
+  describe('LIKE wildcards in the term', () => {
+    async function setDescription(akahuId: string, description: string) {
+      await connection('transactions').where({ akahu_id: akahuId }).update({ description })
     }
+
+    const akahuRowsWhere = (keep: (description: string) => boolean) => async () =>
+      (await allRows())
+        .filter((r) => r.source === 'akahu' && typeof r.description === 'string')
+        .filter((r) => keep(r.description as string))
+        .map((r) => r.id)
+        .sort((a, b) => a - b)
+
+    it('a % in the term matches itself, so it returns only the row with 50% off', async () => {
+      await setDescription('trans_fixture_001', '50% off')
+      await setDescription('trans_fixture_002', 'a_b')
+      await setDescription('trans_fixture_003', 'plainword')
+      const withPercent = await akahuRowsWhere((d) => d.includes('%'))()
+
+      const rows = await searchTxns('%', connection)
+
+      expect(rows.map((r) => r.id).sort((a, b) => a - b)).toEqual(withPercent)
+      expect(rows.map((r) => r.akahu_id)).toEqual(['trans_fixture_001'])
+    })
+
+    it('a _ in the term matches itself, so it returns only the row with a_b', async () => {
+      await setDescription('trans_fixture_001', '50% off')
+      await setDescription('trans_fixture_002', 'a_b')
+      await setDescription('trans_fixture_003', 'plainword')
+      const withUnderscore = await akahuRowsWhere((d) => d.includes('_'))()
+
+      const rows = await searchTxns('_', connection)
+
+      expect(rows.map((r) => r.id).sort((a, b) => a - b)).toEqual(withUnderscore)
+      expect(rows.map((r) => r.akahu_id)).toEqual(['trans_fixture_002'])
+    })
+
+    it('a backslash in the term is an ordinary character, so a\\b matches only a literal a\\b', async () => {
+      await setDescription('trans_fixture_001', 'x a\\b y')
+      await setDescription('trans_fixture_002', 'a_b')
+      await setDescription('trans_fixture_003', 'ab')
+
+      const rows = await searchTxns('a\\b', connection)
+
+      expect(rows.map((r) => r.akahu_id)).toEqual(['trans_fixture_001'])
+    })
   })
 })

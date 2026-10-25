@@ -1,4 +1,8 @@
-import type { Transaction, TransactionRow } from '../../models/transactions.ts'
+import {
+  TRANSACTION_ROW_COLUMNS,
+  type Transaction,
+  type TransactionRow,
+} from '../../models/transactions.ts'
 import type {
   CategoryCorrection,
   CorrectionSource,
@@ -6,41 +10,12 @@ import type {
 } from '../../models/sync.ts'
 import connection from './connection.ts'
 
-// The routes' column list (#212), typed against the row as synced.ts's is.
-// Same names, same order as TRANSACTION_COLUMNS in synced.ts.
-const ROW_COLUMNS = [
-  'id',
-  'akahu_id',
-  'account_id',
-  'user_id',
-  'connection_id',
-  'created_at',
-  'updated_at',
-  'date',
-  'description',
-  'amount_cents',
-  'balance_cents',
-  'type',
-  'hash',
-  'particulars',
-  'code',
-  'reference',
-  'other_account',
-  'logo',
-  'card_suffix',
-  'merchant_id',
-  'merchant_name',
-  'merchant_website',
-  'merchant_logo',
-  'category',
-  'category_source',
-  'status',
-] as const satisfies readonly (keyof TransactionRow)[]
-
-export async function getTxns(db = connection): Promise<TransactionRow[]> {
-  return db('transactions')
-    .select([...ROW_COLUMNS])
-    .orderBy('created_at')
+// The pattern for a LIKE that finds `term` anywhere (#299). `%` and `_` in the
+// term are escaped so they match themselves, and so is `\`, the escape
+// character `searchTxns` declares. One replace pass, so the backslashes it adds
+// are never escaped again.
+function containsPattern(term: string): string {
+  return `%${term.replace(/[\\%_]/g, (c) => `\\${c}`)}%`
 }
 
 // Akahu rows only (prd-02 Ruling 4): a Xero row has no place in these answers.
@@ -49,26 +24,18 @@ export async function searchTxns(
   db = connection,
 ): Promise<TransactionRow[]> {
   let query = db('transactions')
-    .select([...ROW_COLUMNS])
+    .select([...TRANSACTION_ROW_COLUMNS])
     .where({ source: 'akahu' })
 
   if (description) {
-    query = query.where('description', 'like', `%${description}%`)
+    // The pattern is a bound parameter; the ESCAPE clause names the character
+    // containsPattern escapes with.
+    query = query.whereRaw("description like ? escape '\\'", [
+      containsPattern(description),
+    ])
   }
 
   return query
-}
-
-/**
- * PATCH's answer: the row as it is stored now, read after `setUserCategory`
- * has committed, or undefined when no transaction has that id. No source
- * filter: PATCH works on any row, Xero included.
- */
-export async function getTransactionRow(
-  id: number,
-  db = connection,
-): Promise<TransactionRow | undefined> {
-  return db('transactions').where({ id }).first([...ROW_COLUMNS])
 }
 
 /**
@@ -112,16 +79,16 @@ export async function getTransactionCategory(
  * caller may pass its own transaction as `db`; the work then runs in a
  * savepoint inside it.
  *
- * Returns the updated row; `'pending'` when the row exists but is not
- * settled, in which case nothing is written; or undefined when no
- * transaction has that id.
+ * Returns the updated row, with the columns of TransactionRow and nothing
+ * else; `'pending'` when the row exists but is not settled, in which case
+ * nothing is written; or undefined when no transaction has that id.
  */
 export async function setUserCategory(
   id: number,
   category: string,
   db = connection,
   source: Extract<CorrectionSource, 'user' | 'rule'> = 'user',
-): Promise<Transaction | 'pending' | undefined> {
+): Promise<TransactionRow | 'pending' | undefined> {
   return db.transaction(async (trx) => {
     const before: Pick<Transaction, 'category'> | undefined = await trx(
       'transactions',
@@ -144,6 +111,9 @@ export async function setUserCategory(
     }
     await trx('category_corrections').insert(correction)
 
-    return trx('transactions').where({ id }).first()
+    const row: TransactionRow | undefined = await trx('transactions')
+      .where({ id })
+      .first([...TRANSACTION_ROW_COLUMNS])
+    return row
   })
 }

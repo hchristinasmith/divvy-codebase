@@ -7,7 +7,6 @@ import {
   serveOnLoopback,
   type LoopbackApi,
 } from '../../../test-utils/app.ts'
-import { TRANSACTION_COLUMNS } from '../../../db/__tests__/transactionColumns.ts'
 import { insertProposal, type NewProposal } from '../../db/proposals.ts'
 import { runSync } from '../../../sync/run.ts'
 import { at, db, fakeAkahu, MINUTE_MS, page } from '../../../sync/__tests__/harness.ts'
@@ -49,6 +48,38 @@ const PROPOSAL_KEYS = [
   'origin',
   'status',
   'created_at',
+]
+
+// The key set of the transaction in accept's body (#297): the TransactionRow
+// columns, written out here rather than imported from production, so a column
+// added to or dropped from the shared list fails this pin.
+const ACCEPT_TRANSACTION_KEYS = [
+  'id',
+  'akahu_id',
+  'account_id',
+  'user_id',
+  'connection_id',
+  'created_at',
+  'updated_at',
+  'date',
+  'description',
+  'amount_cents',
+  'balance_cents',
+  'type',
+  'hash',
+  'particulars',
+  'code',
+  'reference',
+  'other_account',
+  'logo',
+  'card_suffix',
+  'merchant_id',
+  'merchant_name',
+  'merchant_website',
+  'merchant_logo',
+  'category',
+  'category_source',
+  'status',
 ]
 
 const CORRECTION_KEYS = [
@@ -251,8 +282,12 @@ describe('POST /api/v1/agents/proposals/:id/accept', () => {
     expect(Object.keys(res.body.proposal).sort()).toEqual([...PROPOSAL_KEYS].sort())
     expect(res.body.proposal).toEqual(await proposalRow(targetProposal))
     expect(res.body.proposal.status).toBe('accepted')
-    expect(Object.keys(res.body.transaction).sort()).toEqual([...TRANSACTION_COLUMNS].sort())
-    expect(res.body.transaction).toEqual(await transactionRow(target))
+    expect(Object.keys(res.body.transaction).sort()).toEqual([...ACCEPT_TRANSACTION_KEYS].sort())
+    // The stored row, projected to the pinned keys: the body is the row as it is now.
+    const stored = await transactionRow(target)
+    expect(res.body.transaction).toEqual(
+      Object.fromEntries(ACCEPT_TRANSACTION_KEYS.map((key) => [key, stored[key]])),
+    )
   })
 
   it('a second accept is 409 and writes nothing', async () => {
