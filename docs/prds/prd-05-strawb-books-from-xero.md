@@ -82,11 +82,16 @@ A refresh writes the new token pair in a single database transaction, guarded by
 ## Ruling 4 — Xero never adds money to liquid, and only two Xero figures enter safe-to-spend
 Entering the formula: payables due (as the Strawb scope's "unpaid bills") and year-to-date profit (as the tax-hold input). Not entering: receivables (shown, "pending, excluded", `handoff.md:28`), Xero cash (it is the same money as the BNZ balance from Akahu). Once Xero is connected, Strawb bills come from Xero payables and manual Strawb bills are disabled. This amends prd-02 ruling 2 by reference (profit source and Strawb bills), and does not rewrite it. The formula stays in `shared/safe-to-spend.ts`.
 
+> Amended 2026-10-25 by Ruling 7.
+
 ## Ruling 5 — The bank-feed fallback stays, and is not expected to be needed
 Business bank transactions come from Akahu (prd-01 ruling 9, and Hannah confirms the BNZ business account is already linked to her access number). The Xero fallback imports bank transactions into prd-01's tables with `source = 'xero'` only if Hannah sets `strawb_bank_source = xero`, and never for an account whose bank account has an Akahu source.
 
 ## Ruling 6 — Xero data lives in `xero_*` tables and is a copy, not a ledger
 Invoices, bills, pay runs and the P&L summary are stored as received (amounts in integer cents) and replaced by upsert on Xero's own ids. Divvy never edits them. The P&L is stored per period with its fetch time, because "this year's profit" is only as good as when it was fetched.
+
+## Ruling 7 — Only NZD is ever summed; other currencies are kept apart (operator amendment, 2026-10-25; amends Ruling 4 and Done-when 1)
+Every figure Divvy derives from Xero (receivables owed, payables, anything that enters safe-to-spend) sums only invoices and bills whose `currency` is NZD. Amounts in any other currency are kept per currency and shown separately (e.g. "plus USD 100.00 owed"), never converted with a rate and never added to an NZD total. Why: Hannah chose the simplest honest rule (2026-10-25, #102); a converted figure moves with the exchange rate and a refused list would break the screen the first time Strawb invoices abroad. Extends to: the Xero sync (#66), the Overview's "owed to Strawb" line (#71) and the tax hold's payables (#73). Done-when 1's match with Xero's own figure compares the NZD total only.
 
 ## Sequencing
 

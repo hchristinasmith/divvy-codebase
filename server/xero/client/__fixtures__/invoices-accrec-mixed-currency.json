@@ -1,0 +1,62 @@
+{
+  "Id": "5a1d7e10-0000-4000-8000-00000000a004",
+  "Status": "OK",
+  "ProviderName": "Divvy fixture",
+  "DateTimeUTC": "/Date(1792742400000)/",
+  "Invoices": [
+    {
+      "Type": "ACCREC",
+      "InvoiceID": "3f2b8c41-0000-4000-8000-000000000301",
+      "InvoiceNumber": "INV-0301",
+      "Contact": { "ContactID": "c0a1b2c3-0000-4000-8000-0000000000d1", "Name": "Kowhai Lane Deli" },
+      "DateString": "2026-09-05T00:00:00",
+      "DueDateString": "2026-09-25T00:00:00",
+      "Status": "AUTHORISED",
+      "LineAmountTypes": "Exclusive",
+      "SubTotal": 86.96,
+      "TotalTax": 13.04,
+      "Total": 100.00,
+      "AmountDue": 100.00,
+      "AmountPaid": 0.00,
+      "AmountCredited": 0.00,
+      "CurrencyCode": "NZD",
+      "CurrencyRate": 1.000000
+    },
+    {
+      "Type": "ACCREC",
+      "InvoiceID": "3f2b8c41-0000-4000-8000-000000000302",
+      "InvoiceNumber": "INV-0302",
+      "Contact": { "ContactID": "c0a1b2c3-0000-4000-8000-0000000000d2", "Name": "Bluebell Hollow Stationers" },
+      "DateString": "2026-09-12T00:00:00",
+      "DueDateString": "2026-10-12T00:00:00",
+      "Status": "AUTHORISED",
+      "LineAmountTypes": "NoTax",
+      "SubTotal": 250.50,
+      "TotalTax": 0.00,
+      "Total": 250.50,
+      "AmountDue": 250.50,
+      "AmountPaid": 0.00,
+      "AmountCredited": 0.00,
+      "CurrencyCode": "USD",
+      "CurrencyRate": 0.590000
+    },
+    {
+      "Type": "ACCREC",
+      "InvoiceID": "3f2b8c41-0000-4000-8000-000000000303",
+      "InvoiceNumber": "INV-0303",
+      "Contact": { "ContactID": "c0a1b2c3-0000-4000-8000-0000000000d3", "Name": "Cedar Point Gift House" },
+      "DateString": "2026-09-20T00:00:00",
+      "DueDateString": "2026-10-20T00:00:00",
+      "Status": "AUTHORISED",
+      "LineAmountTypes": "NoTax",
+      "SubTotal": 49.50,
+      "TotalTax": 0.00,
+      "Total": 49.50,
+      "AmountDue": 49.50,
+      "AmountPaid": 0.00,
+      "AmountCredited": 0.00,
+      "CurrencyCode": "USD",
+      "CurrencyRate": 0.590000
+    }
+  ]
+}
