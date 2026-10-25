@@ -1,0 +1,272 @@
+import { afterAll, beforeEach, describe, expect, it } from 'vitest'
+
+import connection from '../../../db/connection.ts'
+import { assertInMemory } from '../../../test-utils/app.ts'
+import { CHART_LIMITS, validateChartSpec } from '../../../../models/insights.ts'
+import {
+  dismissInsight,
+  getInsight,
+  insertInsight,
+  listInsights,
+  type NewInsight,
+} from '../insights.ts'
+
+// The insights agent's inbox accessors (#31; prd-04 Rulings 2, 3 and 8,
+// Done-when 5). Each test starts from an empty, freshly migrated in-memory
+// database and inserts the rows it needs; every value is invented.
+
+beforeEach(async () => {
+  assertInMemory(connection)
+  await connection.migrate.rollback(undefined, true)
+  await connection.migrate.latest()
+})
+
+afterAll(async () => {
+  await connection.destroy()
+})
+
+const AT = '2026-10-25T03:00:00.000Z'
+const NOW = new Date(AT)
+const LATER = new Date('2026-10-25T04:30:00.000Z')
+const LATEST = new Date('2026-10-25T06:00:00.000Z')
+
+const INSIGHT_KEYS = [
+  'body_md',
+  'chart_spec_json',
+  'created_at',
+  'dismissed_at',
+  'id',
+  'kind',
+  'period',
+  'scope',
+  'title',
+]
+
+// A valid spec with `title` before `data`: the validator's copy puts it last.
+const spec = (fields: Record<string, unknown> = {}) => ({
+  title: 'Top merchants',
+  data: {
+    values: [
+      { merchant: 'Fixture Bakery', total: 1250 },
+      { merchant: 'Fixture Grocer', total: 830 },
+    ],
+  },
+  mark: 'bar',
+  encoding: {
+    x: { field: 'merchant', type: 'nominal' },
+    y: { field: 'total', type: 'quantitative' },
+  },
+  ...fields,
+})
+
+const insight = (fields: Partial<NewInsight> = {}): NewInsight => ({
+  kind: 'pattern',
+  title: 'Top merchants this week',
+  body_md: 'Most of the week went to **Fixture Bakery**.',
+  scope: 'personal',
+  period: '2026-W43',
+  ...fields,
+})
+
+async function inserted(i: NewInsight, now: Date = NOW): Promise<number> {
+  const result = await insertInsight(i, now)
+  if (!result.ok) throw new Error(`expected an insert, got ${result.reason}`)
+  return result.id
+}
+
+async function storedRows(): Promise<Record<string, unknown>[]> {
+  return connection('insights').orderBy('id')
+}
+
+function canonical(input: unknown): string {
+  const checked = validateChartSpec(input)
+  if (!checked.ok) throw new Error(`fixture spec refused: ${checked.reason}`)
+  return JSON.stringify(checked.spec)
+}
+
+describe('insertInsight', () => {
+  it("stores the validator's copy of a chart spec, not the input", async () => {
+    const input = spec()
+    const id = await inserted(insight({ kind: 'chart', chart_spec: input }))
+
+    const [stored] = await storedRows()
+    expect(Object.keys(stored).sort()).toEqual(INSIGHT_KEYS)
+    expect(stored.chart_spec_json).toBe(canonical(input))
+    // The proof that the copy, not the input, was stored.
+    expect(stored.chart_spec_json).not.toBe(JSON.stringify(input))
+    expect(stored).toStrictEqual({
+      id,
+      kind: 'chart',
+      title: 'Top merchants this week',
+      body_md: 'Most of the week went to **Fixture Bakery**.',
+      chart_spec_json: canonical(input),
+      scope: 'personal',
+      period: '2026-W43',
+      created_at: AT,
+      dismissed_at: null,
+    })
+
+    const read = await getInsight(id)
+    expect(Object.keys(read ?? {}).sort()).toEqual(INSIGHT_KEYS)
+    expect('mermaid' in (read ?? {})).toBe(false)
+    expect(read).toStrictEqual(stored)
+  })
+
+  const HOSTILE: [name: string, input: unknown, reason: string, marker: string][] = [
+    ['a data URL', spec({ data: { url: 'https://example.invalid/rows.json' } }), 'forbidden_key', 'example.invalid'],
+    ['an unknown mark', spec({ mark: 'rect' }), 'bad_mark', 'rect'],
+    [
+      'a javascript: label',
+      spec({ data: { values: [{ merchant: 'javascript:alert(1)', total: 1 }] } }),
+      'url_in_string',
+      'alert(1)',
+    ],
+    [
+      'a script label',
+      spec({ data: { values: [{ merchant: '<script>x()</script>', total: 1 }] } }),
+      'markup_in_string',
+      '<script>',
+    ],
+    [
+      'a bidi override in a label',
+      spec({ data: { values: [{ merchant: 'Fixture ‮yrekaB', total: 1 }] } }),
+      'bidi_in_string',
+      'yrekaB',
+    ],
+    [
+      'too many rows',
+      spec({
+        data: {
+          values: Array.from({ length: CHART_LIMITS.maxRows + 1 }, (_, i) => ({
+            merchant: `Fixture ${i}`,
+            total: i,
+          })),
+        },
+      }),
+      'too_many_rows',
+      'Fixture 200',
+    ],
+  ]
+
+  it.each(HOSTILE)('refuses %s with the validator’s reason and path, and writes nothing', async (_, input, reason, marker) => {
+    const expected = validateChartSpec(input)
+    expect(expected.ok).toBe(false)
+    if (expected.ok) return
+    expect(expected.reason).toBe(reason)
+
+    const result = await insertInsight(insight({ kind: 'chart', chart_spec: input }), NOW)
+
+    expect(result).toStrictEqual({ ok: false, reason: expected.reason, path: expected.path })
+    expect(JSON.stringify(result)).not.toContain(marker)
+    expect(await storedRows()).toEqual([])
+  })
+
+  it.each([null, undefined])('stores no chart for a %s spec', async (chart) => {
+    const id = await inserted(insight({ chart_spec: chart }))
+    expect((await getInsight(id))?.chart_spec_json).toBeNull()
+    expect((await storedRows())[0].chart_spec_json).toBeNull()
+  })
+
+  it('ignores a mermaid key: there is no column for it (Ruling 2)', async () => {
+    const withMermaid = { ...insight(), mermaid: 'graph TD; A-->B' }
+    const id = await inserted(withMermaid)
+
+    const [stored] = await storedRows()
+    expect(Object.keys(stored).sort()).toEqual(INSIGHT_KEYS)
+    expect(JSON.stringify(stored)).not.toContain('graph TD')
+    expect('mermaid' in ((await getInsight(id)) ?? {})).toBe(false)
+  })
+
+  const BAD: [name: string, fields: Partial<NewInsight>, message: RegExp][] = [
+    ['kind', { kind: 'x' as unknown as NewInsight['kind'] }, /^kind is not a known insight kind$/],
+    ['scope', { scope: 'all' as unknown as NewInsight['scope'] }, /^scope must be personal or strawb$/],
+    [
+      'scope toString',
+      { scope: 'toString' as unknown as NewInsight['scope'] },
+      /^scope must be personal or strawb$/,
+    ],
+    ['blank title', { title: '  ' }, /^title must not be blank$/],
+    ['blank body_md', { body_md: '' }, /^body_md must not be blank$/],
+    ['blank period', { period: '\t' }, /^period must not be blank$/],
+  ]
+
+  it.each(BAD)('throws on a bad %s, and writes nothing', async (_, fields, message) => {
+    await expect(insertInsight(insight({ chart_spec: spec(), ...fields }), NOW)).rejects.toThrow(message)
+    expect(await storedRows()).toEqual([])
+  })
+})
+
+describe('reading re-validates the stored chart (Ruling 8)', () => {
+  async function storeRaw(text: string): Promise<number> {
+    const id = await inserted(insight({ kind: 'chart', chart_spec: spec() }))
+    await connection('insights').where({ id }).update({ chart_spec_json: text })
+    return id
+  }
+
+  it('reads a refused spec as no chart, and keeps the rest of the row', async () => {
+    const hostile = JSON.stringify(spec({ data: { url: 'https://example.invalid/rows.json' } }))
+    const id = await storeRaw(hostile)
+    expect((await storedRows())[0].chart_spec_json).toBe(hostile)
+
+    const read = await getInsight(id)
+    expect(Object.keys(read ?? {}).sort()).toEqual(INSIGHT_KEYS)
+    expect(read).toMatchObject({ id, kind: 'chart', title: 'Top merchants this week', chart_spec_json: null })
+    expect((await listInsights()).map((i) => [i.id, i.chart_spec_json])).toEqual([[id, null]])
+  })
+
+  it('reads stored text over the length cap as no chart', async () => {
+    const long = JSON.stringify({ pad: 'x'.repeat(CHART_LIMITS.maxChars) })
+    expect(long.length).toBeGreaterThan(CHART_LIMITS.maxChars)
+    const id = await storeRaw(long)
+    expect((await getInsight(id))?.chart_spec_json).toBeNull()
+  })
+
+  it("reads a valid spec back as the validator's copy", async () => {
+    const id = await storeRaw(JSON.stringify(spec()))
+    expect((await getInsight(id))?.chart_spec_json).toBe(canonical(spec()))
+  })
+})
+
+describe('dismissInsight and listInsights', () => {
+  it('dismisses once and keeps the first time', async () => {
+    const id = await inserted(insight())
+
+    expect(await dismissInsight(id, LATER)).toBe(true)
+    expect(await dismissInsight(id, LATEST)).toBe(false)
+    expect(await dismissInsight(id + 1000, LATER)).toBe(false)
+
+    expect((await getInsight(id))?.dismissed_at).toBe(LATER.toISOString())
+  })
+
+  it('lists newest first (ties by id), without dismissed ones unless asked, filtered by kind and scope', async () => {
+    const older = await inserted(insight(), NOW)
+    const tieLow = await inserted(insight({ kind: 'report', scope: 'strawb' }), LATER)
+    const tieHigh = await inserted(insight({ kind: 'chart', chart_spec: spec() }), LATER)
+    const dismissed = await inserted(insight(), LATEST)
+    await dismissInsight(dismissed, LATEST)
+
+    const ids = async (filter: Parameters<typeof listInsights>[0]) =>
+      (await listInsights(filter)).map((i) => i.id)
+
+    expect(await ids(undefined)).toEqual([tieHigh, tieLow, older])
+    expect(await ids({ includeDismissed: true })).toEqual([dismissed, tieHigh, tieLow, older])
+    expect(await ids({ kind: 'pattern' })).toEqual([older])
+    expect(await ids({ kind: 'pattern', includeDismissed: true })).toEqual([dismissed, older])
+    expect(await ids({ scope: 'strawb' })).toEqual([tieLow])
+    expect(await ids({ scope: 'personal', kind: 'chart' })).toEqual([tieHigh])
+    for (const row of await listInsights({ includeDismissed: true })) {
+      expect(Object.keys(row).sort()).toEqual(INSIGHT_KEYS)
+    }
+  })
+
+  it("dismisses inside the caller's transaction: rolled back it leaves the insight open", async () => {
+    const id = await inserted(insight())
+    await expect(
+      connection.transaction(async (trx) => {
+        expect(await dismissInsight(id, LATER, trx)).toBe(true)
+        throw new Error('rolled back')
+      }),
+    ).rejects.toThrow('rolled back')
+    expect((await getInsight(id))?.dismissed_at).toBeNull()
+  })
+})
