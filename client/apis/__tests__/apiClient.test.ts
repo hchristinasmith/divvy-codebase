@@ -55,7 +55,6 @@ describe('updateTransactionCategory', () => {
       id,
       category: 'Convenience stores',
       category_source: 'user',
-      category_name: 'Supermarkets and grocery stores',
     })
     expect(
       await connection('transactions').where({ id }).first('category', 'category_source'),

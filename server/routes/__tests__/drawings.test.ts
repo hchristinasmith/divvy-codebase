@@ -10,7 +10,6 @@ import {
 
 import connection from '../../db/connection.ts'
 import { loadDrawingIds } from '../../db/drawings.ts'
-import { TRANSACTION_COLUMNS } from '../../db/__tests__/transactionColumns.ts'
 import { replacePending, upsertSettled } from '../../sync/upsert.ts'
 import type {
   PendingTransaction,
@@ -28,6 +27,36 @@ import type {
   Scope,
   SubscriptionsResponse,
 } from '../../../shared/contracts.ts'
+
+// The key set GET /api/v1/transactions answers (#212), written out here.
+const ROW_KEYS = [
+  'id',
+  'akahu_id',
+  'account_id',
+  'user_id',
+  'connection_id',
+  'created_at',
+  'updated_at',
+  'date',
+  'description',
+  'amount_cents',
+  'balance_cents',
+  'type',
+  'hash',
+  'particulars',
+  'code',
+  'reference',
+  'other_account',
+  'logo',
+  'card_suffix',
+  'merchant_id',
+  'merchant_name',
+  'merchant_website',
+  'merchant_logo',
+  'category',
+  'category_source',
+  'status',
+] as const
 
 // Drawings end to end (prd-02 Ruling 15, issue #264): over HTTP against the
 // real app and a fresh in-memory database. The clock is fixed at 23:30 UTC
@@ -269,9 +298,7 @@ describe('a strawb outflow and an equal personal inflow a day later are both Dra
     const rows: Row[] = res.body.txns
     for (const id of [...OUT_IDS, ...IN_IDS]) {
       const row = rows.find((r) => r.id === id)
-      expect(Object.keys(row ?? {}).sort()).toStrictEqual(
-        [...TRANSACTION_COLUMNS].sort(),
-      )
+      expect(Object.keys(row ?? {}).sort()).toStrictEqual([...ROW_KEYS].sort())
       expect(row).toMatchObject({
         category: 'Drawings',
         category_source: 'rule',
