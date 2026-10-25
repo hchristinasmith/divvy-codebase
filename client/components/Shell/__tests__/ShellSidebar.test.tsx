@@ -19,7 +19,7 @@ function links() {
 }
 
 describe('the desktop sidebar', () => {
-  it('lists the nine handoff screens in order, then Settings', () => {
+  it('lists the shell screens in sidebar order, then Settings', () => {
     renderWithProviders(<ShellSidebar />)
     expect(links().map((a) => a.textContent)).toEqual([
       'Overview',

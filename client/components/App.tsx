@@ -14,9 +14,9 @@ import Targets from './Targets/targets.tsx'
 //
 // The handoff's screens come from the route table in screens/routes.tsx.
 // The routes below are the old pages: Settings is linked from the sidebar;
-// the rest stay reachable by URL only until the prd-02 w5 sweep
-// deletes them (prd-02 Ruling 8). The old Dashboard moved to /dashboard when
-// the Overview took "/".
+// the rest stay reachable by URL only until the prd-02 w5 sweep deletes
+// them (prd-02 Ruling 8). The old Dashboard moved to /dashboard when the
+// Overview took "/".
 export default function App() {
   return (
     <ScopeProvider>
