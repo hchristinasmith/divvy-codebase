@@ -315,3 +315,27 @@ describe('setUserCategory corrections and pending rows', () => {
     expect(await allCorrections()).toHaveLength(1)
   })
 })
+
+// Decision 3cb449c6 (#51): setUserCategory is about to take the source it
+// marks. Its default must stay `user`, which PATCH /transactions relies on by
+// passing no source at all.
+describe('setUserCategory source', () => {
+  it('with no source argument, writes `user` in both category_source and the correction source', async () => {
+    const before = await rowFor('trans_fixture_002')
+    expect(before.category_source).toBe('akahu')
+
+    const row = updatedRow(await setUserCategory(before.id, 'Bakeries', connection))
+
+    expect(row.category_source).toBe('user')
+    const stored = await rowFor('trans_fixture_002')
+    expect(stored).toMatchObject({ category: 'Bakeries', category_source: 'user' })
+    const corrections = await allCorrections()
+    expect(corrections).toHaveLength(1)
+    expect(corrections[0]).toMatchObject({
+      transaction_id: before.id,
+      from_category: before.category,
+      to_category: 'Bakeries',
+      source: 'user',
+    })
+  })
+})
