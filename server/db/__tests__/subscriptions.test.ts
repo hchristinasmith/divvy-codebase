@@ -861,3 +861,270 @@ describe('writes', () => {
     expect(fetch).not.toHaveBeenCalled()
   })
 })
+
+// Written before the detector changes (#391), green on the all-history rule
+// as it is today. What the change must NOT alter: a merchant detected today
+// keeps its bare key end to end, a mark written on that key is read back on
+// that row, and a key that is no merchant in the scope is still not_found.
+describe('#391 regression: what detection today must keep', () => {
+  type Target = { scope: RowScope; merchantKey: string }
+  const target: Target = { scope: 'personal', merchantKey: STREAM }
+
+  const BISTRO_KEY = 'm:merchant_fixture_bistro'
+  const bistro = {
+    merchant_id: 'merchant_fixture_bistro',
+    merchant_name: 'Example Bistro',
+    description: 'EXAMPLE BISTRO 2210 AKL',
+  }
+  const VISIT_AMOUNTS = [1850, 4200, 2900, 3600, 2200, 4500, 3100, 2750]
+  // Noon NZST on each day (June and July are NZST). Gaps 8, 6, 6, 8, 8, 6, 7.
+  const VISIT_DAYS = [
+    '2026-06-01',
+    '2026-06-09',
+    '2026-06-15',
+    '2026-06-21',
+    '2026-06-29',
+    '2026-07-07',
+    '2026-07-13',
+    '2026-07-20',
+  ]
+  // Gaps 8, 6, 6, 16, 8, 6, 7: one skipped week.
+  const SKIPPED_DAYS = [
+    '2026-06-01',
+    '2026-06-09',
+    '2026-06-15',
+    '2026-06-21',
+    '2026-07-07',
+    '2026-07-15',
+    '2026-07-21',
+    '2026-07-28',
+  ]
+  const seedVisits = (days: readonly string[]) =>
+    insertTxs(
+      days.map((day, i) =>
+        tx(EVERYDAY, `${day}T00:00:00.000Z`, -VISIT_AMOUNTS[i], bistro),
+      ),
+    )
+
+  describe('a detected merchant keeps its bare key through the read', () => {
+    beforeEach(async () => {
+      await seedAccounts()
+    })
+
+    it('three monthly charges are one row keyed m:<merchant id>', async () => {
+      await seedStream()
+
+      const result = await readSubscriptions('personal')
+
+      expect(result.subscriptions.map((r) => r.merchantKey)).toStrictEqual([
+        'm:merchant_fixture_stream',
+      ])
+      expect(result.subscriptions).toHaveLength(1)
+      expect(keys(result.subscriptions[0])).toEqual(
+        [
+          'merchantKey',
+          'scope',
+          'name',
+          'chargeCount',
+          'lastChargedOn',
+          'amountCents',
+          'cadence',
+          'detected',
+          'marked',
+          'status',
+          'cancelledOn',
+          'chargedAgainOn',
+          'perMonthCents',
+          'perYearCents',
+        ].sort(),
+      )
+    })
+
+    it('a price change on regular gaps is still one row at the latest price', async () => {
+      // Gaps 30, 31, 30; prices 1299, 1299, 1499, 1799.
+      await insertTxs([
+        tx(EVERYDAY, '2026-05-01T00:00:00.000Z', -1299),
+        tx(EVERYDAY, '2026-05-31T00:00:00.000Z', -1299),
+        tx(EVERYDAY, '2026-07-01T00:00:00.000Z', -1499),
+        tx(EVERYDAY, '2026-07-31T00:00:00.000Z', -1799),
+      ])
+
+      const result = await readSubscriptions('personal')
+
+      expect(
+        result.subscriptions.map((r) => [
+          r.merchantKey,
+          r.chargeCount,
+          r.amountCents,
+          r.cadence,
+          r.perMonthCents,
+          r.perYearCents,
+        ]),
+      ).toStrictEqual([[STREAM, 4, 1799, 'monthly', 1799, 21588]])
+    })
+
+    it('#393 baseline: eight weekly visits at varying prices are one weekly row with the bare key', async () => {
+      await seedVisits(VISIT_DAYS)
+
+      const result = await readSubscriptions('personal')
+
+      expect(result.subscriptions).toStrictEqual([
+        {
+          merchantKey: BISTRO_KEY,
+          scope: 'personal',
+          name: 'Example Bistro',
+          chargeCount: 8,
+          lastChargedOn: '2026-07-20',
+          amountCents: 2750,
+          cadence: 'weekly',
+          detected: true,
+          marked: false,
+          status: 'active',
+          cancelledOn: null,
+          chargedAgainOn: null,
+          // 2750 × 52 = 143000; ÷ 12 = 11916.67 → 11917; × 12 = 143004.
+          perMonthCents: 11917,
+          perYearCents: 143004,
+        },
+      ])
+      expect(result.totals).toStrictEqual({
+        perMonthCents: 11917,
+        perYearCents: 143004,
+        countedCount: 1,
+        uncountedCount: 0,
+      })
+    })
+
+    it('#393 baseline: the same visits with one skipped week are not detected', async () => {
+      await seedVisits(SKIPPED_DAYS)
+
+      expect((await readSubscriptions('personal')).subscriptions).toStrictEqual(
+        [],
+      )
+    })
+  })
+
+  describe('a mark on the bare key of a detected merchant is read back on its row', () => {
+    beforeEach(async () => {
+      await seedAccounts()
+      await seedStream()
+    })
+
+    it('Yes: stored under the bare key, and the one row is marked', async () => {
+      await setAnswer(target, 'subscription', NOW)
+
+      expect(
+        (await marks()).map((m) => [m.scope, m.merchant_key, m.answer]),
+      ).toStrictEqual([
+        ['personal', 'm:merchant_fixture_stream', 'subscription'],
+      ])
+      expect(
+        (await readSubscriptions('personal')).subscriptions.map((r) => [
+          r.merchantKey,
+          r.detected,
+          r.marked,
+          r.status,
+        ]),
+      ).toStrictEqual([['m:merchant_fixture_stream', true, true, 'active']])
+    })
+
+    it('No: the merchant leaves subscriptions and shows under notSubscriptions with the bare key', async () => {
+      await setAnswer(target, 'not_subscription', NOW)
+
+      const result = await readSubscriptions('personal')
+
+      expect(result.subscriptions).toStrictEqual([])
+      expect(result.notSubscriptions).toStrictEqual([
+        {
+          merchantKey: 'm:merchant_fixture_stream',
+          scope: 'personal',
+          name: 'Example Stream',
+          chargeCount: 3,
+          lastChargedOn: '2026-08-30',
+          amountCents: 1599,
+        },
+      ])
+      expect(result.totals).toStrictEqual({
+        perMonthCents: 0,
+        perYearCents: 0,
+        countedCount: 0,
+        uncountedCount: 0,
+      })
+    })
+
+    it('cancel: stored under the bare key, and the one row is cancelled on that date', async () => {
+      await cancelSubscription(target, '2026-09-01', NOW)
+
+      expect(
+        (await marks()).map((m) => [m.scope, m.merchant_key, m.cancelled_on]),
+      ).toStrictEqual([['personal', 'm:merchant_fixture_stream', '2026-09-01']])
+      expect(
+        (await readSubscriptions('personal')).subscriptions.map((r) => [
+          r.merchantKey,
+          r.status,
+          r.cancelledOn,
+          r.chargedAgainOn,
+        ]),
+      ).toStrictEqual([
+        ['m:merchant_fixture_stream', 'cancelled', '2026-09-01', null],
+      ])
+    })
+
+    it('uncancel: the date is cleared on that same row', async () => {
+      await cancelSubscription(target, '2026-09-01', NOW)
+      await uncancelSubscription(target, LATER)
+
+      expect(
+        (await readSubscriptions('personal')).subscriptions.map((r) => [
+          r.merchantKey,
+          r.status,
+          r.cancelledOn,
+        ]),
+      ).toStrictEqual([['m:merchant_fixture_stream', 'active', null]])
+    })
+  })
+
+  describe('a key that is no merchant in the scope is not_found and writes nothing', () => {
+    beforeEach(async () => {
+      await seedAccounts()
+      await seedStream()
+    })
+
+    const JUNK_KEYS = [
+      'junk',
+      'm:',
+      'x:merchant_fixture_stream',
+      'M:merchant_fixture_stream',
+      'd:example stream',
+      'm:merchant_fixture_stream ',
+    ]
+
+    it.each([
+      ['setAnswer', (t: Target) => setAnswer(t, 'subscription', NOW)],
+      [
+        'cancelSubscription',
+        (t: Target) => cancelSubscription(t, undefined, NOW),
+      ],
+      ['uncancelSubscription', (t: Target) => uncancelSubscription(t, NOW)],
+    ])('%s: a junk key and an other-scope key', async (_why, write) => {
+      for (const merchantKey of JUNK_KEYS) {
+        expect(
+          await write({ scope: 'personal', merchantKey }),
+          merchantKey,
+        ).toBe('not_found')
+      }
+      // STREAM has charges in personal only.
+      expect(await write({ scope: 'strawb', merchantKey: STREAM })).toBe(
+        'not_found',
+      )
+      expect(await marks()).toStrictEqual([])
+      expect(
+        (await readSubscriptions('personal')).subscriptions.map((r) => [
+          r.merchantKey,
+          r.marked,
+          r.cancelledOn,
+        ]),
+      ).toStrictEqual([[STREAM, false, null]])
+    })
+  })
+})

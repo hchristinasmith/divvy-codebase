@@ -1500,3 +1500,463 @@ describe('no clock', () => {
     }
   })
 })
+
+// ---------------------------------------------------------------------------
+// #391 regression
+// ---------------------------------------------------------------------------
+
+// Written before the detector changes (#391), green on the all-history rule
+// as it is today. Each case is something the change must NOT alter: a
+// merchant the all-history rule detects keeps its bare key, its one row and
+// its figures. Every expected value is worked by hand and written as a
+// literal; invented merchants only.
+describe('#391 regression: what detection today must keep', () => {
+  const BISTRO = {
+    merchantId: 'merchant_fixture_bistro',
+    merchantName: 'Example Bistro',
+    description: 'EXAMPLE BISTRO 2210 AKL',
+  }
+  // Eight visits a week or so apart, in order, each at its own price.
+  const VISIT_AMOUNTS = [1850, 4200, 2900, 3600, 2200, 4500, 3100, 2750]
+  // Gaps 8, 6, 6, 8, 8, 6, 7: every one in the weekly band (5 to 9).
+  const VISIT_DATES = [
+    '2026-06-01',
+    '2026-06-09',
+    '2026-06-15',
+    '2026-06-21',
+    '2026-06-29',
+    '2026-07-07',
+    '2026-07-13',
+    '2026-07-20',
+  ]
+  // The same visits with a skipped week: gaps 8, 6, 6, 16, 8, 6, 7.
+  const SKIPPED_DATES = [
+    '2026-06-01',
+    '2026-06-09',
+    '2026-06-15',
+    '2026-06-21',
+    '2026-07-07',
+    '2026-07-15',
+    '2026-07-21',
+    '2026-07-28',
+  ]
+  const visits = (dates: readonly string[]) =>
+    dates.map((date, i) =>
+      tx({ date, amountCents: -VISIT_AMOUNTS[i], ...BISTRO }),
+    )
+
+  describe('a merchant detected today keeps its bare key and one exact row', () => {
+    it('monthly: one row, the bare m: key', () => {
+      const result = run(charges(MONTHLY))
+
+      expect(result.subscriptions.map((r) => r.merchantKey)).toStrictEqual([
+        'm:merchant_fixture_stream',
+      ])
+      expect(keys(result.subscriptions[0])).toEqual(keys(ROW_KEYS))
+      expect(result.subscriptions).toStrictEqual([
+        {
+          merchantKey: 'm:merchant_fixture_stream',
+          scope: 'personal',
+          name: 'Example Stream',
+          chargeCount: 3,
+          lastChargedOn: '2026-08-30',
+          amountCents: 1599,
+          cadence: 'monthly',
+          detected: true,
+          marked: false,
+          status: 'active',
+          cancelledOn: null,
+          chargedAgainOn: null,
+          perMonthCents: 1599,
+          // 12 × 1599 = 19188
+          perYearCents: 19188,
+        },
+      ])
+      expect(result.questions).toStrictEqual([])
+      expect(result.notSubscriptions).toStrictEqual([])
+    })
+
+    it('weekly: one row, the bare m: key', () => {
+      const result = run(charges(WEEKLY, { amountCents: -1250 }))
+
+      expect(result.subscriptions.map((r) => r.merchantKey)).toStrictEqual([
+        'm:merchant_fixture_stream',
+      ])
+      expect(keys(result.subscriptions[0])).toEqual(keys(ROW_KEYS))
+      expect(result.subscriptions).toStrictEqual([
+        {
+          merchantKey: 'm:merchant_fixture_stream',
+          scope: 'personal',
+          name: 'Example Stream',
+          chargeCount: 3,
+          lastChargedOn: '2026-08-17',
+          amountCents: 1250,
+          cadence: 'weekly',
+          detected: true,
+          marked: false,
+          status: 'active',
+          cancelledOn: null,
+          chargedAgainOn: null,
+          // 1250 × 52 = 65000; ÷ 12 = 5416.67 → 5417
+          perMonthCents: 5417,
+          // 12 × 5417 = 65004
+          perYearCents: 65004,
+        },
+      ])
+      expect(result.totals).toStrictEqual({
+        perMonthCents: 5417,
+        perYearCents: 65004,
+        countedCount: 1,
+        uncountedCount: 0,
+      })
+    })
+
+    it('yearly: one row, the bare m: key', () => {
+      const result = run(charges(YEARLY, { amountCents: -1806 }))
+
+      expect(result.subscriptions.map((r) => r.merchantKey)).toStrictEqual([
+        'm:merchant_fixture_stream',
+      ])
+      expect(keys(result.subscriptions[0])).toEqual(keys(ROW_KEYS))
+      expect(result.subscriptions).toStrictEqual([
+        {
+          merchantKey: 'm:merchant_fixture_stream',
+          scope: 'personal',
+          name: 'Example Stream',
+          chargeCount: 3,
+          lastChargedOn: '2026-03-01',
+          amountCents: 1806,
+          cadence: 'yearly',
+          detected: true,
+          marked: false,
+          status: 'active',
+          cancelledOn: null,
+          chargedAgainOn: null,
+          // 1806 ÷ 12 = 150.5 → 151
+          perMonthCents: 151,
+          // 12 × 151 = 1812
+          perYearCents: 1812,
+        },
+      ])
+      expect(result.totals).toStrictEqual({
+        perMonthCents: 151,
+        perYearCents: 1812,
+        countedCount: 1,
+        uncountedCount: 0,
+      })
+    })
+
+    it('a merchant keyed by description: one row, the bare d: key', () => {
+      const gym = (date: string, description: string) =>
+        tx({
+          date,
+          merchantId: null,
+          merchantName: 'Example Gym',
+          amountCents: -2000,
+          description,
+        })
+      const result = run([
+        gym('2026-07-01', 'EXAMPLE GYM 0042 CARD 1111'),
+        gym('2026-07-31', 'EXAMPLE GYM 0043 CARD 2222'),
+        gym('2026-08-30', 'Example Gym 9 card-3'),
+      ])
+
+      expect(result.subscriptions.map((r) => r.merchantKey)).toStrictEqual([
+        'd:example gym card',
+      ])
+      expect(keys(result.subscriptions[0])).toEqual(keys(ROW_KEYS))
+      expect(result.subscriptions).toStrictEqual([
+        {
+          merchantKey: 'd:example gym card',
+          scope: 'personal',
+          name: 'Example Gym',
+          chargeCount: 3,
+          lastChargedOn: '2026-08-30',
+          amountCents: 2000,
+          cadence: 'monthly',
+          detected: true,
+          marked: false,
+          status: 'active',
+          cancelledOn: null,
+          chargedAgainOn: null,
+          perMonthCents: 2000,
+          // 12 × 2000 = 24000
+          perYearCents: 24000,
+        },
+      ])
+    })
+
+    it('four merchants at once: four rows, four bare keys, in name order', () => {
+      const result = run([
+        ...charges(MONTHLY, {
+          merchantId: 'merchant_fixture_m',
+          merchantName: 'A monthly',
+        }),
+        ...charges(WEEKLY, {
+          merchantId: 'merchant_fixture_w',
+          merchantName: 'B weekly',
+          amountCents: -1250,
+        }),
+        ...charges(YEARLY, {
+          merchantId: 'merchant_fixture_y',
+          merchantName: 'C yearly',
+          amountCents: -1806,
+        }),
+        ...charges(MONTHLY, {
+          merchantId: null,
+          merchantName: 'D gym',
+          description: 'EXAMPLE GYM 0042 CARD 1111',
+          amountCents: -2000,
+        }),
+      ])
+
+      expect(
+        result.subscriptions.map((r) => [
+          r.merchantKey,
+          r.cadence,
+          r.chargeCount,
+          r.perMonthCents,
+        ]),
+      ).toStrictEqual([
+        ['m:merchant_fixture_m', 'monthly', 3, 1599],
+        ['m:merchant_fixture_w', 'weekly', 3, 5417],
+        ['m:merchant_fixture_y', 'yearly', 3, 151],
+        ['d:example gym card', 'monthly', 3, 2000],
+      ])
+      // 1599 + 5417 + 151 + 2000 = 9167; 12 × 9167 = 110004.
+      expect(result.totals).toStrictEqual({
+        perMonthCents: 9167,
+        perYearCents: 110004,
+        countedCount: 4,
+        uncountedCount: 0,
+      })
+    })
+  })
+
+  describe('a price change on regular gaps stays one row with the bare key', () => {
+    it('four monthly charges, three prices: one row at the latest price', () => {
+      // Gaps 30, 31, 30: all monthly. Prices 1299, 1299, 1499, 1799.
+      const result = run([
+        tx({ date: '2026-05-01', amountCents: -1299 }),
+        tx({ date: '2026-05-31', amountCents: -1299 }),
+        tx({ date: '2026-07-01', amountCents: -1499 }),
+        tx({ date: '2026-07-31', amountCents: -1799 }),
+      ])
+
+      expect(result.subscriptions.map((r) => r.merchantKey)).toStrictEqual([
+        'm:merchant_fixture_stream',
+      ])
+      expect(result.subscriptions).toStrictEqual([
+        {
+          merchantKey: 'm:merchant_fixture_stream',
+          scope: 'personal',
+          name: 'Example Stream',
+          chargeCount: 4,
+          lastChargedOn: '2026-07-31',
+          amountCents: 1799,
+          cadence: 'monthly',
+          detected: true,
+          marked: false,
+          status: 'active',
+          cancelledOn: null,
+          chargedAgainOn: null,
+          perMonthCents: 1799,
+          // 12 × 1799 = 21588
+          perYearCents: 21588,
+        },
+      ])
+      expect(result.totals).toStrictEqual({
+        perMonthCents: 1799,
+        perYearCents: 21588,
+        countedCount: 1,
+        uncountedCount: 0,
+      })
+    })
+
+    it('a price change on every charge is still one row', () => {
+      const result = run([
+        tx({ date: MONTHLY[0], amountCents: -999 }),
+        tx({ date: MONTHLY[1], amountCents: -1199 }),
+        tx({ date: MONTHLY[2], amountCents: -1399 }),
+      ])
+
+      expect(
+        result.subscriptions.map((r) => [
+          r.merchantKey,
+          r.chargeCount,
+          r.amountCents,
+          r.cadence,
+        ]),
+      ).toStrictEqual([['m:merchant_fixture_stream', 3, 1399, 'monthly']])
+    })
+  })
+
+  describe('#393 baseline: weekly visits at varying prices', () => {
+    it('eight visits a week or so apart are one weekly row with the bare key', () => {
+      const result = run(visits(VISIT_DATES))
+
+      expect(result.subscriptions.map((r) => r.merchantKey)).toStrictEqual([
+        'm:merchant_fixture_bistro',
+      ])
+      expect(keys(result.subscriptions[0])).toEqual(keys(ROW_KEYS))
+      expect(result.subscriptions).toStrictEqual([
+        {
+          merchantKey: 'm:merchant_fixture_bistro',
+          scope: 'personal',
+          name: 'Example Bistro',
+          chargeCount: 8,
+          lastChargedOn: '2026-07-20',
+          amountCents: 2750,
+          cadence: 'weekly',
+          detected: true,
+          marked: false,
+          status: 'active',
+          cancelledOn: null,
+          chargedAgainOn: null,
+          // 2750 × 52 = 143000; ÷ 12 = 11916.67 → 11917
+          perMonthCents: 11917,
+          // 12 × 11917 = 143004
+          perYearCents: 143004,
+        },
+      ])
+      expect(result.questions).toStrictEqual([])
+      expect(result.notSubscriptions).toStrictEqual([])
+      expect(result.totals).toStrictEqual({
+        perMonthCents: 11917,
+        perYearCents: 143004,
+        countedCount: 1,
+        uncountedCount: 0,
+      })
+    })
+
+    it('the same visits with one skipped week (a 16-day gap) are not detected', () => {
+      const result = run(visits(SKIPPED_DATES))
+
+      expect(result.subscriptions).toStrictEqual([])
+    })
+  })
+
+  describe('cancel paths keep the bare key and the status', () => {
+    it('cancelled on the last charge date: cancelled, bare key, out of the totals', () => {
+      const result = run(charges(MONTHLY), [
+        mark({ cancelledOn: '2026-08-30' }),
+      ])
+
+      expect(result.subscriptions).toStrictEqual([
+        {
+          merchantKey: 'm:merchant_fixture_stream',
+          scope: 'personal',
+          name: 'Example Stream',
+          chargeCount: 3,
+          lastChargedOn: '2026-08-30',
+          amountCents: 1599,
+          cadence: 'monthly',
+          detected: true,
+          marked: false,
+          status: 'cancelled',
+          cancelledOn: '2026-08-30',
+          chargedAgainOn: null,
+          perMonthCents: 1599,
+          perYearCents: 19188,
+        },
+      ])
+      expect(result.totals).toStrictEqual(NOTHING.totals)
+    })
+
+    it('a charge after the cancel date: active again on the bare key', () => {
+      // Gaps 30, 30, 30; cancelled 1 Aug, charged again on 30 Aug.
+      const result = run(charges([...MONTHLY, '2026-09-29']), [
+        mark({ cancelledOn: '2026-08-01' }),
+      ])
+
+      expect(result.subscriptions).toStrictEqual([
+        {
+          merchantKey: 'm:merchant_fixture_stream',
+          scope: 'personal',
+          name: 'Example Stream',
+          chargeCount: 4,
+          lastChargedOn: '2026-09-29',
+          amountCents: 1599,
+          cadence: 'monthly',
+          detected: true,
+          marked: false,
+          status: 'active',
+          cancelledOn: '2026-08-01',
+          chargedAgainOn: '2026-08-30',
+          perMonthCents: 1599,
+          perYearCents: 19188,
+        },
+      ])
+    })
+
+    it('a charge-again off the cadence is still detected from the charges up to the cancel, on the bare key', () => {
+      // Gaps 31 and 28 up to the cancel; then 92 days to the charge-again.
+      const result = run(
+        [
+          ...charges(['2026-01-05', '2026-02-05', '2026-03-05']),
+          tx({ date: '2026-06-05', amountCents: -1799 }),
+        ],
+        [mark({ cancelledOn: '2026-03-10' })],
+      )
+
+      expect(result.subscriptions).toStrictEqual([
+        {
+          merchantKey: 'm:merchant_fixture_stream',
+          scope: 'personal',
+          name: 'Example Stream',
+          chargeCount: 4,
+          lastChargedOn: '2026-06-05',
+          amountCents: 1799,
+          cadence: 'monthly',
+          detected: true,
+          marked: false,
+          status: 'active',
+          cancelledOn: '2026-03-10',
+          chargedAgainOn: '2026-06-05',
+          perMonthCents: 1799,
+          perYearCents: 21588,
+        },
+      ])
+    })
+
+    it('a not_subscription mark on the bare key moves the merchant to notSubscriptions under that key', () => {
+      const result = run(charges(MONTHLY), [
+        mark({
+          merchantKey: 'm:merchant_fixture_stream',
+          answer: 'not_subscription',
+        }),
+      ])
+
+      expect(result.subscriptions).toStrictEqual([])
+      expect(result.notSubscriptions).toStrictEqual([
+        {
+          merchantKey: 'm:merchant_fixture_stream',
+          scope: 'personal',
+          name: 'Example Stream',
+          chargeCount: 3,
+          lastChargedOn: '2026-08-30',
+          amountCents: 1599,
+        },
+      ])
+      expect(result.totals).toStrictEqual(NOTHING.totals)
+    })
+
+    it('a subscription mark on the bare key of a detected merchant is marked on that one row', () => {
+      const result = run(charges(MONTHLY), [
+        mark({
+          merchantKey: 'm:merchant_fixture_stream',
+          answer: 'subscription',
+        }),
+      ])
+
+      expect(
+        result.subscriptions.map((r) => [
+          r.merchantKey,
+          r.detected,
+          r.marked,
+          r.status,
+        ]),
+      ).toStrictEqual([['m:merchant_fixture_stream', true, true, 'active']])
+    })
+  })
+})
