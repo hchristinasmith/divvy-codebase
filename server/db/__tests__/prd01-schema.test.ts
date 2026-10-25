@@ -7,6 +7,7 @@ import knex, { Knex } from 'knex'
 import config from '../knexfile.js'
 import { migrateToJustBefore } from './migrateToJustBefore.ts'
 import { omit } from './omit.ts'
+import { columns, count, notNullColumns, sequence } from './schemaInfo.ts'
 import { TRANSACTION_COLUMNS } from './transactionColumns.ts'
 import { dollarsToCents } from '../../../shared/money.ts'
 import type { AkahuTransaction } from '../../../models/akahu.ts'
@@ -119,16 +120,6 @@ type Row = Record<string, unknown>
 
 let db: Knex
 
-async function columns(table: string): Promise<string[]> {
-  const info: { name: string }[] = await db.raw('PRAGMA table_info(??)', [table])
-  return info.map((c) => c.name)
-}
-
-async function sequence(table: string): Promise<number | undefined> {
-  const row = await db('sqlite_sequence').where({ name: table }).first('seq')
-  return row?.seq
-}
-
 async function applied(): Promise<string[]> {
   const [completed] = (await db.migrate.list()) as [{ name: string }[], unknown]
   return completed.map((m) => m.name)
@@ -212,8 +203,8 @@ beforeEach(async () => {
   await db('transactions').where({ id: discarded }).del()
 
   before = await db('transactions').orderBy('id')
-  beforeColumns = await columns('transactions')
-  beforeSequence = await sequence('transactions')
+  beforeColumns = await columns(db, 'transactions')
+  beforeSequence = await sequence(db, 'transactions')
 })
 
 afterEach(async () => {
@@ -344,13 +335,13 @@ describe('backfill of existing transactions (Done-when 1)', () => {
       row.akahu_id === R1 ? { ...row, category: 'Bakeries' } : row,
     )
     expect(kept).toStrictEqual(expected)
-    expect(await sequence('transactions')).toBe(beforeSequence)
+    expect(await sequence(db, 'transactions')).toBe(beforeSequence)
   })
 
   it('keeps the legacy category and money columns (Done-when 7)', async () => {
     await db.migrate.latest()
 
-    const names = await columns('transactions')
+    const names = await columns(db, 'transactions')
     for (const legacy of [...LEGACY_CATEGORY, 'amount_cents', 'balance_cents']) {
       expect(names).toContain(legacy)
     }
@@ -439,7 +430,7 @@ describe('accounts (Done-when 2)', () => {
   })
 
   it('has exactly the columns of the Account type', async () => {
-    expect((await columns('accounts')).sort()).toEqual(
+    expect((await columns(db, 'accounts')).sort()).toEqual(
       Object.keys(ACCOUNT_KEYS).sort(),
     )
   })
@@ -535,7 +526,7 @@ describe('sync_runs (Done-when 3)', () => {
   })
 
   it('has exactly the columns of the SyncRun type', async () => {
-    expect((await columns('sync_runs')).sort()).toEqual(
+    expect((await columns(db, 'sync_runs')).sort()).toEqual(
       Object.keys(SYNC_RUN_KEYS).sort(),
     )
   })
@@ -644,7 +635,7 @@ describe('category_corrections (Done-when 4)', () => {
   })
 
   it('has exactly the columns of the CategoryCorrection type', async () => {
-    expect((await columns('category_corrections')).sort()).toEqual(
+    expect((await columns(db, 'category_corrections')).sort()).toEqual(
       Object.keys(CORRECTION_KEYS).sort(),
     )
   })
@@ -773,10 +764,6 @@ describe('NOT NULL columns (#166)', () => {
     return rows[table]
   }
 
-  async function count(table: string): Promise<number> {
-    return Number((await db(table).count('* as n').first())?.n)
-  }
-
   it('lists every NOT NULL column the schema has, split by whether it has a default', async () => {
     const scope: [table: string, only?: string[]][] = [
       ['accounts'],
@@ -787,12 +774,8 @@ describe('NOT NULL columns (#166)', () => {
     const required: string[] = []
     const defaulted: string[] = []
     for (const [table, only] of scope) {
-      const info: { name: string; notnull: number; dflt_value: string | null }[] = await db.raw(
-        'PRAGMA table_info(??)',
-        [table],
-      )
-      for (const c of info) {
-        if (!c.notnull || c.name === 'id' || (only && !only.includes(c.name))) continue
+      for (const c of await notNullColumns(db, table)) {
+        if (only && !only.includes(c.name)) continue
         ;(c.dflt_value === null ? required : defaulted).push(`${table}.${c.name}`)
       }
     }
@@ -813,16 +796,16 @@ describe('NOT NULL columns (#166)', () => {
     async (table, column) => {
       const row = validRow(table)
       const refusal = new RegExp(`NOT NULL constraint failed: ${table}\\.${column}$`)
-      const stored = await count(table)
+      const stored = await count(db, table)
 
       await expect(db(table).insert({ ...row, [column]: null }), 'set to null').rejects.toThrow(
         refusal,
       )
       await expect(db(table).insert(omit(row, column)), 'left out').rejects.toThrow(refusal)
-      expect(await count(table)).toBe(stored)
+      expect(await count(db, table)).toBe(stored)
 
       await expect(db(table).insert(row), 'the valid row').resolves.toBeDefined()
-      expect(await count(table)).toBe(stored + 1)
+      expect(await count(db, table)).toBe(stored + 1)
     },
   )
 
@@ -853,7 +836,7 @@ describe('rollback (Done-when 8)', () => {
       corrected_at: AT,
       source: 'user',
     })
-    for (const table of NEW_TABLES) expect(await sequence(table)).toBe(1)
+    for (const table of NEW_TABLES) expect(await sequence(db, table)).toBe(1)
 
     while ((await applied()).includes(FIRST)) await db.migrate.down()
 
@@ -868,16 +851,16 @@ describe('rollback (Done-when 8)', () => {
       await db('sqlite_sequence').whereIn('name', NEW_TABLES).pluck('name'),
     ).toEqual([])
 
-    expect(await columns('transactions')).toEqual(beforeColumns)
+    expect(await columns(db, 'transactions')).toEqual(beforeColumns)
     // `up` repaired R1's missing category; `down` cannot tell a repaired
     // category from one that was always there, so it stays repaired.
     expect(await db('transactions').orderBy('id')).toStrictEqual(
       before.map((row) => (row.akahu_id === R1 ? { ...row, category: 'Bakeries' } : row)),
     )
-    expect(await sequence('transactions')).toBe(beforeSequence)
+    expect(await sequence(db, 'transactions')).toBe(beforeSequence)
 
     await db.migrate.latest()
-    expect((await columns('transactions')).sort()).toEqual([...TRANSACTION_COLUMNS].sort())
+    expect((await columns(db, 'transactions')).sort()).toEqual([...TRANSACTION_COLUMNS].sort())
   })
 
   it('deletes pending rows, so none is left looking settled', async () => {
