@@ -27,7 +27,8 @@ import type {
 // Amounts: `JSON.parse` would turn `19.99` into a binary double before any
 // code saw it, so `parseExactJson` quotes every number literal first and each
 // amount arrives as the decimal text Akahu sent. That text must look like
-// `-12.34` (at most two decimal places, no exponent) and is converted by
+// `-12.34` (JSON's number grammar, at most two decimal places, no exponent;
+// the same text sent quoted, `"-12.34"`, is accepted too) and is converted by
 // `parseDollars`, which is string arithmetic. A shape not seen before is
 // refused, never rounded.
 //
@@ -47,6 +48,7 @@ export type AkahuErrorCode =
   | 'http' // any other non-2xx status
   | 'network' // no response: fetch rejected, the body broke off, or timeout
   | 'bad_response' // a 2xx body this client cannot read
+  | 'invalid_range' // the caller passed an invalid or reversed date window
 
 export class AkahuError extends Error {
   readonly code: AkahuErrorCode
@@ -72,9 +74,11 @@ function badResponse(message: string, status: number | null = null) {
 // does not end it), or a JSON number literal. A number is matched by JSON's
 // own grammar, so `01` splits into `0` and `1` and the quoted result fails to
 // parse, as `JSON.parse` would. A number followed by `:` is left bare, so an
-// invalid numeric key stays invalid instead of becoming a quoted one.
+// invalid numeric key stays invalid instead of becoming a quoted one. A
+// string with no closing quote runs to the end of the text (still invalid),
+// so a malformed body is scanned once rather than once per quote in it.
 const JSON_TOKEN =
-  /"(?:[^"\\]|\\.)*"|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?(?!\s*:)/g
+  /"(?:[^"\\]|\\[\s\S]?)*(?:"|$)|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?(?!\s*:)/g
 
 /** JSON.parse with every number literal kept as its source text. */
 function parseExactJson(text: string): unknown {
@@ -146,7 +150,9 @@ function optionalText(
   return value
 }
 
-const AKAHU_AMOUNT = /^-?\d+(\.\d{1,2})?$/
+// JSON's number grammar, so a quoted amount cannot slip past it with a
+// leading zero (`"0019.99"`) that a bare number literal could not have.
+const AKAHU_AMOUNT = /^-?(?:0|[1-9]\d*)(?:\.\d{1,2})?$/
 
 /**
  * Akahu's decimal dollar text as integer cents (prd-01 Ruling 3).
@@ -432,7 +438,12 @@ async function akahuGet(
     } catch {
       throw networkError(path, controller.signal)
     }
-    if (!response.ok) throw statusError(response.status, path)
+    if (!response.ok) {
+      // The error body is never read, so release the connection. Not
+      // awaited, and a failed cancel cannot replace the status error.
+      response.body?.cancel().catch(() => undefined)
+      throw statusError(response.status, path)
+    }
     status = response.status
     try {
       text = await response.text()
@@ -512,6 +523,27 @@ async function listAll<T>(
   throw badResponse(`${path} did not end within ${MAX_PAGES} pages`)
 }
 
+/**
+ * The `start`/`end` query for a settled listing. An invalid date, or a start
+ * after the end, is refused before any request: the first would otherwise
+ * throw a native `RangeError`, the second would resolve as an empty list.
+ */
+function windowQuery(range: { start: Date; end: Date }): Record<string, string> {
+  const { start, end } = range
+  if (
+    Number.isNaN(start.getTime()) ||
+    Number.isNaN(end.getTime()) ||
+    start.getTime() > end.getTime()
+  ) {
+    throw new AkahuError(
+      'invalid_range',
+      'Akahu transaction window is invalid or ends before it starts',
+      null,
+    )
+  }
+  return { start: start.toISOString(), end: end.toISOString() }
+}
+
 // ---------------------------------------------------------------------------
 // The client.
 
@@ -540,13 +572,8 @@ export function createAkahuClient(options: AkahuClientOptions): AkahuClient {
     async listAccounts() {
       return listAll(context, '/v1/accounts', {}, mapAccount)
     },
-    async listTransactions({ start, end }) {
-      return listAll(
-        context,
-        '/v1/transactions',
-        { start: start.toISOString(), end: end.toISOString() },
-        mapSettled,
-      )
+    async listTransactions(range) {
+      return listAll(context, '/v1/transactions', windowQuery(range), mapSettled)
     },
     async listPendingTransactions() {
       return listAll(context, '/v1/transactions/pending', {}, mapPending)

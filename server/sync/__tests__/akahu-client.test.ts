@@ -186,6 +186,7 @@ describe('dollars to integer cents (prd-01 Ruling 3)', () => {
     ['5', 500],
     ['5.5', 550],
     ['123456789012.34', 12345678901234],
+    ['"19.99"', 1999],
   ])('converts %s to %d cents', async (amount, cents) => {
     const { client } = clientWith([
       page([
@@ -240,6 +241,25 @@ describe('dollars to integer cents (prd-01 Ruling 3)', () => {
       'Akahu returned a body that is not JSON on /v1/transactions',
     )
   })
+
+  it.each([
+    ['leading zeros', '"0019.99"'],
+    ['a single leading zero', '"01"'],
+  ])(
+    'refuses a quoted amount with %s, as a bare number could not have it',
+    async (_label, amount) => {
+      const { client } = clientWith([
+        page([settledItem('trans_fixture_quoted', amount)]),
+      ])
+
+      const error = await rejection(client.listTransactions(WINDOW))
+
+      expect(error.code).toBe('bad_response')
+      expect(error.message).toBe(
+        'transaction.amount is missing or not an amount',
+      )
+    },
+  )
 
   it('refuses an amount too large to be exact in cents', async () => {
     const { client } = clientWith([
@@ -306,6 +326,19 @@ describe('reading the body exactly', () => {
 
     expect(error.code).toBe('bad_response')
     expect(error.status).toBe(200)
+  })
+
+  it('rejects an unterminated string of escaped quotes in one pass', async () => {
+    // A scanner that restarts at every quote inside an unterminated string
+    // takes seconds on this 200 kB body; one pass takes about a millisecond.
+    const body = `{"success":true,"items":["${'\\"'.repeat(100_000)}`
+    const { client } = clientWith([body])
+
+    const started = performance.now()
+    const error = await rejection(client.listAccounts())
+
+    expect(error.code).toBe('bad_response')
+    expect(performance.now() - started).toBeLessThan(1_000)
   })
 
   it.each([
@@ -401,6 +434,7 @@ describe('accounts', () => {
       /"connection":\{[^}]*\},/,
       'account.connection is not an object',
     ],
+    ['balance', /,"balance":\{[^}]*\}/, 'account.balance is not an object'],
   ])('rejects an account missing %s', async (_label, cut, message) => {
     const item =
       '{"_id":"acc_fixture_bare","name":"Fixture Bare","type":"SAVINGS","status":"ACTIVE","connection":{"_id":"conn_fixture_bare","name":"Example Bank"},"balance":{"current":10}}'
@@ -1031,6 +1065,80 @@ describe('typed errors', () => {
   })
 
   it.each([
+    ['an invalid start', { start: new Date('nope'), end: WINDOW.end }],
+    ['an invalid end', { start: WINDOW.start, end: new Date(Number.NaN) }],
+    ['a start after the end', { start: WINDOW.end, end: WINDOW.start }],
+  ])(
+    'rejects %s as invalid_range without a request',
+    async (_label, range) => {
+      const { client, calls } = clientWith([singlePageTransactions()])
+
+      const error = await rejection(client.listTransactions(range))
+
+      expect(error.code).toBe('invalid_range')
+      expect(error.status).toBeNull()
+      expect(error.message).toBe(
+        'Akahu transaction window is invalid or ends before it starts',
+      )
+      expect(calls).toHaveLength(0)
+    },
+  )
+
+  it('accepts a window that starts and ends at the same instant', async () => {
+    const { client, calls } = clientWith([singlePageTransactions()])
+
+    await client.listTransactions({ start: WINDOW.end, end: WINDOW.end })
+
+    expect(calls).toHaveLength(1)
+  })
+
+  it('cancels the unread body of an error response', async () => {
+    const cancelled: unknown[] = []
+    const client = clientFetching(
+      async () =>
+        new Response(
+          new ReadableStream({
+            cancel(reason) {
+              cancelled.push(reason)
+            },
+          }),
+          { status: 503 },
+        ),
+    )
+
+    const error = await rejection(client.listAccounts())
+
+    expect(error.code).toBe('server')
+    expect(error.status).toBe(503)
+    expect(cancelled).toHaveLength(1)
+  })
+
+  it('keeps the status error when cancelling the body fails', async () => {
+    let cancelCalls = 0
+    const client = clientFetching(
+      async () =>
+        new Response(
+          new ReadableStream({
+            cancel() {
+              cancelCalls += 1
+              throw new Error(`cancel failed ${SENTINEL_TOKEN}`)
+            },
+          }),
+          { status: 401 },
+        ),
+    )
+
+    const error = await rejection(client.listAccounts())
+    // Let a cancel rejection surface; vitest fails the run if it is unhandled.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(cancelCalls).toBe(1)
+    expect(error.code).toBe('unauthorized')
+    expect(error.status).toBe(401)
+    expect(error.message).not.toContain(SENTINEL_TOKEN)
+  })
+
+  it.each([
     ['token', { token: '', appId: SENTINEL_APP_ID }],
     ['app id', { token: SENTINEL_TOKEN, appId: '' }],
     ['token (whitespace)', { token: '   ', appId: SENTINEL_APP_ID }],
@@ -1081,6 +1189,24 @@ describe('no secret reaches an error or a log line', () => {
       () =>
         clientFetching(async () => {
           throw new TypeError(`connect ${SENTINEL_TOKEN} ${SENTINEL_APP_ID}`)
+        }),
+    ],
+    [
+      'missing token while the app id is set',
+      () =>
+        createAkahuClient({
+          token: '',
+          appId: SENTINEL_APP_ID,
+          fetch: recordingFetch([]).fetch,
+        }),
+    ],
+    [
+      'missing app id while the token is set',
+      () =>
+        createAkahuClient({
+          token: SENTINEL_TOKEN,
+          appId: ' ',
+          fetch: recordingFetch([]).fetch,
         }),
     ],
     [
