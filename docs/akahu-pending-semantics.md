@@ -253,10 +253,12 @@ Sync's own types are in `server/sync/types.ts`, which has
 `PendingTransaction`. Since #155 they carry the merchant `logo`,
 `meta.card_suffix`, `meta.conversion`, the account `_authorisation` and
 `_credentials` ids, `attributes`, and the connection type and logo.
-`posted_date` and `merchant.nzbn` are read by the client, but no upsert
-stores them yet; #191 adds their columns. A conversion amount is in
-hundredths of its currency, JPY included (`types.ts`); #192 tracks currency
-minor units.
+`posted_date` and `merchant.nzbn` are read by the client and, since #191,
+stored in `transactions.posted_date` and `transactions.merchant_nzbn`. A
+settled row stores `posted_date`; a pending row leaves it NULL. `nzbn` is
+stored on settled and pending rows, NULL when Akahu sends none. A
+conversion amount is in hundredths of its currency, JPY included
+(`types.ts`); #192 tracks currency minor units.
 
 [guide]: https://developers.akahu.nz/docs/accessing-transactional-data
 [model]: https://developers.akahu.nz/docs/the-transaction-model
