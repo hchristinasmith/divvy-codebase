@@ -507,16 +507,20 @@ async function listAll<T>(
 }
 
 /**
- * The `start`/`end` query for a settled listing. An invalid date, or a start
- * after the end, is refused before any request: the first would otherwise
- * throw a native `RangeError`, the second would resolve as an empty list.
+ * The `start`/`end` query for a settled listing. A bound the caller leaves out
+ * is not sent at all, so with neither, Akahu answers with everything it allows
+ * for the app (docs/akahu-pending-semantics.md §3). A bound that is given must
+ * be a valid date, and a start after an end that is also given is refused.
+ * All of that is checked before any request: an invalid date would otherwise
+ * throw a native `RangeError`, and a reversed pair would resolve as an empty
+ * list.
  */
-function windowQuery(range: { start: Date; end: Date }): Record<string, string> {
+function windowQuery(range: { start?: Date; end?: Date }): Record<string, string> {
   const { start, end } = range
   if (
-    Number.isNaN(start.getTime()) ||
-    Number.isNaN(end.getTime()) ||
-    start.getTime() > end.getTime()
+    (start !== undefined && Number.isNaN(start.getTime())) ||
+    (end !== undefined && Number.isNaN(end.getTime())) ||
+    (start !== undefined && end !== undefined && start.getTime() > end.getTime())
   ) {
     throw new AkahuError(
       'invalid_range',
@@ -524,7 +528,10 @@ function windowQuery(range: { start: Date; end: Date }): Record<string, string> 
       null,
     )
   }
-  return { start: start.toISOString(), end: end.toISOString() }
+  const query: Record<string, string> = {}
+  if (start !== undefined) query.start = start.toISOString()
+  if (end !== undefined) query.end = end.toISOString()
+  return query
 }
 
 // ---------------------------------------------------------------------------
@@ -532,11 +539,14 @@ function windowQuery(range: { start: Date; end: Date }): Record<string, string> 
 
 export interface AkahuClient {
   listAccounts(): Promise<AkahuAccount[]>
-  /** Settled transactions dated within `start`..`end` (prd-01 Ruling 2). */
-  listTransactions(range: {
-    start: Date
-    end: Date
-  }): Promise<SettledTransaction[]>
+  /**
+   * Settled transactions dated within the window (prd-01 Ruling 2). With
+   * neither bound, Akahu returns everything it allows for the app
+   * (docs/akahu-pending-semantics.md §3); that is the form the first sync
+   * uses. An `end` alone is sent as given, because only the no-bounds form is
+   * documented. Every page of one listing sends the same bounds.
+   */
+  listTransactions(range: { start?: Date; end?: Date }): Promise<SettledTransaction[]>
   listPendingTransactions(): Promise<PendingTransaction[]>
 }
 
