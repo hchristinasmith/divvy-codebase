@@ -1,6 +1,8 @@
 # Divvy: one Node process serving the API and the built client, with SQLite
-# on a volume (D1, D2), reachable only over Tailscale (D4). Built for Fly.io;
-# see fly.toml and docs/deploy.md.
+# on a volume (D1, D2), published only on the tailnet (D4). The loopback bind
+# and start.sh's refusal of any other HOST keep Fly's network out; the tailnet
+# policy limits which peers get in. Built for Fly.io; see fly.toml and
+# docs/deploy.md.
 
 # ---- tools: fetch Tailscale and Litestream, pinned by version and sha256 ----
 # amd64 only, matching Fly's shared-cpu-1x. Changing architecture means

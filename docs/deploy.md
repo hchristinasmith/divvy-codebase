@@ -10,7 +10,7 @@ The operator runbook for the first deploy (prd-01 w4) and every one after it. Ev
 - The server binds `127.0.0.1:3005`, and `start.sh` refuses to boot with `HOST` set to anything else. That bind is what keeps `fly proxy` and the rest of Fly's private network from reaching the app. `tailscale serve`, in the same machine, proxies the tailnet to it.
 - In userspace networking mode, `tailscaled` forwards a tailnet connection on *any* port to the same port on loopback. So the bind does nothing against tailnet peers: the tailnet policy is what decides which devices reach the app and on which port. Without the section 2 policy, every device on the tailnet reaches `http://divvy:3005` (plain HTTP, no TLS) as well as 443 (checked in section 8).
 
-The image's CMD is `scripts/start.sh`. It refuses to start without `TS_AUTHKEY`, or with `HOST` set to anything but `127.0.0.1`, starts `tailscaled` in userspace networking mode with none of the app's environment (only `PATH`), joins the tailnet, publishes the app with `tailscale serve`, checks that the serve config proxies to the app with Funnel off, and only then runs `npm start` (migrations, then the server). If any tailnet step fails, the app never starts.
+The image's CMD is `scripts/start.sh`. It refuses to start without `TS_AUTHKEY`, or with `HOST` set to anything but `127.0.0.1`, starts `tailscaled` in userspace networking mode with none of the app's environment (only `PATH`), joins the tailnet, publishes the app with `tailscale serve`, checks that the serve config proxies to the app with Funnel off, and only then runs `npm start` (migrations, then the server), under Litestream if `/app/litestream.yml` exists. If any tailnet step fails, the app never starts.
 
 ## 2. Prerequisites
 
@@ -138,7 +138,10 @@ If a stale node named `divvy` already exists on the tailnet (from an earlier att
 - **`start.sh: ERROR: TS_AUTHKEY is not set`.** The secret is missing. The machine exits 1, and Fly retries it a limited number of times before giving up. Set the secret (section 4); setting it restarts the machine.
 - **`tailscale up failed or timed out`.** The key is wrong, revoked or expired, or the tag is not in `tagOwners`. Generate a new key (section 3) and set it again.
 - **`tailscale serve failed or timed out`.** Usually HTTPS certificates or MagicDNS are off for the tailnet (section 2).
-- **`tailscaled socket ... did not appear`.** `tailscaled` failed to start. Look at the lines before it in `fly logs`.
+- **`tailscaled socket ... did not appear`.** `tailscaled` was still running but never created its socket within the wait (30 seconds). Look at the lines before it in `fly logs`.
+- **`tailscaled exited before its socket appeared`.** `tailscaled` crashed at startup. Look at the lines before it in `fly logs` for its own error.
+- **`tailscale serve reset failed`.** `start.sh` clears the serve config on every boot, and that command failed or ran past its 30 second limit, so `tailscaled` was not answering. The app does not start. Read the lines before it in `fly logs`, then `fly machine restart -a divvy-strawb`.
+- **`tailscale serve status failed`.** The command that reads the serve config back failed, so `start.sh` cannot confirm the proxy or that Funnel is off, and it does not start the app. Read the lines before it in `fly logs`, then `fly machine restart -a divvy-strawb`.
 - **`serve status does not show a proxy` or `Funnel is on`.** The serve config is not what `start.sh` set. It resets the config on every boot, so this means something else changed it; check `serve status` (section 6).
 
 ## 11. Bumping Tailscale or Litestream
