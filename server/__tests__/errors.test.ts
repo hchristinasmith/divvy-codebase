@@ -1,3 +1,4 @@
+import { inspect } from 'node:util'
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -12,6 +13,9 @@ import {
 // routes that fail on purpose, so a route error can be provoked without
 // editing any router file.
 const SECRET = 'secret detail /Users/someone/divvy'
+// Carried in an error field, as body-parser carries the raw request text in
+// `err.body`: it must reach neither the response nor the log.
+const FIELD_SECRET = 'raw request text in a field'
 
 vi.mock('../routes/index.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../routes/index.ts')>()
@@ -21,7 +25,7 @@ vi.mock('../routes/index.ts', async (importOriginal) => {
     throw new Error(SECRET)
   })
   router.get('/__test/next-error', (req, res, next) => {
-    next(Object.assign(new Error(SECRET), { body: SECRET, status: 418 }))
+    next(Object.assign(new Error(SECRET), { body: FIELD_SECRET, status: 418 }))
   })
   router.use(actual.default)
   return { default: router }
@@ -58,6 +62,7 @@ const STACK_MARKERS = [
 function expectNoLeak(text: string): void {
   for (const marker of STACK_MARKERS) expect(text).not.toContain(marker)
   expect(text).not.toContain(SECRET)
+  expect(text).not.toContain(FIELD_SECRET)
 }
 
 const MALFORMED = '{"not json'
@@ -105,6 +110,8 @@ describe('a route error on /api is a fixed JSON 500', () => {
       expect(Object.keys(res.body)).toEqual(['error'])
       expectNoLeak(res.text)
       expect(errorLog).toHaveBeenCalledTimes(1)
+      // The stack is logged, never the error object and its fields.
+      expect(inspect(errorLog.mock.calls)).not.toContain(FIELD_SECRET)
     },
   )
 })
