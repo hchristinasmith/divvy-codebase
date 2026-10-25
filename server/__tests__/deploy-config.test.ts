@@ -73,6 +73,13 @@ describe('fly.toml', () => {
     expect(shape.get('[mounts]')?.get('destination')).toBe('"/data"')
   })
 
+  it('stops with SIGTERM, waits 30s for it, and builds from the Dockerfile', () => {
+    expect(shape.get('')?.get('kill_signal')).toBe('"SIGTERM"')
+    expect(shape.get('')?.get('kill_timeout')).toBe('"30s"')
+    expect(keys('[build]')).toEqual(['dockerfile'])
+    expect(shape.get('[build]')?.get('dockerfile')).toBe('"Dockerfile"')
+  })
+
   it('declares no table that could publish or multiply the machine', () => {
     expect(keys('')).toEqual(
       sorted(['app', 'primary_region', 'kill_signal', 'kill_timeout']),
@@ -122,6 +129,30 @@ describe('Dockerfile', () => {
     expect(instructions).not.toContain('/latest/')
   })
 
+  it('downloads each tool at its pinned version', () => {
+    const urls = instructions.match(/https:\/\/[^"\s]+/g) ?? []
+
+    expect(urls).toHaveLength(2)
+    const tailscale = urls.filter((url) => url.startsWith('https://pkgs.tailscale.com/'))
+    const litestream = urls.filter((url) =>
+      url.startsWith('https://github.com/benbjohnson/litestream/'),
+    )
+    expect(tailscale).toHaveLength(1)
+    expect(litestream).toHaveLength(1)
+    expect(tailscale[0]).toContain('${TAILSCALE_VERSION}')
+    expect(litestream[0]).toContain('${LITESTREAM_VERSION}')
+  })
+
+  it('ships start.sh into the runtime stage, executable, and runs it as root', () => {
+    expect(runtimeStage).toMatch(
+      /^COPY --from=build \/app\/scripts\/start\.sh \.\/scripts\/start\.sh$/m,
+    )
+    expect(runtimeStage).toMatch(/^RUN chmod 755 \/app\/scripts\/start\.sh$/m)
+    // tailscaled needs root, and Fly mounts the volume root-owned (see the
+    // Dockerfile's comment), so no stage may switch user.
+    expect(instructions).not.toMatch(/^\s*USER\b/im)
+  })
+
   it('copies the three binaries into the runtime stage and installs CA roots there', () => {
     expect(runtimeStage).toMatch(
       /^COPY --from=tools \/tools\/tailscale \/tools\/tailscaled \/tools\/litestream \/usr\/local\/bin\/$/m,
@@ -166,13 +197,94 @@ describe('scripts/start.sh and docs/deploy.md, as files', () => {
     },
   )
 
+  // Inside a fenced sh block, so prose that merely names the command (`fly
+  // ips list` must print nothing) cannot stand in for it.
   it.each([
     'fly secrets set TS_AUTHKEY=',
     'fly deploy --ha=false --no-public-ips',
     'fly ips list',
     'fly machines list',
-  ])('docs/deploy.md gives the operator `%s`', (command) => {
-    expect(deployMd).toContain(command)
+  ])('docs/deploy.md gives the operator `%s` to run', (command) => {
+    const shBlocks = [...deployMd.matchAll(/^ *```sh\n([\s\S]*?)^ *```$/gm)].map(
+      (block) => block[1],
+    )
+    expect(shBlocks.length).toBeGreaterThan(0)
+    expect(shBlocks.some((block) => block.includes(command))).toBe(true)
+  })
+})
+
+// The runbook's sections, by their `## N.` headings. Called while the
+// describe blocks are collected, so a missing heading throws, failing the file.
+function deploySection(n: number): string {
+  const start = deployMd.indexOf(`\n## ${n}. `)
+  if (start === -1) throw new Error(`docs/deploy.md has no "## ${n}." section`)
+  const end = deployMd.indexOf(`\n## ${n + 1}. `)
+  return deployMd.slice(start, end === -1 ? undefined : end)
+}
+
+describe('docs/deploy.md, the tailnet policy', () => {
+  // The policy the tailnet runs (set by Hannah). The loopback bind does not
+  // limit tailnet peers, so this block is the only thing that keeps :3005 and
+  // every other port on tag:divvy closed to them.
+  const block = deploySection(2).match(/^ *```json\n([\s\S]*?)^ *```$/m)
+
+  it('is plain JSON in section 2', () => {
+    expect(block).not.toBeNull()
+    expect(() => JSON.parse(block?.[1] ?? '')).not.toThrow()
+  })
+
+  it('lets your devices reach tag:divvy on 443 and each other, and nothing else', () => {
+    const policy: unknown = JSON.parse(block?.[1] ?? 'null')
+
+    expect(policy).toStrictEqual({
+      tagOwners: { 'tag:divvy': ['autogroup:admin'] },
+      acls: [
+        {
+          action: 'accept',
+          src: ['autogroup:member'],
+          dst: ['tag:divvy:443'],
+        },
+        {
+          action: 'accept',
+          src: ['autogroup:member'],
+          dst: ['autogroup:self:*'],
+        },
+      ],
+    })
+  })
+
+  it('has no rule with tag:divvy as a source', () => {
+    const policy = JSON.parse(block?.[1] ?? 'null') as {
+      acls?: { src?: string[] }[]
+    }
+
+    expect(policy.acls?.length ?? 0).toBeGreaterThan(0)
+    for (const rule of policy.acls ?? []) {
+      expect(rule.src ?? []).not.toContain('tag:divvy')
+    }
+  })
+})
+
+describe('docs/deploy.md, troubleshooting', () => {
+  // A troubleshooting entry the operator matches against `fly logs` is useless
+  // if start.sh never prints it. Each bold lead quotes the start of a message
+  // start.sh dies with; `...` in the doc and a $variable in start.sh both
+  // stand for the part that varies.
+  const VARIES = '...'
+  const dieMessages = [...startSh.matchAll(/\bdie "([^"]*)"/g)].map((m) =>
+    m[1].replace(/\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/g, VARIES),
+  )
+  const quoted = [...deploySection(10).matchAll(/^- \*\*(.*?)\*\*/gm)]
+    .flatMap((lead) => [...lead[1].matchAll(/`([^`]+)`/g)].map((m) => m[1]))
+    .map((text) => text.replace(/^start\.sh: ERROR: /, ''))
+
+  it('finds messages on both sides', () => {
+    expect(dieMessages.length).toBeGreaterThan(0)
+    expect(quoted.length).toBeGreaterThan(0)
+  })
+
+  it.each(quoted)('`%s` begins a message start.sh dies with', (text) => {
+    expect(dieMessages.some((message) => message.startsWith(text))).toBe(true)
   })
 })
 
@@ -215,11 +327,17 @@ if (!mode('no-socket') && socket) {
 setTimeout(() => process.exit(0), 30000)
 `
 
+// Each subcommand exits with its own FAKE_*_EXIT (default 0). tailscale is
+// not run under \`env -i\`, so the environment reaches it.
 const FAKE_TAILSCALE = `#!/bin/sh
 echo "tailscale $*" >> "$FAKE_DIR/calls.log"
 case " $* " in
   *" up "*) exit "\${FAKE_UP_EXIT:-0}" ;;
-  *" serve status "*) cat "$FAKE_DIR/serve-status" ;;
+  *" serve reset "*) exit "\${FAKE_RESET_EXIT:-0}" ;;
+  *" serve --bg "*) exit "\${FAKE_SERVE_EXIT:-0}" ;;
+  *" serve status "*)
+    cat "$FAKE_DIR/serve-status"
+    exit "\${FAKE_STATUS_EXIT:-0}" ;;
 esac
 exit 0
 `
@@ -388,7 +506,16 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
     expect(up).toContain('--reset')
     expect(up).toMatch(/ --timeout=\d+s( |$)/)
 
-    expect(run.stderr).toContain('WARNING: backups are OFF')
+    // The lines the runbook (section 6) tells the operator to look for in
+    // `fly logs`, in its order.
+    const lines = run.stderr.split('\n')
+    const serving = 'start.sh: serving http://127.0.0.1:3005 on the tailnet as divvy'
+    expect(deployMd).toContain(serving)
+    expect(lines).toContain(serving)
+    const warning = lines.findIndex((line) =>
+      line.startsWith('start.sh: WARNING: backups are OFF'),
+    )
+    expect(warning).toBeGreaterThan(lines.indexOf(serving))
     expect(ran(run.calls, 'litestream')).toBe(false)
     // exec'd, not a child: npm runs in start.sh's own process, so Fly's
     // SIGTERM to that process reaches it.
@@ -421,14 +548,20 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
     expect(run.stderr).not.toContain('WARNING')
   })
 
-  it('bounds tailscale serve with a timeout', () => {
+  it('bounds tailscale serve reset and serve --bg with a timeout', () => {
     const run = runStart()
+    const socket = join(tmp, 's', 'ts.sock')
+    const bounded = run.calls.filter((line) => line.startsWith('timeout '))
 
-    expect(
-      run.calls.some(
-        (line) => line.startsWith('timeout ') && line.includes('serve --bg'),
+    expect(bounded).toHaveLength(2)
+    expect(bounded[0]).toMatch(
+      new RegExp(`^timeout \\d+ tailscale --socket=${socket} serve reset$`),
+    )
+    expect(bounded[1]).toMatch(
+      new RegExp(
+        `^timeout \\d+ tailscale --socket=${socket} serve --bg --https=443 http://127\\.0\\.0\\.1:3005$`,
       ),
-    ).toBe(true)
+    )
   })
 
   it.each([
@@ -487,19 +620,43 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
       'up',
       'did not appear',
     ],
+    [
+      'tailscale serve reset fails',
+      { env: { FAKE_RESET_EXIT: '1' } },
+      'serve --bg',
+      'tailscale serve reset failed',
+    ],
+    [
+      'tailscale serve --bg times out',
+      { env: { FAKE_SERVE_EXIT: '124' } },
+      'serve status',
+      'tailscale serve failed or timed out',
+    ],
+    [
+      'tailscale serve status fails',
+      { env: { FAKE_STATUS_EXIT: '1' } },
+      'npm start',
+      'tailscale serve status failed',
+    ],
   ])('fails closed when %s', (_label, options, neverReached, reason) => {
     const run = runStart(options)
 
     expect(run.status).not.toBe(0)
-    expect(run.stderr).toContain(reason)
+    // One ERROR line, and it is this step's: a later guard failing instead
+    // (say, the proxy check on an empty status) would print a different one.
+    const errors = run.stderr
+      .split('\n')
+      .filter((line) => line.startsWith('start.sh: ERROR: '))
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toContain(reason)
     expect(ran(run.calls, 'tailscaled ')).toBe(true)
-    const reached = run.calls.some(
-      (line) =>
-        line.startsWith('tailscale ') &&
-        `${line} `.includes(` ${neverReached} `),
+    // Any call, \`timeout\` included, that names the next step's words.
+    const reached = run.calls.some((line) =>
+      ` ${line} `.includes(` ${neverReached} `),
     )
     expect(reached).toBe(false)
     expect(ran(run.calls, 'npm')).toBe(false)
+    expect(run.stderr).not.toContain('start.sh: serving ')
   })
 
   it('never hands the auth key to tailscaled, npm or litestream, and never prints it', () => {

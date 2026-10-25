@@ -17,24 +17,31 @@ The image's CMD is `scripts/start.sh`. It refuses to start without `TS_AUTHKEY`,
 - The Fly app exists: `fly apps list` shows `divvy-strawb`.
 - The volume exists in `syd`: `fly volumes list -a divvy-strawb` shows `divvy_data`.
 - On the tailnet admin console's DNS page, **MagicDNS** is on and **HTTPS certificates** are enabled. `tailscale serve --https=443` needs both.
-- The tailnet policy file (admin console, Access controls) contains this, with the placeholders filled in. It is mandatory, not a suggestion: the loopback bind does not limit tailnet peers (section 1).
+- The tailnet policy file (admin console, Access controls) has exactly these `tagOwners` and `acls`; this is the policy the tailnet runs. It is mandatory, not a suggestion: the loopback bind does not limit tailnet peers (section 1).
 
   ```json
   {
     "tagOwners": {
-      "tag:divvy": ["<your login>"]
+      "tag:divvy": ["autogroup:admin"]
     },
     "acls": [
       {
         "action": "accept",
-        "src": ["<your login, or your own devices>"],
+        "src": ["autogroup:member"],
         "dst": ["tag:divvy:443"]
+      },
+      {
+        "action": "accept",
+        "src": ["autogroup:member"],
+        "dst": ["autogroup:self:*"]
       }
     ]
   }
   ```
 
-  - This rule **replaces** the default `{"action": "accept", "src": ["*"], "dst": ["*:*"]}` rule; delete that one. Left in, it opens every port on `tag:divvy` (`3005` included) to every device. If the file uses `grants` instead of `acls`, an allow-all grant (`"src": ["*"]`, `"dst": ["*"]`) does the same and must go too. Deleting it also ends open access between your other devices; if you rely on that, add a rule with your own login on both sides (`"dst": ["<your login>:*"]`), which does not reach `tag:divvy` because a tagged node belongs to no user.
+  - `autogroup:admin` (the tailnet's admins: you) may apply `tag:divvy`, which the tagged key in section 3 needs. `autogroup:member` is the devices of the tailnet's users (you); a tagged node is not one of them.
+  - These two rules **replace** the default `{"action": "accept", "src": ["*"], "dst": ["*:*"]}` rule; delete that one. Left in, it opens every port on `tag:divvy` (`3005` included) to every device. If the file uses `grants` instead of `acls`, an allow-all grant (`"src": ["*"]`, `"dst": ["*"]`) does the same and must go too.
+  - The `autogroup:self:*` rule keeps your own devices talking to each other, which deleting the default rule would otherwise end. It does not reach `tag:divvy`, because a tagged node belongs to no user.
   - There must be no rule with `tag:divvy` in its `src`, so the node cannot dial out to the rest of the tailnet.
   - There must be no `nodeAttrs` entry granting `funnel` to `tag:divvy`. (`start.sh` also refuses to start the app if `serve status` shows Funnel on.)
 
@@ -62,7 +69,7 @@ The key is a standing credential, held only as a Fly secret. Never paste it into
 fly secrets set TS_AUTHKEY=<key from admin console> -a divvy-strawb
 ```
 
-With no machines yet, this only stages the secret for the next deploy. Keep the key out of your shell history: start the line with a space (zsh `HIST_IGNORE_SPACE`), or clear the line from history afterwards.
+This has been done once: `TS_AUTHKEY` is staged on `divvy-strawb`. Run it again only with a new key (section 3). With no machines yet, it only stages the secret for the next deploy. Keep the key out of your shell history: start the line with a space (zsh `HIST_IGNORE_SPACE`), or clear the line from history afterwards.
 
 ## 5. Deploy
 
