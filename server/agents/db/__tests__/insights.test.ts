@@ -113,12 +113,16 @@ describe('insertInsight', () => {
   })
 
   // The insights agent stamps every draft with the ISO week it covers
-  // (buildDrafts in server/agents/insights/prompt.ts), so that label must store.
-  it("stores the insights agent's ISO week label unchanged", async () => {
-    const id = await inserted(insight({ period: '2026-W43' }))
+  // (buildDrafts in server/agents/insights/prompt.ts), so that label must
+  // store; a month label must too, for a draft that covers a month.
+  it.each([
+    ['an ISO week', '2026-W43'],
+    ['a month', '2026-10'],
+  ])('stores %s period label unchanged', async (_, period) => {
+    const id = await inserted(insight({ period }))
 
-    expect((await getInsight(id))?.period).toBe('2026-W43')
-    expect((await storedRows())[0].period).toBe('2026-W43')
+    expect((await getInsight(id))?.period).toBe(period)
+    expect((await storedRows())[0].period).toBe(period)
   })
 
   const HOSTILE: [name: string, input: unknown, reason: string, marker: string][] = [
