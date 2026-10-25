@@ -198,12 +198,14 @@ export async function upsertAccounts(
 // Settled transactions.
 
 /**
- * The columns a settled and a pending row share for the merchant's logo,
- * the card and a foreign-currency conversion (issue #155). A field Akahu
- * does not send is NULL, so a field Akahu stops sending is cleared.
+ * The columns a settled and a pending row share for the merchant's logo
+ * and NZ Business Number, the card and a foreign-currency conversion
+ * (issues #155, #191). A field Akahu does not send is NULL, so a field
+ * Akahu stops sending is cleared.
  */
 interface DetailFields {
   merchant_logo: string | null
+  merchant_nzbn: string | null
   card_suffix: string | null
   conversion_amount_cents: number | null
   conversion_currency: string | null
@@ -217,6 +219,7 @@ function detailFields(
   const rate = conversion?.rate ?? null
   return {
     merchant_logo: tx.merchant?.logo ?? null,
+    merchant_nzbn: tx.merchant?.nzbn ?? null,
     card_suffix: tx.meta?.card_suffix ?? null,
     conversion_amount_cents: conversion?.amount_cents ?? null,
     conversion_currency: conversion?.currency ?? null,
@@ -233,6 +236,9 @@ interface SettledAkahuFields extends DetailFields {
   created_at: string | null
   updated_at: string | null
   date: string
+  // When the bank posted it (#191): Akahu's full ISO text, as sent, like
+  // `date`.
+  posted_date: string | null
   description: string
   amount_cents: number
   balance_cents: number | null
@@ -259,6 +265,7 @@ function settledFields(tx: SettledTransaction): SettledAkahuFields {
     created_at: tx.created_at,
     updated_at: tx.updated_at,
     date: tx.date,
+    posted_date: tx.posted_date,
     description: tx.description,
     amount_cents: tx.amount_cents,
     balance_cents: tx.balance_cents,
@@ -351,7 +358,10 @@ export async function upsertSettled(
 // ---------------------------------------------------------------------------
 // The pending mirror.
 
-/** A pending row. Akahu gives it no id, hash, balance or category. */
+/**
+ * A pending row. Akahu gives it no id, hash, balance, category or posted
+ * date.
+ */
 interface PendingInsert extends DetailFields {
   akahu_id: null
   status: 'pending'
@@ -361,6 +371,7 @@ interface PendingInsert extends DetailFields {
   created_at: null
   updated_at: string | null
   date: string
+  posted_date: null
   description: string
   amount_cents: number
   balance_cents: null
@@ -397,6 +408,7 @@ function pendingRow(tx: PendingTransaction): PendingInsert {
     created_at: null,
     updated_at: tx.updated_at,
     date: tx.date,
+    posted_date: null,
     description: tx.description,
     amount_cents: tx.amount_cents,
     balance_cents: null,
