@@ -440,19 +440,28 @@ describe('the settled window (Ruling 2, amended by Ruling 10)', () => {
     return settledWindows(akahu.calls)[0]
   }
 
-  it('reaches back 730 days on the first run', async () => {
-    expect(await windowAfter([])).toEqual({
-      start: at(-730 * DAY_MS).toISOString(),
-      end: NOW.toISOString(),
-    })
+  it('asks for everything Akahu allows on the first run, with no start or end', async () => {
+    expect(await windowAfter([])).toEqual({ start: null, end: null })
   })
 
-  it('reaches back 730 days when every earlier run failed', async () => {
+  it('asks for everything Akahu allows when every earlier run failed', async () => {
     expect(
       await windowAfter([
         { started_at: at(-DAY_MS).toISOString(), outcome: 'failed' },
       ]),
-    ).toEqual({ start: at(-730 * DAY_MS).toISOString(), end: NOW.toISOString() })
+    ).toEqual({ start: null, end: null })
+  })
+
+  it('sends neither bound on every page of the first run', async () => {
+    // The default transactions route paginates (the fixture's cursor, then an
+    // empty last page), so this checks each request, not only the first.
+    const akahu = fakeAkahu()
+    const result = await runSync({ client: akahu.client, db, now: fixed(NOW) })
+    expect(result.outcome).toBe('success')
+
+    const windows = settledWindows(akahu.calls)
+    expect(windows.length).toBeGreaterThan(1)
+    expect(windows).toEqual(windows.map(() => ({ start: null, end: null })))
   })
 
   it('starts 30 days before the last success started', async () => {
@@ -483,10 +492,10 @@ describe('the settled window (Ruling 2, amended by Ruling 10)', () => {
     ).toEqual({ start: at(-75 * DAY_MS).toISOString(), end: NOW.toISOString() })
   })
 
-  it('reaches back 730 days when the last success has an unreadable start', async () => {
+  it('asks for everything Akahu allows when the last success has an unreadable start', async () => {
     expect(
       await windowAfter([{ started_at: 'not-a-timestamp', outcome: 'success' }]),
-    ).toEqual({ start: at(-730 * DAY_MS).toISOString(), end: NOW.toISOString() })
+    ).toEqual({ start: null, end: null })
   })
 
   it('follows the most recent success, not the oldest or the first inserted', async () => {

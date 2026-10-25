@@ -6,6 +6,16 @@ import { formatCents } from '../../../shared/money.ts'
 import { Button } from '@/components/ui/button'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { updateTransactionCategory } from '../../apis/apiClient.ts'
+import { categories } from '../../../data/cats.js'
+
+// Each category name sits under exactly one group in data/cats.js, so the
+// group is a function of the name. It is derived here, never read from
+// Akahu's group or the legacy category_group_name (akahu-pending-semantics §4).
+const groupByCategory = new Map<string, string>(
+  Object.entries(categories).flatMap(([group, names]) =>
+    names.map((name): [string, string] => [name, group]),
+  ),
+)
 
 interface Props {
   transaction: Transaction
@@ -14,15 +24,17 @@ interface Props {
 export default function TxnItems({ transaction }: Props) {
   const [formData, setFormData] = useState({
     description: transaction.description,
-    category: transaction.category_group_name,
+    category: transaction.category ?? '',
   })
+  const group = transaction.category
+    ? groupByCategory.get(transaction.category)
+    : undefined
   const [editing, setEditing] = useState(false)
 
   const queryClient = useQueryClient()
 
-  // TODO(#9): updateTransactionCategory does not match the server route yet
-  // (client PATCHes { categoryId }; server has PUT { category_group_name }),
-  // and this passes a category name where the contract says id. Not rendered.
+  // Sends the effective category name, the only thing PATCH
+  // /api/v1/transactions/:id accepts. TransactionsPage does not mount this row.
   const editTxnMutation = useMutation({
     mutationFn: (category: string) =>
       updateTransactionCategory(transaction.id, category),
@@ -60,6 +72,16 @@ export default function TxnItems({ transaction }: Props) {
       </TableCell>
       <TableCell className="text-right font-semibold">
         {formatCents(transaction.amount_cents)}
+      </TableCell>
+      <TableCell>
+        {transaction.category && (
+          <>
+            <div>{transaction.category}</div>
+            {group && (
+              <div className="text-xs text-muted-foreground">{group}</div>
+            )}
+          </>
+        )}
       </TableCell>
       <TableCell>
         {editing ? (

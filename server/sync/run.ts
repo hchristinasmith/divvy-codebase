@@ -42,9 +42,6 @@ const DAY_MS = 24 * 60 * 60_000
 /** Ruling 2: each run re-reads this much history. */
 const OVERLAP_MS = 30 * DAY_MS
 
-/** A personal app's history limit, used by the first run (Ruling 2). */
-const FIRST_RUN_LOOKBACK_MS = 730 * DAY_MS
-
 const ABANDONED_MESSAGE =
   'sync_abandoned: run did not finish within the stale timeout'
 
@@ -77,21 +74,20 @@ type Claim =
 
 /**
  * The settled window to fetch (Ruling 2, amended by Ruling 10). With no
- * successful run yet, as far back as a personal app may read. After one,
- * from 30 days before the last success started, so an outage longer than
- * the overlap is still covered; never later than 30 days before now. A
- * start time that does not parse counts as no success, like the stale
+ * successful run yet, no window at all: neither bound is sent, so Akahu
+ * returns everything it allows for this app (prd-01 Ruling 2; issue #139).
+ * After one, from 30 days before the last success started, so an outage
+ * longer than the overlap is still covered; never later than 30 days before
+ * now. A start time that does not parse counts as no success, like the stale
  * check, so one bad row cannot fail every later run.
  */
 function windowFor(
   lastSuccessStartedAt: string | null,
   now: Date,
-): { start: Date; end: Date } {
+): { start?: Date; end?: Date } {
   const lastSuccess =
     lastSuccessStartedAt === null ? NaN : Date.parse(lastSuccessStartedAt)
-  if (Number.isNaN(lastSuccess)) {
-    return { start: new Date(now.getTime() - FIRST_RUN_LOOKBACK_MS), end: now }
-  }
+  if (Number.isNaN(lastSuccess)) return {}
   const start = Math.min(
     now.getTime() - OVERLAP_MS,
     lastSuccess - OVERLAP_MS,

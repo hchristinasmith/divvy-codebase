@@ -999,6 +999,100 @@ describe('pagination (prd-01 Ruling 2)', () => {
   })
 })
 
+describe('an open window (issue #139)', () => {
+  // Pages linked by cursor, so every page after the first is checked.
+  function threePages(): Reply[] {
+    return [
+      page([settledItem('trans_fixture_p1')], 'cursor_fixture_a'),
+      page([settledItem('trans_fixture_p2')], 'cursor_fixture_b'),
+      page([settledItem('trans_fixture_p3')]),
+    ]
+  }
+
+  /** The query one request carried: its parameter names, bounds and cursor. */
+  function queryOf(call: RecordedCall) {
+    const params = call.url.searchParams
+    return {
+      keys: [...params.keys()].sort(),
+      start: params.get('start'),
+      end: params.get('end'),
+      cursor: params.get('cursor'),
+    }
+  }
+
+  it('sends neither start nor end on every page when neither is given', async () => {
+    const { client, calls } = clientWith(threePages())
+
+    const settled = await client.listTransactions({})
+
+    expect(settled.map((t) => t.id)).toEqual([
+      'trans_fixture_p1',
+      'trans_fixture_p2',
+      'trans_fixture_p3',
+    ])
+    expect(calls.map(queryOf)).toEqual([
+      { keys: [], start: null, end: null, cursor: null },
+      {
+        keys: ['cursor'],
+        start: null,
+        end: null,
+        cursor: 'cursor_fixture_a',
+      },
+      {
+        keys: ['cursor'],
+        start: null,
+        end: null,
+        cursor: 'cursor_fixture_b',
+      },
+    ])
+  })
+
+  it('sends end and no start on every page when only end is given', async () => {
+    const { client, calls } = clientWith(threePages())
+
+    await client.listTransactions({ end: WINDOW.end })
+
+    const end = WINDOW.end.toISOString()
+    expect(calls.map(queryOf)).toEqual([
+      { keys: ['end'], start: null, end, cursor: null },
+      { keys: ['cursor', 'end'], start: null, end, cursor: 'cursor_fixture_a' },
+      { keys: ['cursor', 'end'], start: null, end, cursor: 'cursor_fixture_b' },
+    ])
+  })
+
+  it('sends start and no end on every page when only start is given', async () => {
+    const { client, calls } = clientWith(threePages())
+
+    await client.listTransactions({ start: WINDOW.start })
+
+    const start = WINDOW.start.toISOString()
+    expect(calls.map(queryOf)).toEqual([
+      { keys: ['start'], start, end: null, cursor: null },
+      { keys: ['cursor', 'start'], start, end: null, cursor: 'cursor_fixture_a' },
+      { keys: ['cursor', 'start'], start, end: null, cursor: 'cursor_fixture_b' },
+    ])
+  })
+
+  it.each([
+    ['an invalid lone start', { start: new Date('nope') }],
+    ['an invalid lone end', { end: new Date(Number.NaN) }],
+  ])(
+    'refuses %s as invalid_range before any request',
+    async (_label, range) => {
+      const { client, calls } = clientWith([singlePageTransactions()])
+
+      const error = await rejection(client.listTransactions(range))
+
+      expect(error.code).toBe('invalid_range')
+      expect(error.status).toBeNull()
+      expect(error.message).toBe(
+        'Akahu transaction window is invalid or ends before it starts',
+      )
+      expect(calls).toHaveLength(0)
+    },
+  )
+})
+
 describe('requests', () => {
   const EVERY_CALL: [string, Reply, (c: AkahuClient) => Promise<unknown>][] = [
     ['/v1/accounts', fixture('akahu-accounts.json'), (c) => c.listAccounts()],
