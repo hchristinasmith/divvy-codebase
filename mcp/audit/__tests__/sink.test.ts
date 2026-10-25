@@ -481,7 +481,7 @@ describe('a record that breaks the contract is refused before the file is touche
     ['tool', { tool: '' }],
     ['tool', { tool: `${BAD}${'x'.repeat(64)}` }],
     ['tool', { tool: `${BAD}\nforged` }],
-    ['tool', { tool: `${BAD}‮` }],
+    ['tool', { tool: `${BAD}\u202E` }],
     ['tool', { tool: 42 }],
   ])('%s: %j', async (field, overrides) => {
     const dir = scratch()

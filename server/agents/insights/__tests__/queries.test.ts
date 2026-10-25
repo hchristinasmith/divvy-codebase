@@ -1235,7 +1235,7 @@ describe('cleanLabel', () => {
     // NFKC first: full-width digits are digits.
     ['４１１１ １１１１', '####'],
     // A slash or an invisible character between groups is counted through.
-    ['4111​1111/1111-1111', '####'],
+    ['4111\u200B1111/1111-1111', '####'],
     // Masked before the 40 code point cut, so no prefix of the number shows.
     ['a'.repeat(35) + ' 4111111111111111', 'a'.repeat(35) + ' ####'],
     // #304: a combining mark on every digit is counted through, and masked
