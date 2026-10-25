@@ -412,10 +412,29 @@ describe('only this site may write (as POST /api/v1/sync/run)', () => {
     ['DELETE /1', () => deleteBill(1)],
     ['POST /1/payments', () => pay(1)],
   ]
-  const REFUSED: [string, Record<string, string>][] = [
-    ['Sec-Fetch-Site cross-site', { 'Sec-Fetch-Site': 'cross-site' }],
-    ['a foreign Origin', { Origin: 'http://evil.example' }],
-    ['Origin null', { Origin: 'null' }],
+  // Headers are built per test: the served port is known only once the
+  // server listens. supertest sends `Host: 127.0.0.1:<port>`.
+  type Headers = (port: number) => Record<string, string>
+  const port = (): number => {
+    if (served === undefined) throw new Error('the server is not listening')
+    return served.address.port
+  }
+
+  const REFUSED: [string, Headers][] = [
+    ['Sec-Fetch-Site cross-site', () => ({ 'Sec-Fetch-Site': 'cross-site' })],
+    [
+      'Sec-Fetch-Site same-site with this host’s own Origin',
+      (p) => ({
+        'Sec-Fetch-Site': 'same-site',
+        Origin: `http://127.0.0.1:${p}`,
+      }),
+    ],
+    ['a foreign Origin', () => ({ Origin: 'http://evil.example' })],
+    ['Origin null', () => ({ Origin: 'null' })],
+    [
+      'an Origin that differs from Host by port only',
+      (p) => ({ Origin: `http://127.0.0.1:${p + 1}` }),
+    ],
   ]
 
   describe.each(WRITES)('%s', (_write, send) => {
@@ -425,7 +444,7 @@ describe('only this site may write (as POST /api/v1/sync/run)', () => {
       )
       const before = await snapshotTables()
 
-      const res = await send().set(headers)
+      const res = await send().set(headers(port()))
 
       expect(res.status).toBe(403)
       expect(res.body).toStrictEqual({ error: 'Forbidden' })
@@ -433,21 +452,64 @@ describe('only this site may write (as POST /api/v1/sync/run)', () => {
     })
   })
 
+  // The site check runs before the id and the body are read: a cross-site
+  // write with a bad id or body is 403, not 400. Each request is first sent
+  // without the header to show it really is a 400 on its own.
   it.each([
-    ['Sec-Fetch-Site same-origin', { 'Sec-Fetch-Site': 'same-origin' }],
-    ['Sec-Fetch-Site none', { 'Sec-Fetch-Site': 'none' }],
-    ['no headers (curl)', {}],
-  ])('%s passes every write', async (_why, headers) => {
-    const made = await postBill(VALID).set(headers)
-    expect(made.status).toBe(201)
-    const id = made.body.id
-    expect((await patchBill(id, { name: 'Renamed' }).set(headers)).status).toBe(
-      200,
-    )
-    expect((await pay(id).set(headers)).status).toBe(201)
-    const spare = await postBill(VALID).set(headers)
-    expect((await deleteBill(spare.body.id).set(headers)).status).toBe(204)
-  })
+    ['PATCH /abc', () => patchBill('abc', { name: 'Renamed' })],
+    ['DELETE /abc', () => deleteBill('abc')],
+    ['POST /abc/payments', () => pay('abc')],
+    ['POST / with an invalid body', () => postBill({})],
+    ['PATCH /1 with an invalid body', () => patchBill(1, { amountCents: 'x' })],
+    [
+      'POST /1/payments with a body',
+      () => api.post('/api/v1/bills/1/payments').send({ paid: true }),
+    ],
+  ])(
+    'refuses a cross-site %s with 403 before reading the id or body',
+    async (_write, send) => {
+      await connection('bills').insert(
+        bill(1, 'personal', 'Invented gym', 'weekly', 1500, '2026-10-21'),
+      )
+      const before = await snapshotTables()
+
+      expect((await send()).status).toBe(400)
+
+      const res = await send().set('Sec-Fetch-Site', 'cross-site')
+
+      expect(res.status).toBe(403)
+      expect(res.body).toStrictEqual({ error: 'Forbidden' })
+      expect(await snapshotTables()).toStrictEqual(before)
+    },
+  )
+
+  it.each([
+    ['Sec-Fetch-Site same-origin', () => ({ 'Sec-Fetch-Site': 'same-origin' })],
+    ['Sec-Fetch-Site none', () => ({ 'Sec-Fetch-Site': 'none' })],
+    ['no headers (curl)', () => ({})],
+    [
+      'no Sec-Fetch-Site and this host’s own Origin',
+      (p) => ({ Origin: `http://127.0.0.1:${p}` }),
+    ],
+    [
+      'no Sec-Fetch-Site, a mixed-case Host and its lowercase Origin',
+      (p) => ({ Host: `LocalHost:${p}`, Origin: `http://localhost:${p}` }),
+    ],
+  ] satisfies [string, Headers][])(
+    '%s passes every write',
+    async (_why, build) => {
+      const headers = build(port())
+      const made = await postBill(VALID).set(headers)
+      expect(made.status).toBe(201)
+      const id = made.body.id
+      expect(
+        (await patchBill(id, { name: 'Renamed' }).set(headers)).status,
+      ).toBe(200)
+      expect((await pay(id).set(headers)).status).toBe(201)
+      const spare = await postBill(VALID).set(headers)
+      expect((await deleteBill(spare.body.id).set(headers)).status).toBe(204)
+    },
+  )
 })
 
 // ---------------------------------------------------------------------------
