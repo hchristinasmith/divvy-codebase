@@ -10,8 +10,10 @@ primary_region = "syd"
 
 # Fly signals start.sh's process, which by then is Litestream (#24), or the
 # node server when backups are off. Litestream passes SIGTERM on to node, its
-# direct child with no npm in between (npm does not pass it on, #255), waits
-# for it to exit, then does a final sync; the timeout gives it time for that.
+# direct child with no npm or shell in between (#255: under npm, node got the
+# signal only if npm's script shell had exec'd it, as dash does and bash does
+# not), waits for it to exit, then does a final sync; the timeout gives it
+# time for that.
 kill_signal = "SIGTERM"
 kill_timeout = "30s"
 

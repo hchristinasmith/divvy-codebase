@@ -99,7 +99,8 @@ log "serving $serve_target on the tailnet as $ts_hostname"
 #    app when backups are off, so Fly's SIGTERM lands on this process. In the
 #    app each step execs (env, then sh, then node), so the server is the
 #    process Litestream passes the signal to, or the one Fly signals
-#    directly; npm would not pass SIGTERM on to node (#255). `env -u` keeps
+#    directly. Under npm, node got SIGTERM only if npm's script shell had
+#    exec'd it, as dash does and bash does not (#255). `env -u` keeps
 #    the backup credential, which can delete every backup, out of the app in
 #    both branches (#254); Litestream copies the LITESTREAM_ keys into the AWS_
 #    names before it starts the app, so both sets go. The -exec string is
@@ -113,4 +114,5 @@ if [ -f "$litestream_config" ]; then
 fi
 echo "start.sh: WARNING: backups are OFF: no $litestream_config, so nothing replicates the database off the volume (D2, #24)" >&2
 # $scrub unquoted on purpose: one word per flag and per name.
+# shellcheck disable=SC2086
 exec env $scrub sh -c "$app"

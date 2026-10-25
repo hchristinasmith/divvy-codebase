@@ -190,6 +190,16 @@ describe('scripts/start.sh and docs/deploy.md, as files', () => {
     expect(code).not.toMatch(/set\s+-[a-z]*x/)
   })
 
+  // The run tests below see a missing `exec` only where sh is bash: dash
+  // execs the last command of a -c string by itself, so on a dash host they
+  // stay green. Pinned as text so either host catches it (#255).
+  it('ends the app command by exec\'ing node, so no shell stays between it and SIGTERM', () => {
+    const app = startSh.match(/^app='([^']*)'$/m)
+
+    expect(app).not.toBeNull()
+    expect(app?.[1]).toMatch(/ && exec node dist\/server\.js$/)
+  })
+
   it.each(['fly.toml', 'Dockerfile', 'scripts/start.sh', 'docs/deploy.md'])(
     '%s holds nothing shaped like a Tailscale key',
     (rel) => {
