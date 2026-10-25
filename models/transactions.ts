@@ -65,6 +65,39 @@ export interface Transaction {
   akahu_category_group_name?: string | null
 }
 
+// A `transactions` row as GET and PATCH /api/v1/transactions answer it (#212).
+// An explicit column list, so a column added to the table stays out of these
+// responses until it is named here. Legacy category_*, Akahu's akahu_category_*,
+// conversion_*, source, posted_date and merchant_nzbn are deliberately absent.
+export interface TransactionRow {
+  id: number
+  akahu_id: string | null
+  account_id: string | null
+  user_id: string | null
+  connection_id: string | null
+  created_at: string | null
+  updated_at: string | null
+  date: string | null
+  description: string | null
+  amount_cents: number | null
+  balance_cents: number | null
+  type: string | null
+  hash: string | null
+  particulars: string | null
+  code: string | null
+  reference: string | null
+  other_account: string | null
+  logo: string | null
+  card_suffix: string | null
+  merchant_id: string | null
+  merchant_name: string | null
+  merchant_website: string | null
+  merchant_logo: string | null
+  category: string | null
+  category_source: CategorySource
+  status: TransactionStatus
+}
+
 // Body of PATCH /api/v1/transactions/:id, the one category-edit route.
 // Sets the effective category with category_source 'user'; Akahu's
 // category_* fields are never written by it.
@@ -73,5 +106,5 @@ export interface UpdateTransactionCategory {
 }
 
 export interface UpdateTransactionCategoryResponse {
-  transaction: Transaction
+  transaction: TransactionRow
 }

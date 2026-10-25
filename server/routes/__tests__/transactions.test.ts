@@ -3,9 +3,40 @@ import server from '../../server.ts'
 import connection from '../../db/connection.ts'
 import { serveOnLoopback, type LoopbackApi } from '../../test-utils/app.ts'
 import fixture from '../../db/fixtures/transactions.json'
-import { TRANSACTION_COLUMNS } from '../../db/__tests__/transactionColumns.ts'
 import { dollarsToCents } from '../../../shared/money.ts'
 import { categories } from '../../../data/cats.js'
+
+// The key set GET and PATCH /api/v1/transactions answer (#212), written out
+// here rather than imported from production, so a column added to the
+// table or to the list in server/db/transactions.ts fails a test.
+const ROW_KEYS = [
+  'id',
+  'akahu_id',
+  'account_id',
+  'user_id',
+  'connection_id',
+  'created_at',
+  'updated_at',
+  'date',
+  'description',
+  'amount_cents',
+  'balance_cents',
+  'type',
+  'hash',
+  'particulars',
+  'code',
+  'reference',
+  'other_account',
+  'logo',
+  'card_suffix',
+  'merchant_id',
+  'merchant_name',
+  'merchant_website',
+  'merchant_logo',
+  'category',
+  'category_source',
+  'status',
+] as const
 
 // Route tests run against the app's own connection, which is the in-memory
 // SQLite `test` config under vitest (NODE_ENV=test). Each test starts from a
@@ -71,10 +102,10 @@ describe('GET /api/v1/transactions', () => {
     expect(row.amount_cents).toBe(dollarsToCents(source.amount))
     expect(row.balance_cents).toBe(dollarsToCents(source.balance))
     expect(Number.isInteger(row.amount_cents)).toBe(true)
-    expect(Object.keys(row).sort()).toEqual([...TRANSACTION_COLUMNS].sort())
+    expect(Object.keys(row).sort()).toEqual([...ROW_KEYS].sort())
   })
 
-  it('today: returns a row whose source is xero, with every stored column', async () => {
+  it('leaves a xero-sourced row out of the answer and keeps every Akahu row', async () => {
     await connection('transactions')
       .where({ akahu_id: 'trans_fixture_002' })
       .update({ source: 'xero' })
@@ -82,24 +113,34 @@ describe('GET /api/v1/transactions', () => {
     const res = await api.get('/api/v1/transactions')
 
     expect(res.status).toBe(200)
-    const row = res.body.txns.find(
-      (t: { akahu_id: string }) => t.akahu_id === 'trans_fixture_002',
+    expect(res.body.txns.map((t: { akahu_id: string }) => t.akahu_id).sort()).toEqual(
+      fixture.items
+        .map((t) => t._id)
+        .filter((id) => id !== 'trans_fixture_002')
+        .sort(),
     )
-    expect(row).toMatchObject({ source: 'xero' })
-    expect(Object.keys(row).sort()).toEqual([...TRANSACTION_COLUMNS].sort())
   })
 
-  it('today: answers a repeated ?description= with 200', async () => {
-    const res = await api.get(
-      '/api/v1/transactions?description=Sample&description=Superette',
-    )
+  it.each([
+    ['a repeated', '/api/v1/transactions?description=Sample&description=Superette'],
+    ['a nested', '/api/v1/transactions?description[a]=Sample'],
+  ])(
+    'refuses %s ?description= with 400 before any read',
+    async (_, url) => {
+      // Renamed away: a read that got past the check would answer 500, not 400.
+      await connection.schema.renameTable('transactions', 'transactions_aside')
+      try {
+        const res = await api.get(url)
 
-    expect(res.status).toBe(200)
-    expect(Array.isArray(res.body.txns)).toBe(true)
-    // Express turns the repeated key into an array, which the LIKE filter
-    // stringifies to 'Sample,Superette'; no description contains that comma.
-    expect(res.body.txns).toHaveLength(0)
-  })
+        expect(res.status).toBe(400)
+        expect(res.body).toStrictEqual({
+          error: 'description must be a single string',
+        })
+      } finally {
+        await connection.schema.renameTable('transactions_aside', 'transactions')
+      }
+    },
+  )
 
   it("answers 500 with a fixed text and logs the error's class, never the search string", async () => {
     const SEARCH = 'Sample Superette'
@@ -153,9 +194,7 @@ describe('PATCH /api/v1/transactions/:id', () => {
       category: 'Convenience stores',
       category_source: 'user',
     })
-    expect(Object.keys(res.body.transaction).sort()).toEqual(
-      [...TRANSACTION_COLUMNS].sort(),
-    )
+    expect(Object.keys(res.body.transaction).sort()).toEqual([...ROW_KEYS].sort())
 
     const after = await rowFor('trans_fixture_002')
     expect(after.category).toBe('Convenience stores')
@@ -244,7 +283,7 @@ describe('PATCH /api/v1/transactions/:id', () => {
     },
   )
 
-  it('answers with exactly the row that is now stored', async () => {
+  it('answers with exactly the row that is now stored, projected to the list', async () => {
     const { id } = await rowFor('trans_fixture_002')
 
     const res = await api
@@ -253,10 +292,14 @@ describe('PATCH /api/v1/transactions/:id', () => {
       .expect(200)
 
     expect(Object.keys(res.body).sort()).toEqual(['transaction'])
-    expect(res.body.transaction).toEqual(await rowFor('trans_fixture_002'))
+    const stored = await rowFor('trans_fixture_002')
+    expect(Object.keys(res.body.transaction).sort()).toEqual([...ROW_KEYS].sort())
+    expect(res.body.transaction).toEqual(
+      Object.fromEntries(ROW_KEYS.map((key) => [key, stored[key]])),
+    )
   })
 
-  it('today: answers a xero-sourced row with every stored column', async () => {
+  it('answers a xero-sourced row with exactly the explicit column list', async () => {
     await connection('transactions')
       .where({ akahu_id: 'trans_fixture_002' })
       .update({ source: 'xero' })
@@ -267,9 +310,29 @@ describe('PATCH /api/v1/transactions/:id', () => {
       .send({ category: 'Bakeries' })
 
     expect(res.status).toBe(200)
-    expect(Object.keys(res.body.transaction).sort()).toEqual(
-      [...TRANSACTION_COLUMNS].sort(),
-    )
+    expect(Object.keys(res.body.transaction).sort()).toEqual([...ROW_KEYS].sort())
+  })
+
+  it('never answers a column outside the list, in GET or PATCH, even when the row holds one', async () => {
+    // Set on the row, not only in the schema: a select() without a column
+    // list would answer every one of these.
+    await connection('transactions').where({ akahu_id: 'trans_fixture_002' }).update({
+      merchant_nzbn: 'invented-nzbn',
+      posted_date: '2026-10-01',
+      akahu_category_name: 'Invented category',
+      source: 'akahu',
+    })
+    const { id } = await rowFor('trans_fixture_002')
+
+    const listed = await api.get('/api/v1/transactions').query({ description: 'Sample Superette' })
+    const shown = listed.body.txns.find((t: { id: number }) => t.id === id)
+    expect(Object.keys(shown).sort()).toEqual([...ROW_KEYS].sort())
+
+    const patched = await api
+      .patch(`/api/v1/transactions/${id}`)
+      .send({ category: 'Bakeries' })
+      .expect(200)
+    expect(Object.keys(patched.body.transaction).sort()).toEqual([...ROW_KEYS].sort())
   })
 
   it('overwrites an earlier PATCH on the same row', async () => {

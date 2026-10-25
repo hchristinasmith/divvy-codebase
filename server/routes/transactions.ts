@@ -16,11 +16,15 @@ function errorClass(err: unknown): string {
 // GET /api/v1/transactions?description=
 // Each row shows its effective category: a half of a drawing is Drawings,
 // set by `rule`, unless Hannah categorised it by hand (prd-02 Ruling 15).
-// Nothing is written; the row's keys are the stored columns, as before.
+// Nothing is written. Rows carry the explicit column list (#212), Akahu rows
+// only. A repeated or nested ?description= is refused before anything is read.
 router.get('/', async (req, res) => {
   const { description } = req.query
+  if (description !== undefined && typeof description !== 'string') {
+    return res.status(400).json({ error: 'description must be a single string' })
+  }
   try {
-    const rows = await db.searchTxns(description as string)
+    const rows = await db.searchTxns(description)
     const txns = applyDrawings(rows, await loadDrawingIds())
     res.json({ txns })
   } catch (error) {
@@ -62,7 +66,11 @@ router.patch('/:id', async (req, res) => {
           'Transaction is still pending; its category can be changed once it settles',
       })
     }
-    const body: UpdateTransactionCategoryResponse = { transaction }
+    const row = await db.getTransactionRow(id)
+    if (row === undefined) {
+      return res.status(404).json({ error: 'Transaction not found' })
+    }
+    const body: UpdateTransactionCategoryResponse = { transaction: row }
     res.json(body)
   } catch (error) {
     console.error('Error setting transaction category:', errorClass(error))

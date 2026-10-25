@@ -1,9 +1,45 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import connection from '../connection.ts'
 import { assertInMemory } from '../../test-utils/app.ts'
-import { getTransactionCategory, setUserCategory } from '../transactions.ts'
+import {
+  getTransactionCategory,
+  getTransactionRow,
+  searchTxns,
+  setUserCategory,
+} from '../transactions.ts'
 import { TRANSACTION_COLUMNS } from './transactionColumns.ts'
 import type { Transaction } from '../../../models/transactions.ts'
+
+// The row's key set (#212), written out here rather than imported from the
+// production column list, so a change to that list fails these tests.
+const ROW_KEYS = [
+  'id',
+  'akahu_id',
+  'account_id',
+  'user_id',
+  'connection_id',
+  'created_at',
+  'updated_at',
+  'date',
+  'description',
+  'amount_cents',
+  'balance_cents',
+  'type',
+  'hash',
+  'particulars',
+  'code',
+  'reference',
+  'other_account',
+  'logo',
+  'card_suffix',
+  'merchant_id',
+  'merchant_name',
+  'merchant_website',
+  'merchant_logo',
+  'category',
+  'category_source',
+  'status',
+] as const
 
 // Direct tests of the db layer, with the connection passed explicitly. The
 // connection is the in-memory `test` config under vitest (NODE_ENV=test);
@@ -481,5 +517,49 @@ describe('getTransactionCategory', () => {
 
   it('an unknown id gives undefined', async () => {
     expect(await getTransactionCategory(999_999, connection)).toBeUndefined()
+  })
+})
+
+describe('getTransactionRow', () => {
+  it('a known id gives exactly the listed keys, with the stored values', async () => {
+    const stored = await rowFor('trans_fixture_002')
+
+    const row = await getTransactionRow(stored.id, connection)
+
+    expect(Object.keys(row ?? {}).sort()).toEqual([...ROW_KEYS].sort())
+    expect(row).toEqual(Object.fromEntries(ROW_KEYS.map((key) => [key, stored[key]])))
+  })
+
+  it('an unknown id gives undefined', async () => {
+    expect(await getTransactionRow(999_999, connection)).toBeUndefined()
+  })
+
+  it('works on a xero-sourced row, which PATCH also answers', async () => {
+    const { id } = await rowFor('trans_fixture_002')
+    await connection('transactions').where({ id }).update({ source: 'xero' })
+
+    const row = await getTransactionRow(id, connection)
+
+    expect(row?.akahu_id).toBe('trans_fixture_002')
+    expect(Object.keys(row ?? {}).sort()).toEqual([...ROW_KEYS].sort())
+  })
+})
+
+describe('searchTxns', () => {
+  it('leaves a xero-sourced row out and pins the key set of every row it returns', async () => {
+    const { id } = await rowFor('trans_fixture_002')
+    await connection('transactions').where({ id }).update({ source: 'xero' })
+    const akahuIds = (await allRows())
+      .filter((r) => r.source === 'akahu')
+      .map((r) => r.id)
+    expect(akahuIds.length).toBeGreaterThan(0)
+
+    const rows = await searchTxns(undefined, connection)
+
+    expect(rows.map((r) => r.id).sort((a, b) => a - b)).toEqual(akahuIds)
+    expect(rows.map((r) => r.akahu_id)).not.toContain('trans_fixture_002')
+    for (const row of rows) {
+      expect(Object.keys(row).sort()).toEqual([...ROW_KEYS].sort())
+    }
   })
 })
