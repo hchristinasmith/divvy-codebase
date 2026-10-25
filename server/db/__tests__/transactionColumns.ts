@@ -34,4 +34,10 @@ export const TRANSACTION_COLUMNS = [
   'conversion_amount_cents',
   'category',
   'category_source',
+  'status',
+  'source',
+  'akahu_category_id',
+  'akahu_category_name',
+  'akahu_category_group_id',
+  'akahu_category_group_name',
 ]
