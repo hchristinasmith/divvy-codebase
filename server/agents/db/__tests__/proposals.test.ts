@@ -201,6 +201,7 @@ describe('insertProposal', () => {
     // The blank check runs before the cap: a blank value over the cap is blank.
     ['reason 2,001 spaces', { reason: ' '.repeat(2_001) }, /^reason must not be blank$/],
     ['reason 2,001 U+200B', { reason: '\u200b'.repeat(2_001) }, /^reason must not be blank$/],
+    ['reason 2,001 U+0001', { reason: '\u0001'.repeat(2_001) }, /^reason must not be blank$/],
     ['reason 42', { reason: 42 as unknown as string }, /^reason must not be blank$/],
     [
       'origin claude',
@@ -417,6 +418,7 @@ describe('insertProposal', () => {
   it.each([
     ['visible text and U+3164', 'Moved\u3164 twice'],
     ['one visible character among U+200B', '\u200bx\u200b'],
+    ['visible text after a leading U+0085', '\u0085Moved twice'],
   ])('stores a reason of %s byte-for-byte unchanged', async (_, reason) => {
     const txId = await transaction('a')
 
@@ -426,21 +428,24 @@ describe('insertProposal', () => {
   })
 })
 
-// Today's behaviour, pinned so #342 can flip it: a control character is not
-// invisible to the blank check, so a reason made of one is stored exactly as
-// given. #342 turns these into refusals, and the expectations here are what
-// change.
-describe("insertProposal stores today's control-character reasons unchanged (pins #342)", () => {
+// A control character is invisible to the blank check (#342): a reason made
+// only of control characters, whitespace and tabs is refused, and nothing is
+// written. Nothing is stripped, so a reason with visible text is stored as
+// given (see the byte-for-byte rows above).
+describe('insertProposal refuses a reason made only of control characters (#342)', () => {
   it.each([
     ['U+0001', '\u0001'],
     ['U+0085', '\u0085'],
     ['U+0090', '\u0090'],
-  ])('stores a reason made only of %s unchanged', async (_, reason) => {
+    ['DEL', '\u007f'],
+    ['U+0001, space, U+0085 and tab', '\u0001 \u0085\t'],
+  ])('refuses a reason made only of %s, and writes nothing', async (_, reason) => {
     const txId = await transaction('a')
 
-    const result = await insertProposal(proposal(txId, { reason }), NOW)
-    expect(result).toStrictEqual({ inserted: true, id: expect.any(Number) })
-    expect((await rows())[0].reason).toBe(reason)
+    await expect(insertProposal(proposal(txId, { reason }), NOW)).rejects.toThrow(
+      /^reason must not be blank$/,
+    )
+    expect(await rows()).toEqual([])
   })
 })
 

@@ -13,8 +13,9 @@
 // ignored, and a read row has no `mermaid` key.
 //
 // A refused input throws an error naming the field, never its value, and a
-// title or body_md past its length cap is a refused input, and so is a
-// title, body_md or period with nothing visible in it. A refused write throws
+// title, body_md or period past its length cap is a refused input, and so is
+// a title, body_md or period with nothing visible in it: control characters
+// count as invisible too. A refused write throws
 // SQLite's words without the row (`scrubbed`, in ./scrubbed.ts).
 import {
   INSIGHT_KINDS,
@@ -34,6 +35,7 @@ const SCOPES: Record<InsightScope, true> = { personal: true, strawb: true }
 // Length caps, counted in code points, not UTF-16 units: a non-BMP character
 // is one code point and two units.
 const TITLE_MAX_LENGTH = 200
+const PERIOD_MAX_LENGTH = 32
 const BODY_MD_MAX_LENGTH = 20_000
 
 export interface NewInsight {
@@ -52,10 +54,11 @@ export type InsertInsightResult =
 
 type InsightRow = Omit<Insight, 'mermaid'>
 
-// Blank means nothing visible: whitespace and default-ignorable characters
-// are removed before the test, and the value is stored exactly as given.
+// Blank means nothing visible: whitespace, default-ignorable characters and
+// control characters are removed before the test, and the value is stored
+// exactly as given.
 function notBlank(value: unknown, field: string): void {
-  if (typeof value !== 'string' || value.replace(/[\s\p{DI}]/gu, '') === '') {
+  if (typeof value !== 'string' || value.replace(/[\s\p{DI}\p{Cc}]/gu, '') === '') {
     throw new Error(`${field} must not be blank`)
   }
 }
@@ -86,6 +89,7 @@ export async function insertInsight(
   notBlank(insight.body_md, 'body_md')
   atMostLength(insight.body_md, 'body_md', BODY_MD_MAX_LENGTH)
   notBlank(insight.period, 'period')
+  atMostLength(insight.period, 'period', PERIOD_MAX_LENGTH)
 
   let chartSpecJson: string | null = null
   if (insight.chart_spec !== null && insight.chart_spec !== undefined) {

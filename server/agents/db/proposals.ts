@@ -17,7 +17,7 @@
 // bound values and all, in its error message, and `scrubbed` rethrows it as
 // SQLite's own words alone. A reason past its length cap is a refused input
 // too, as a title or body_md is in insights.ts, and so is a reason with
-// nothing visible in it.
+// nothing visible in it (control characters count as invisible too).
 //
 // current_category is capped at the column's width, in code points, and kept
 // raw, never trimmed or normalised: the accept route's stale check compares
@@ -51,10 +51,10 @@ const REASON_MAX_LENGTH = 2_000
 const CURRENT_CATEGORY_MAX_LENGTH = 255
 
 // A private copy of insights.ts's notBlank, not an export: a lift is a
-// separate issue. Blank means nothing visible, so whitespace and default-
-// ignorable characters are removed before the test.
+// separate issue. Blank means nothing visible, so whitespace, default-
+// ignorable characters and control characters are removed before the test.
 function notBlank(value: unknown, field: string): void {
-  if (typeof value !== 'string' || value.replace(/[\s\p{DI}]/gu, '') === '') {
+  if (typeof value !== 'string' || value.replace(/[\s\p{DI}\p{Cc}]/gu, '') === '') {
     throw new Error(`${field} must not be blank`)
   }
 }
