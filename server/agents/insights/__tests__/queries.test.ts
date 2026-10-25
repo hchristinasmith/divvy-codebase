@@ -7,7 +7,7 @@ import {
   OTHER_CATEGORIES,
   cleanLabel,
   collectAggregates,
-  excludeTransfers,
+  excludeOwnAccountTransfers,
   isoWeekOf,
   lastCompleteWeek,
   loadLedger,
@@ -257,7 +257,7 @@ describe('collectAggregates against the hand-written oracle', () => {
       .map((m) => ({ merchant: m.label, spendCents: m.spend, count: m.count }))
     expect(a.topMerchants).toStrictEqual(oracle.slice(0, 5))
     // Uncapped, so the Sunday 23:59 and Unknown merchant rows are compared too.
-    const ledger = excludeTransfers(await loadLedger('personal', '2026-10-17', '2026-10-27'))
+    const ledger = excludeOwnAccountTransfers(await loadLedger('personal', '2026-10-17', '2026-10-27'))
     expect(topMerchants(ledger, WEEK, 50)).toStrictEqual(oracle)
     // The fixture is what the oracle says it is.
     expect(a.topMerchants.map((m) => m.spendCents)).toEqual([66666, 7700, 6000, 2500, 1250])
@@ -338,7 +338,7 @@ describe('collectAggregates against the hand-written oracle', () => {
     const a = await collectAggregates('personal', WEEK)
     expect(a.topMerchants.map((m) => m.merchant)).not.toContain('Invented Transfer')
     // Read for the week alone, the same outflow has no partner.
-    const narrow = excludeTransfers(await loadLedger('personal', '2026-10-19', '2026-10-25'))
+    const narrow = excludeOwnAccountTransfers(await loadLedger('personal', '2026-10-19', '2026-10-25'))
     expect(topMerchants(narrow, WEEK, 50).map((m) => m.merchant)).toContain('Invented Transfer')
   })
 
@@ -466,9 +466,47 @@ describe('drawings (prd-02 Ruling 15)', () => {
       updated_at: STAMP,
     })
     await tx({ account: 'acc_s2', at: day('2026-10-20'), cents: 30000, merchant: 'Strawb Refund Fixture', category: 'Sales' })
-    const rows = excludeTransfers(await loadLedger('strawb', '2026-10-19', '2026-10-25'))
+    const rows = excludeOwnAccountTransfers(await loadLedger('strawb', '2026-10-19', '2026-10-25'))
     expect(rows.map((r) => r.amountCents)).toContain(30000)
     expect(rows.map((r) => r.amountCents)).not.toContain(-30000)
+  })
+
+  // The candidate read's source filters. A row they let through would be a
+  // candidate; its only way to show is by taking a personal in half from a
+  // real drawing, which then counts as strawb spend. Each fake out half
+  // posts the same day as the in half (a gap of 0), so the matcher would
+  // take it before the real out half the day before (a gap of 1).
+  it.each([
+    ['a Xero-sourced strawb outflow', 'acc_s1', 'xero'],
+    ['a strawb outflow on a non-Akahu account', 'acc_sx', 'akahu'],
+  ] as const)('%s is not a drawing candidate, so it takes no in half from a real one', async (_why, account, source) => {
+    await seedAccounts()
+    await connection('accounts').insert({
+      akahu_id: 'acc_sx',
+      source: 'xero',
+      scope: 'strawb',
+      name: 'Invented account',
+      created_at: STAMP,
+      updated_at: STAMP,
+    })
+    await tx({ account: 'acc_s1', at: day('2026-10-20'), cents: -27100, merchant: 'Real Drawing Fixture', category: 'Transfers' })
+    await tx({ account, at: day('2026-10-21'), cents: -27100, merchant: 'Fake Half Fixture', category: 'Transfers', source })
+    await tx({ at: day('2026-10-21'), cents: 27100, merchant: 'Owner In Fixture' })
+    const a = await collectAggregates('strawb', WEEK)
+    expect(a.topMerchants).toStrictEqual([])
+    expect(a.wow.thisWeekCents).toBe(0)
+  })
+
+  it('a strawb candidate whose amount is not whole cents is skipped, not thrown on', async () => {
+    await seedAccounts()
+    await tx({ account: 'acc_s1', at: day('2026-10-20'), cents: -12.5, merchant: 'Fractional Fixture', category: 'Supplies' })
+    await tx({ account: 'acc_s1', at: day('2026-10-20'), cents: -27100, merchant: 'Real Drawing Fixture', category: 'Transfers' })
+    await tx({ at: day('2026-10-21'), cents: 27100, merchant: 'Owner In Fixture' })
+    // Stored as a REAL: SQLite keeps 12.5 rather than rounding it.
+    const stored = await connection('transactions').where({ merchant_name: 'Fractional Fixture' }).first()
+    expect(stored.amount_cents).toBe(-12.5)
+    const a = await collectAggregates('strawb', WEEK)
+    expect(a.topMerchants).toStrictEqual([])
   })
 
   it('ledgerRowCount counts drawing rows, as it counts transfer legs', async () => {
@@ -541,6 +579,17 @@ describe('loadLedger', () => {
     }
   })
 
+  it('leaves out a row whose amount is not whole cents', async () => {
+    await seedAccounts()
+    await tx({ at: day('2026-10-20'), cents: -12.5, merchant: 'Fractional Fixture', category: 'Shops' })
+    await tx({ at: day('2026-10-20'), cents: -1250, merchant: 'Whole Fixture', category: 'Shops' })
+    // Stored as a REAL: SQLite keeps 12.5 rather than rounding it.
+    const stored = await connection('transactions').where({ merchant_name: 'Fractional Fixture' }).first()
+    expect(stored.amount_cents).toBe(-12.5)
+    const rows = await loadLedger('personal', '2026-10-19', '2026-10-25')
+    expect(rows.map((r) => [r.merchant, r.amountCents])).toStrictEqual([['Whole Fixture', -1250]])
+  })
+
   it('keeps only the NZ days asked for, read from UTC instants', async () => {
     await seedLedger()
     const rows = await loadLedger('personal', '2026-10-19', '2026-10-25')
@@ -589,39 +638,39 @@ const row = (date: string, accountId: string, amountCents: number, merchant = 'I
   category,
 })
 
-describe('excludeTransfers', () => {
+describe('excludeOwnAccountTransfers', () => {
   it('drops an equal and opposite pair on different accounts, and keeps an unequal one', () => {
     const out = row('2026-10-20', 'acc_p1', -20000)
     const back = row('2026-10-20', 'acc_p2', 20000)
-    expect(excludeTransfers([out, back])).toEqual([])
+    expect(excludeOwnAccountTransfers([out, back])).toEqual([])
     const near = row('2026-10-20', 'acc_p2', 19999)
-    expect(excludeTransfers([out, near])).toEqual([out, near])
+    expect(excludeOwnAccountTransfers([out, near])).toEqual([out, near])
   })
 
   it('pairs legs up to two days apart and no further', () => {
     const out = row('2026-10-20', 'acc_p1', -5000)
-    expect(excludeTransfers([out, row('2026-10-22', 'acc_p2', 5000)])).toEqual([])
-    expect(excludeTransfers([out, row('2026-10-18', 'acc_p2', 5000)])).toEqual([])
+    expect(excludeOwnAccountTransfers([out, row('2026-10-22', 'acc_p2', 5000)])).toEqual([])
+    expect(excludeOwnAccountTransfers([out, row('2026-10-18', 'acc_p2', 5000)])).toEqual([])
     const far = row('2026-10-23', 'acc_p2', 5000)
-    expect(excludeTransfers([out, far])).toEqual([out, far])
+    expect(excludeOwnAccountTransfers([out, far])).toEqual([out, far])
   })
 
   it('pairs across a month end by calendar days', () => {
     const out = row('2026-10-31', 'acc_p1', -5000)
-    expect(excludeTransfers([out, row('2026-11-02', 'acc_p2', 5000)])).toEqual([])
+    expect(excludeOwnAccountTransfers([out, row('2026-11-02', 'acc_p2', 5000)])).toEqual([])
   })
 
   it('does not pair two legs on the same account (a refund)', () => {
     const spend = row('2026-10-20', 'acc_p1', -500)
     const refund = row('2026-10-21', 'acc_p1', 500)
-    expect(excludeTransfers([spend, refund])).toEqual([spend, refund])
+    expect(excludeOwnAccountTransfers([spend, refund])).toEqual([spend, refund])
   })
 
   it('pairs one to one: two outflows and one inflow leave one outflow', () => {
     const a = row('2026-10-20', 'acc_p1', -1000, 'A')
     const b = row('2026-10-20', 'acc_p1', -1000, 'B')
     const back = row('2026-10-20', 'acc_p2', 1000)
-    expect(excludeTransfers([a, b, back])).toEqual([b])
+    expect(excludeOwnAccountTransfers([a, b, back])).toEqual([b])
   })
 
   it('takes the nearest inflow, and the earlier of two equally near', () => {
@@ -629,16 +678,16 @@ describe('excludeTransfers', () => {
     const nearest = row('2026-10-20', 'acc_p2', 1000)
     const before = row('2026-10-19', 'acc_p2', 1000)
     const after = row('2026-10-21', 'acc_p2', 1000)
-    expect(excludeTransfers([after, before, nearest, out])).toEqual([after, before])
-    expect(excludeTransfers([after, before, out])).toEqual([after])
+    expect(excludeOwnAccountTransfers([after, before, nearest, out])).toEqual([after, before])
+    expect(excludeOwnAccountTransfers([after, before, out])).toEqual([after])
   })
 
   it('pairs the same outflow whatever order the rows arrive in, when two differ only by category', () => {
     const first = row('2026-10-20', 'acc_p1', -5000, 'M', 'B')
     const second = row('2026-10-20', 'acc_p1', -5000, 'M', 'A')
     const back = row('2026-10-20', 'acc_p2', 5000, 'M', 'Transfers')
-    expect(excludeTransfers([first, second, back])).toEqual([first])
-    expect(excludeTransfers([second, first, back])).toEqual([first])
+    expect(excludeOwnAccountTransfers([first, second, back])).toEqual([first])
+    expect(excludeOwnAccountTransfers([second, first, back])).toEqual([first])
   })
 })
 
@@ -682,6 +731,41 @@ describe('the folds', () => {
       ['Fall', -3000],
       ['Rise', 1000],
       ['Same', 0],
+    ])
+  })
+
+  it('week over week breaks a tie in size of change by category, whatever the sign or arrival order', () => {
+    // Categories arrive this week's first (Zed, Alpha), then last week's (Fall).
+    const rows = [
+      row('2026-10-20', 'acc_p1', -1000, 'M', 'Zed'),
+      row('2026-10-21', 'acc_p1', -1000, 'M', 'Alpha'),
+      row('2026-10-13', 'acc_p1', -1000, 'M', 'Fall'),
+    ]
+    expect(weekOverWeek(rows, WEEK).byCategory.map((c) => [c.category, c.changeCents])).toEqual([
+      ['Alpha', 1000],
+      ['Fall', -1000],
+      ['Zed', 1000],
+    ])
+  })
+
+  it('the monthly fold orders equal cells in a month by category, whatever the arrival order', () => {
+    const rows = [
+      row('2026-10-05', 'acc_p1', -500, 'M', 'Zed'),
+      row('2026-10-06', 'acc_p1', -500, 'M', 'Alpha'),
+      row('2026-10-07', 'acc_p1', -900, 'M', 'Mid'),
+    ]
+    expect(spendByCategoryPerMonth(rows, ['2026-10'])).toStrictEqual([
+      { month: '2026-10', category: 'Mid', spendCents: 900 },
+      { month: '2026-10', category: 'Alpha', spendCents: 500 },
+      { month: '2026-10', category: 'Zed', spendCents: 500 },
+    ])
+  })
+
+  it('the monthly fold names the earlier category of two with equal spend over the window', () => {
+    const rows = [row('2026-10-05', 'acc_p1', -500, 'M', 'Zed'), row('2026-10-06', 'acc_p1', -500, 'M', 'Alpha')]
+    expect(spendByCategoryPerMonth(rows, ['2026-10'], 1)).toStrictEqual([
+      { month: '2026-10', category: 'Alpha', spendCents: 500 },
+      { month: '2026-10', category: OTHER_CATEGORIES, spendCents: 500 },
     ])
   })
 
@@ -779,7 +863,7 @@ describe('unusualSpends', () => {
       row('2026-10-21', 'acc_p2', 10000, 'M'),
     ]
     expect(unusualSpends(rows, WEEK)).toHaveLength(1)
-    expect(unusualSpends(excludeTransfers(rows), WEEK)).toEqual([])
+    expect(unusualSpends(excludeOwnAccountTransfers(rows), WEEK)).toEqual([])
   })
 
   it('is capped, by amount then merchant then date', () => {
@@ -955,7 +1039,7 @@ describe('cleanLabel', () => {
   it.each([
     ['12-3456-0123456-00', '####'],
     ['4111 1111 1111 1111', '####'],
-    ['BNZ 12-3456-0123456-00 Transfer', 'BNZ #### Transfer'],
+    ['Bank 12-3456-0123456-00 Transfer', 'Bank #### Transfer'],
     ['12345678', '####'],
     // NFKC first: full-width digits are digits.
     ['４１１１ １１１１', '####'],

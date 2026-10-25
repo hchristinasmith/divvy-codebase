@@ -5,17 +5,21 @@ import { assertInMemory } from '../../../test-utils/app.ts'
 import { CHART_LIMITS, parseChartSpecJson, type ChartSpec } from '../../../../models/insights.ts'
 import { dismissInsight, type NewInsight } from '../../db/insights.ts'
 import { runInsightsAgent } from '../agent.ts'
-import { mdCode } from '../prompt.ts'
+import { mdCode, monthlyMarkdown, topMerchantsMarkdown, weekOverWeekMarkdown } from '../prompt.ts'
 import { cleanLabel, collectAggregates, type Aggregates } from '../queries.ts'
 
 // The insights agent end to end (#47; prd-04 Rulings 2, 3, 7 and 8). Each
 // test starts from an empty, freshly migrated in-memory database and inserts
 // the rows it needs; every merchant, account and amount is invented.
 //
-// Three seams, each a pass-through unless a test sets its hook: the
-// template's drafts can be replaced (a spec the validator refuses), the
-// aggregate query can be made to throw, and `insertInsight` calls are
-// counted (one attempt, no retry).
+// Seams, each a pass-through unless a test sets its hook: the template's
+// drafts can be replaced (a spec the validator refuses), the aggregate query
+// can be made to throw, and `insertInsight` calls are counted (one attempt,
+// no retry).
+//
+// A run's finished_at is the later of the wall clock and the `now` it is
+// given, so a test that reads it fakes the wall clock (Date only) rather
+// than depend on the real date relative to NOW.
 
 const hooks = vi.hoisted(() => ({
   drafts: null as null | ((drafts: NewInsight[]) => NewInsight[]),
@@ -82,7 +86,17 @@ beforeEach(async () => {
 
 afterEach(() => {
   errors.mockRestore()
+  vi.useRealTimers()
 })
+
+// The wall clock, set relative to NOW. Only Date is faked, so knex and
+// SQLite keep their real timers.
+function wallClockAt(offsetMs: number): Date {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  const at = new Date(NOW.getTime() + offsetMs)
+  vi.setSystemTime(at)
+  return at
+}
 
 afterAll(async () => {
   await connection.destroy()
@@ -206,6 +220,8 @@ const stripCodeSpans = (md: string) => md.replace(/`[^`]*`/g, '')
 describe('a run', () => {
   it('writes the three insights with scope and period, and logs one successful run', async () => {
     await seedLedger()
+    // The wall clock a minute behind NOW: the run still finishes at NOW.
+    wallClockAt(-60_000)
     const result = await runInsightsAgent('personal', {}, NOW)
 
     const rows = await insightRows()
@@ -245,9 +261,17 @@ describe('a run', () => {
       sync_run_id: null,
       cursor: null,
       started_at: NOW.toISOString(),
+      finished_at: NOW.toISOString(),
     })
-    expect(String(run.finished_at) >= NOW.toISOString()).toBe(true)
     expect((await collectAggregates('personal', WEEK)).ledgerRowCount).toBe(considered)
+  })
+
+  it('finishes at the wall clock when that is after now', async () => {
+    await seedLedger()
+    const later = wallClockAt(3_600_000)
+    await runInsightsAgent('personal', {}, NOW)
+    const [run] = await runRows()
+    expect(run).toMatchObject({ started_at: NOW.toISOString(), finished_at: later.toISOString() })
   })
 
   it('takes a weekly trigger and an explicit period', async () => {
@@ -313,11 +337,188 @@ describe('a run', () => {
 
   it('the bodies show the same figures, labels in code spans', async () => {
     await seedLedger()
+    // A second Fixture Bakery outflow this week: one merchant of two
+    // transactions, and a Cafes change whose two weeks differ.
+    await tx('acc_p1', day('2026-10-22'), -750, 'Fixture Bakery', 'Cafes')
     await runInsightsAgent('personal', {}, NOW)
-    const [pattern, report] = await insightRows()
-    expect(pattern.body_md).toContain('- `Sample Fuel` $60.00 across 1 transaction')
-    expect(pattern.body_md).toContain('- `Sample Fuel` on 2026-10-23, $60.00 against a typical $16.00 (`Fuel`)')
-    expect(report.body_md).toContain('was $793.16, against $19.00 the week before, a change of +$774.16 (+4075%).')
+    const [pattern, report, chart] = await insightRows()
+    expect(pattern.body_md).toBe(
+      [
+        '## Top merchants',
+        '',
+        `- \`${PERSONAL.merchant}\` ${PERSONAL.shown} across 1 transaction`,
+        '- `Sample Fuel` $60.00 across 1 transaction',
+        '- `Invented Grocer` $45.00 across 1 transaction',
+        '- `Fixture Bakery` $20.00 across 2 transactions',
+        '- `Invented Gym` $9.00 across 1 transaction',
+        '',
+        '## Unusual spends',
+        '',
+        // History 1500, 1600, 1700: median 1600.
+        '- `Sample Fuel` on 2026-10-23, $60.00 against a typical $16.00 (`Fuel`)',
+      ].join('\n'),
+    )
+    // This week 66666 + 6000 + 4500 + 1250 + 750 + 900 = 80066; the week
+    // before 1000 + 900 = 1900; 78166 / 1900 is 4114%. Fitness did not
+    // change, so it has no line.
+    expect(report.body_md).toBe(
+      [
+        'Spend in 2026-W43 was $800.66, against $19.00 the week before, a change of +$781.66 (+4114%).',
+        '',
+        '## Biggest changes by category',
+        '',
+        `- \`${PERSONAL.category}\` +${PERSONAL.shown}, ${PERSONAL.shown} this week and $0.00 the week before`,
+        '- `Fuel` +$60.00, $60.00 this week and $0.00 the week before',
+        '- `Groceries` +$45.00, $45.00 this week and $0.00 the week before',
+        '- `Cafes` +$10.00, $20.00 this week and $10.00 the week before',
+      ].join('\n'),
+    )
+    // Categories in the order they first appear: Fuel in July, the rest in
+    // October by spend.
+    expect(chart.body_md).toBe(
+      [
+        'Spend by category for each month from 2026-05 to the week ending 2026-10-25.',
+        '',
+        `Categories shown \`Fuel\`, \`${PERSONAL.category}\`, \`Groceries\`, \`Cafes\`, \`Fitness\`.`,
+      ].join('\n'),
+    )
+  })
+
+  it('each stored spec is the fixed chart around its values', async () => {
+    await seedLedger()
+    await runInsightsAgent('personal', {}, NOW)
+    const specs = new Map(
+      (await insightRows()).map((r) => [r.kind, JSON.parse(r.chart_spec_json ?? 'null') as Record<string, unknown>]),
+    )
+    const around = (kind: string) => {
+      const spec = specs.get(kind)
+      if (!spec) throw new Error(`no ${kind} spec`)
+      const { data, ...rest } = spec
+      expect(Object.keys(data as object)).toStrictEqual(['values'])
+      return rest
+    }
+    const spend = { field: 'spend_cents', type: 'quantitative', title: 'Spend in cents' }
+    expect(around('pattern')).toStrictEqual({
+      title: 'Top merchants by spend',
+      mark: 'bar',
+      encoding: { x: { field: 'merchant', type: 'nominal', title: 'Merchant' }, y: spend },
+    })
+    expect(around('report')).toStrictEqual({
+      title: 'Change in spend by category',
+      mark: 'bar',
+      encoding: {
+        x: { field: 'category', type: 'nominal', title: 'Category' },
+        y: { field: 'change_cents', type: 'quantitative', title: 'Change in cents' },
+      },
+    })
+    expect(around('chart')).toStrictEqual({
+      title: 'Spend by category per month',
+      mark: 'bar',
+      encoding: {
+        x: { field: 'month', type: 'ordinal', title: 'Month' },
+        y: spend,
+        color: { field: 'category', type: 'nominal', title: 'Category' },
+      },
+    })
+  })
+})
+
+describe('the template, from hand-built aggregates', () => {
+  const aggregates = (over: Partial<Aggregates>): Aggregates => ({
+    week: '2026-W43',
+    months: ['2026-05', '2026-06', '2026-07', '2026-08', '2026-09', '2026-10'],
+    asOf: '2026-10-25',
+    ledgerRowCount: 0,
+    topMerchants: [],
+    wow: { thisWeekCents: 0, lastWeekCents: 0, changeCents: 0, changePct: null, byCategory: [] },
+    unusual: [],
+    monthly: [],
+    ...over,
+  })
+
+  it('with no unusual spend, says nothing stood out; counts read 1 transaction and N transactions', () => {
+    const a = aggregates({
+      topMerchants: [
+        { merchant: 'Invented Shop', spendCents: 123456, count: 3 },
+        { merchant: 'Fixture Kiosk', spendCents: 500, count: 1 },
+      ],
+    })
+    expect(topMerchantsMarkdown(a)).toBe(
+      [
+        '## Top merchants',
+        '',
+        '- `Invented Shop` $1,234.56 across 3 transactions',
+        '- `Fixture Kiosk` $5.00 across 1 transaction',
+        '',
+        '## Unusual spends',
+        '',
+        "Nothing stood out against each merchant's recent spending.",
+      ].join('\n'),
+    )
+  })
+
+  it('with no spend the week before, shows no percent', () => {
+    const a = aggregates({
+      wow: {
+        thisWeekCents: 1500,
+        lastWeekCents: 0,
+        changeCents: 1500,
+        changePct: null,
+        byCategory: [{ category: 'Shops', thisCents: 1500, lastCents: 0, changeCents: 1500 }],
+      },
+    })
+    expect(weekOverWeekMarkdown(a)).toBe(
+      [
+        'Spend in 2026-W43 was $15.00, against $0.00 the week before, a change of +$15.00.',
+        '',
+        '## Biggest changes by category',
+        '',
+        '- `Shops` +$15.00, $15.00 this week and $0.00 the week before',
+      ].join('\n'),
+    )
+  })
+
+  it('a fall is signed and its percent negative; an unchanged category has no line', () => {
+    const a = aggregates({
+      wow: {
+        thisWeekCents: 1501,
+        lastWeekCents: 3500,
+        changeCents: -1999,
+        changePct: -57,
+        byCategory: [
+          { category: 'Shops', thisCents: 1001, lastCents: 3000, changeCents: -1999 },
+          { category: 'Same', thisCents: 500, lastCents: 500, changeCents: 0 },
+        ],
+      },
+    })
+    expect(weekOverWeekMarkdown(a)).toBe(
+      [
+        'Spend in 2026-W43 was $15.01, against $35.00 the week before, a change of -$19.99 (-57%).',
+        '',
+        '## Biggest changes by category',
+        '',
+        '- `Shops` -$19.99, $10.01 this week and $30.00 the week before',
+      ].join('\n'),
+    )
+  })
+
+  it('the monthly body names the first month, the as-of day, and each category once in first-seen order', () => {
+    const a = aggregates({
+      months: ['2026-04', '2026-05'],
+      asOf: '2026-05-10',
+      monthly: [
+        { month: '2026-04', category: 'Rent', spendCents: 100 },
+        { month: '2026-05', category: 'Food', spendCents: 300 },
+        { month: '2026-05', category: 'Rent', spendCents: 200 },
+      ],
+    })
+    expect(monthlyMarkdown(a)).toBe(
+      [
+        'Spend by category for each month from 2026-04 to the week ending 2026-05-10.',
+        '',
+        'Categories shown `Rent`, `Food`.',
+      ].join('\n'),
+    )
   })
 })
 

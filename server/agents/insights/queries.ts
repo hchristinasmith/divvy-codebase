@@ -19,12 +19,20 @@
 // id, scope, date and amount (so a personal inflow's merchant, category and
 // description are never read). A `personal` run never makes that read and
 // reads no strawb row: a personal half is an inflow, which is never spend.
-// It therefore cannot tell a drawing's in half from any other inflow, so
-// `excludeTransfers` may pair it with a personal outflow of equal cents on
-// another personal account within TRANSFER_WINDOW_DAYS, and that outflow is
-// then not counted as spend. The strawb side has no such gap.
-// server/db/drawings.ts is not imported because it imports
+// It therefore cannot tell a drawing's in half from any other inflow, so the
+// interim own-account transfer rule (`excludeOwnAccountTransfers`, below)
+// may pair it with a personal outflow of equal cents on another personal
+// account, and that outflow is then not counted as spend. The strawb side
+// has no such gap. server/db/drawings.ts is not imported because it imports
 // server/db/overview.ts, which writes.
+//
+// Own-account transfers. How a transfer between the scope's own accounts is
+// told from spending is not set by #47 or prd-04; it is the open question on
+// #52 (Baseline decision 0a37d21b). The rule here is an interim one the #47
+// lane chose, and it lives in one place: `excludeOwnAccountTransfers` and
+// the TRANSFER_WINDOW_DAYS it reads (which `collectAggregates` also uses to
+// pad the ledger read). When #52 is answered, that function's body is what
+// changes.
 //
 // Days are Pacific/Auckland calendar days (YYYY-MM-DD), bucketed here in JS:
 // SQL date functions would need raw SQL, which nothing under server/agents/
@@ -65,8 +73,13 @@ export interface LedgerRow {
   merchant: string
 }
 
-// Two legs of a transfer between the scope's own accounts may post on
-// different days; legs further apart than this are not paired.
+// Part of the interim own-account transfer rule (`excludeOwnAccountTransfers`),
+// not set by #47 or prd-04: it follows #52's answer (Baseline decision
+// 0a37d21b). Two legs of a transfer between the scope's own accounts may
+// post on different days; legs further apart than this are not paired.
+// `collectAggregates` also pads the ledger read by it, so a leg just outside
+// the window still pairs; if #52's rule needs no window, drop the padding
+// with it.
 export const TRANSFER_WINDOW_DAYS = 2
 export const UNUSUAL_LOOKBACK_WEEKS = 8
 export const UNUSUAL_MIN_HISTORY = 3
@@ -257,8 +270,8 @@ const DIGIT_MASK = '####'
  * Merchant or category text made safe to show: cut to a bounded prefix
  * (never splitting a surrogate pair), NFKC-folded (so a full-width colon is
  * a colon before it is dropped, and full-width digits are digits),
- * disallowed characters replaced by spaces, whitespace collapsed, every run
- * of eight or more digits masked (so no account or card number is stored),
+ * disallowed characters replaced by spaces, whitespace collapsed, every
+ * LONG_DIGIT_RUN masked (so no account or card number is stored),
  * and cut to a maximum number of code points without splitting a surrogate
  * pair. Empty after that, it is `fallback`.
  */
@@ -294,7 +307,10 @@ interface CandidateRow {
 // window edge changes the greedy pairing; Akahu rows on stored Akahu
 // accounts, settled and pending; strawb outflows and personal inflows. A row
 // the matcher cannot place (an unparseable date, a year past 9999, an amount
-// that is not whole cents) is skipped, as there.
+// that is not whole cents) is skipped, as there: `findDrawingIds` throws on
+// a non-integer amount, so that skip is what keeps a run alive. The amount
+// signs only narrow the read: `findDrawingIds` itself ignores any row that
+// is not a strawb outflow or a personal inflow, so they change no result.
 async function readDrawingIds(db: typeof connection): Promise<Set<number>> {
   const rows: CandidateRow[] = await db('transactions as t')
     .join('accounts as a', 'a.akahu_id', 't.account_id')
@@ -437,7 +453,17 @@ function push<K>(map: Map<K, number[]>, key: K, value: number): void {
 }
 
 /**
- * Drops transfers between the scope's own accounts. An outflow pairs with an
+ * Drops transfers between the scope's own accounts.
+ *
+ * Interim rule, chosen by the #47 lane: neither #47 nor prd-04 sets how an
+ * own-account transfer is told from spending. It follows #52's answer
+ * (Baseline decision 0a37d21b, which weighs pairing on amounts, Akahu's
+ * TRANSFER type and the other account's number). This function is the one
+ * place the rule lives; when #52 is answered, replace its body (and the
+ * TRANSFER_WINDOW_DAYS read padding in `collectAggregates`, if the new rule
+ * needs none).
+ *
+ * Today's rule pairs on amounts. An outflow pairs with an
  * unpaired inflow of the same absolute cents on a different account no more
  * than TRANSFER_WINDOW_DAYS apart, the nearest first, a tie going to the
  * earlier inflow (then the lower account id). Each leg pairs at most once,
@@ -445,7 +471,7 @@ function push<K>(map: Map<K, number[]>, key: K, value: number): void {
  * leg in another scope is never paired; drawings, which cross scopes, are
  * dropped at load, before this runs (prd-02 Ruling 15).
  */
-export function excludeTransfers(rows: readonly LedgerRow[]): LedgerRow[] {
+export function excludeOwnAccountTransfers(rows: readonly LedgerRow[]): LedgerRow[] {
   const inflows = new Map<number, LedgerRow[]>()
   const byDateThenAccount = (a: LedgerRow, b: LedgerRow) =>
     compareText(a.date, b.date) ||
@@ -717,7 +743,8 @@ export interface Aggregates {
  * Reads the scope's ledger once and folds it for one ISO week. The window
  * runs from the earlier of the first monthly month and the unusual-spend
  * lookback to the week's Sunday; it is read TRANSFER_WINDOW_DAYS wider on
- * both sides so a transfer whose other leg falls just outside still pairs.
+ * both sides so a transfer whose other leg falls just outside still pairs
+ * (padding for the interim own-account transfer rule, which follows #52).
  * Rows after the Sunday are otherwise ignored, so a week reads the same
  * whenever it is run, except for a transfer leg posted in those padding days.
  */
@@ -740,7 +767,7 @@ export async function collectAggregates(
     db,
   )
   const inWindow = (r: LedgerRow) => inRange(r, windowStart, range.end)
-  const kept = excludeTransfers(loaded).filter(inWindow)
+  const kept = excludeOwnAccountTransfers(loaded).filter(inWindow)
   const drawingsInWindow = drawingDays.filter((d) => d >= windowStart && d <= range.end).length
 
   return {
