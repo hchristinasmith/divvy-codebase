@@ -194,6 +194,35 @@ describe('insertInsight', () => {
     await expect(insertInsight(insight({ chart_spec: spec(), ...fields }), NOW)).rejects.toThrow(message)
     expect(await storedRows()).toEqual([])
   })
+
+  // #303 pins today's behaviour: no length cap on title or body_md. The
+  // non-BMP run makes code points and UTF-16 units differ, so a cap counted
+  // in either unit would refuse these strings.
+  it('#303 pins today: accepts a title over 200 code points and stores it whole', async () => {
+    const title = '\u{20000}'.repeat(100) + 'a'.repeat(101)
+    expect(Array.from(title)).toHaveLength(201)
+    expect(title.length).toBeGreaterThan(201)
+
+    const result = await insertInsight(insight({ title }), NOW)
+    expect(result).toStrictEqual({ ok: true, id: expect.any(Number) })
+
+    const [stored] = await storedRows()
+    expect(Object.keys(stored).sort()).toEqual(INSIGHT_KEYS)
+    expect(stored.title).toBe(title)
+  })
+
+  it('#303 pins today: accepts a body_md over 20,000 code points and stores it whole', async () => {
+    const body = '\u{20000}'.repeat(10_000) + 'b'.repeat(10_001)
+    expect(Array.from(body)).toHaveLength(20_001)
+    expect(body.length).toBeGreaterThan(20_001)
+
+    const result = await insertInsight(insight({ body_md: body }), NOW)
+    expect(result).toStrictEqual({ ok: true, id: expect.any(Number) })
+
+    const [stored] = await storedRows()
+    expect(Object.keys(stored).sort()).toEqual(INSIGHT_KEYS)
+    expect(stored.body_md).toBe(body)
+  })
 })
 
 describe('reading re-validates the stored chart (Ruling 8)', () => {
