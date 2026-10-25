@@ -656,6 +656,58 @@ describe('scope: a row of one scope never shows under the other', () => {
     ])
   })
 
+  describe('a strawb mark on a key both scopes share is read under strawb only', () => {
+    const same = [...charges(MONTHLY), ...charges(MONTHLY, { scope: 'strawb' })]
+
+    it('a strawb not_subscription moves the strawb row, under strawb and under all', () => {
+      const marks = [mark({ scope: 'strawb', answer: 'not_subscription' })]
+
+      const strawb = run(same, marks, 'strawb')
+      expect(strawb.subscriptions).toStrictEqual([])
+      expect(
+        strawb.notSubscriptions.map((r) => [r.scope, r.merchantKey]),
+      ).toStrictEqual([['strawb', STREAM]])
+
+      const all = run(same, marks, 'all')
+      expect(
+        all.subscriptions.map((r) => [r.scope, r.merchantKey]),
+      ).toStrictEqual([['personal', STREAM]])
+      expect(
+        all.notSubscriptions.map((r) => [r.scope, r.merchantKey]),
+      ).toStrictEqual([['strawb', STREAM]])
+
+      expect(run(same, marks, 'personal')).toStrictEqual(
+        run(same, [], 'personal'),
+      )
+    })
+
+    it('a strawb cancel date cancels the strawb row, under strawb and under all', () => {
+      const marks = [mark({ scope: 'strawb', cancelledOn: '2026-08-30' })]
+
+      expect(
+        run(same, marks, 'strawb').subscriptions.map((r) => [
+          r.scope,
+          r.status,
+          r.cancelledOn,
+        ]),
+      ).toStrictEqual([['strawb', 'cancelled', '2026-08-30']])
+      expect(
+        run(same, marks, 'all').subscriptions.map((r) => [
+          r.scope,
+          r.status,
+          r.cancelledOn,
+        ]),
+      ).toStrictEqual([
+        ['personal', 'active', null],
+        ['strawb', 'cancelled', '2026-08-30'],
+      ])
+
+      expect(run(same, marks, 'personal')).toStrictEqual(
+        run(same, [], 'personal'),
+      )
+    })
+  })
+
   it('a personal mark never changes the strawb row', () => {
     const strawbOnly = charges(MONTHLY, { scope: 'strawb' })
     const marks = [

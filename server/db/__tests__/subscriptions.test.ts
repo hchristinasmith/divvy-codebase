@@ -652,6 +652,46 @@ describe('writes', () => {
     )
   })
 
+  it('uncancel and a null answer in one scope change only that scope’s row and answer with it', async () => {
+    await seedStream(TRADING)
+    const strawbTarget: Target = { scope: 'strawb', merchantKey: STREAM }
+    // The strawb row is written first, so it is the first row for the key.
+    await setAnswer(strawbTarget, 'not_subscription', NOW)
+    await cancelSubscription(strawbTarget, '2026-09-15', NOW)
+    await setAnswer(target, 'subscription', NOW)
+    await cancelSubscription(target, '2026-09-01', NOW)
+    const strawbRow = async () =>
+      (await marks()).filter((m) => m.scope === 'strawb')
+    const strawbBefore = await strawbRow()
+    expect(
+      strawbBefore.map((m) => [m.merchant_key, m.answer, m.cancelled_on]),
+    ).toStrictEqual([[STREAM, 'not_subscription', '2026-09-15']])
+
+    expect(await uncancelSubscription(target, LATER)).toStrictEqual({
+      scope: 'personal',
+      merchantKey: STREAM,
+      answer: 'subscription',
+      cancelledOn: null,
+    })
+    expect(await strawbRow()).toStrictEqual(strawbBefore)
+
+    expect(await setAnswer(target, null, LATER)).toStrictEqual({
+      scope: 'personal',
+      merchantKey: STREAM,
+      answer: null,
+      cancelledOn: null,
+    })
+    expect(await strawbRow()).toStrictEqual(strawbBefore)
+
+    // The strawb read is unchanged too.
+    expect(
+      (await readSubscriptions('strawb')).notSubscriptions.map((r) => [
+        r.scope,
+        r.merchantKey,
+      ]),
+    ).toStrictEqual([['strawb', STREAM]])
+  })
+
   it('no write calls anything outbound', async () => {
     const fetch = vi.spyOn(globalThis, 'fetch')
 

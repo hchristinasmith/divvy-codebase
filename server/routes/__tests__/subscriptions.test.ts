@@ -755,6 +755,106 @@ describe('round trips', () => {
     ).toStrictEqual([['active', null, null]])
   })
 
+  describe('one key in both scopes', () => {
+    // Example Stream is also paid from the strawb account, on the same days.
+    async function seedBoth() {
+      await seed()
+      await insertAll('transactions', [
+        tx(TRADING, '2026-07-01T00:00:00.000Z', -1599),
+        tx(TRADING, '2026-07-31T00:00:00.000Z', -1599),
+        tx(TRADING, '2026-08-30T00:00:00.000Z', -1599),
+      ])
+    }
+    const streamRows = (body: SubscriptionsResponse) =>
+      body.subscriptions
+        .filter((r) => r.merchantKey === STREAM)
+        .map((r) => [r.scope, r.status, r.cancelledOn])
+    const notSubscriptions = (body: SubscriptionsResponse) =>
+      body.notSubscriptions.map((r) => [r.scope, r.merchantKey])
+
+    it('a strawb cancel and a strawb No show under strawb and all, and never under personal', async () => {
+      await seedBoth()
+
+      const cancelled = await cancel({
+        scope: 'strawb',
+        merchantKey: STREAM,
+        on: '2026-09-01',
+      })
+      expect(cancelled.status).toBe(200)
+      expect(streamRows((await get('strawb')).body)).toStrictEqual([
+        ['strawb', 'cancelled', '2026-09-01'],
+      ])
+      expect(streamRows((await get('all')).body)).toStrictEqual([
+        ['personal', 'active', null],
+        ['strawb', 'cancelled', '2026-09-01'],
+      ])
+      expect(streamRows((await get('personal')).body)).toStrictEqual([
+        ['personal', 'active', null],
+      ])
+
+      const no = await mark({
+        scope: 'strawb',
+        merchantKey: STREAM,
+        answer: 'not_subscription',
+      })
+      expect(no.status).toBe(200)
+      expect(notSubscriptions((await get('strawb')).body)).toStrictEqual([
+        ['strawb', STREAM],
+      ])
+      const all: SubscriptionsResponse = (await get('all')).body
+      expect(notSubscriptions(all)).toStrictEqual([['strawb', STREAM]])
+      expect(streamRows(all)).toStrictEqual([['personal', 'active', null]])
+      expect(notSubscriptions((await get('personal')).body)).toStrictEqual([])
+    })
+
+    it('a personal uncancel and a cleared answer leave the strawb mark alone and answer with the personal one', async () => {
+      await seedBoth()
+      // Strawb first, so its row is the first for the key.
+      await mark({
+        scope: 'strawb',
+        merchantKey: STREAM,
+        answer: 'not_subscription',
+      })
+      await cancel({ scope: 'strawb', merchantKey: STREAM, on: '2026-09-15' })
+      await mark({
+        scope: 'personal',
+        merchantKey: STREAM,
+        answer: 'subscription',
+      })
+      await cancel({ scope: 'personal', merchantKey: STREAM, on: '2026-09-01' })
+      const strawbRow = async () =>
+        (await marks()).filter((m) => m.scope === 'strawb')
+      const strawbBefore = await strawbRow()
+      expect(
+        strawbBefore.map((m) => [m.merchant_key, m.answer, m.cancelled_on]),
+      ).toStrictEqual([[STREAM, 'not_subscription', '2026-09-15']])
+
+      const back = await uncancel({ scope: 'personal', merchantKey: STREAM })
+      expect(back.status).toBe(200)
+      expect(back.body).toStrictEqual({
+        scope: 'personal',
+        merchantKey: STREAM,
+        answer: 'subscription',
+        cancelledOn: null,
+      })
+      expect(await strawbRow()).toStrictEqual(strawbBefore)
+
+      const cleared = await mark({
+        scope: 'personal',
+        merchantKey: STREAM,
+        answer: null,
+      })
+      expect(cleared.status).toBe(200)
+      expect(cleared.body).toStrictEqual({
+        scope: 'personal',
+        merchantKey: STREAM,
+        answer: null,
+        cancelledOn: null,
+      })
+      expect(await strawbRow()).toStrictEqual(strawbBefore)
+    })
+  })
+
   it('cancel with no date records today in NZ', async () => {
     await seed()
 
