@@ -1,13 +1,30 @@
-import { readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 // Litestream is the only copy of the database off the Fly volume (D2; prd-01
 // Done-when 6; #24). Nothing at runtime notices a config that replicates the
 // wrong file, names a bucket in a public repo, or opens a listener: Litestream
 // would still start and the app would still answer. So the config is pinned
-// here as text, against the other files that name the database path.
+// here as text, against the other files that name the database path. And
+// scripts/restore.sh is run for real against a fake litestream, so "never
+// overwrites a database" is executed, not just read.
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '../..')
 const read = (rel: string): string => readFileSync(join(root, rel), 'utf8')
@@ -18,6 +35,8 @@ const dockerignore = read('.dockerignore')
 const flyToml = read('fly.toml')
 const knexfile = read('server/db/knexfile.js')
 const startSh = read('scripts/start.sh')
+const restoreScript = join(root, 'scripts/restore.sh')
+const restoreSh = readFileSync(restoreScript, 'utf8')
 
 // Full-line and trailing `#` comments. The config's comments explain what is
 // absent, so they name the very words the assertions below forbid.
@@ -132,6 +151,18 @@ describe('the database path, everywhere it is named', () => {
       knexPath,
     )
   })
+
+  // restore.sh refuses to restore into the live database's directory, which
+  // it finds from DATABASE_PATH or, when that is unset, from this fallback.
+  it("is restore.sh's fallback for the live database", () => {
+    expect(
+      capture(
+        restoreSh,
+        /^live_dir="\$\(dirname "\$\{DATABASE_PATH:-([^}]+)\}"\)"$/m,
+        "restore.sh's DATABASE_PATH fallback",
+      ),
+    ).toBe(knexPath)
+  })
 })
 
 describe('litestream.yml reaches the container', () => {
@@ -187,5 +218,381 @@ describe('litestream.yml reaches the container', () => {
       expect(patterns.some((p) => toRegExp(p).test(excluded))).toBe(true)
     }
     expect(patterns.filter((p) => toRegExp(p).test('litestream.yml'))).toEqual([])
+  })
+})
+
+describe('scripts/restore.sh, as a file', () => {
+  // Comment lines go: the header names `set -x` to forbid it.
+  const code = restoreSh.replace(/^\s*#.*$/gm, '')
+
+  it('is an executable POSIX sh script with no bash-only syntax and no tracing', () => {
+    expect(statSync(restoreScript).mode & 0o111).not.toBe(0)
+    expect(restoreSh.startsWith('#!/bin/sh\n')).toBe(true)
+    expect(spawnSync('sh', ['-n', restoreScript]).status).toBe(0)
+    expect(code).not.toMatch(/\[\[/)
+    expect(code).not.toMatch(/^\s*(local|function)\s/m)
+    expect(code).not.toContain('<<<')
+    expect(code).not.toMatch(/\[ [^\]]*==/)
+    expect(code).not.toMatch(/set\s+-[a-z]*x/)
+  })
+
+  // Each of these is a way for a restore to replace a database: overwrite
+  // the output, skip quietly over one, or create a directory to land in.
+  it.each(['-force', '-if-db-not-exists', 'mkdir'])('never uses %s', (word) => {
+    expect(code).not.toContain(word)
+  })
+})
+
+// ---- restore.sh, run against a fake litestream ----
+
+const URL_SENTINEL = 'file:///nonexistent/url-sentinel-replica'
+const ID_SENTINEL = 'not-a-real-key-id-sentinel'
+const SECRET_SENTINEL = 'not-a-real-secret-sentinel'
+const RUN_TIMEOUT_MS = 15000
+
+// Logs its argv, dumps its environment, and writes to the -o path what a
+// restore would: the database (`ok`), nothing (`fail`), a partial file then a
+// failure (`partial`), or the database while something else creates the
+// final name beside it (`race`).
+const FAKE_LITESTREAM = `#!/bin/sh
+echo "$*" >> "$FAKE_DIR/calls.log"
+env > "$FAKE_DIR/litestream.env"
+out=
+prev=
+for arg in "$@"; do
+  if [ "$prev" = "-o" ]; then out="$arg"; fi
+  prev="$arg"
+done
+case "\${FAKE_LITESTREAM:-ok}" in
+  fail) echo "fake litestream: no matching backup files available" >&2; exit 1 ;;
+  partial) printf PARTIAL > "$out"; exit 1 ;;
+  race) printf RESTORED > "$out"; printf INTRUDER > "\${out%-restoring}"; exit 0 ;;
+  *) printf RESTORED > "$out"; exit 0 ;;
+esac
+`
+
+let tmp: string
+let fakeDir: string
+let area: string
+let target: string
+let live: string
+
+beforeEach(() => {
+  tmp = mkdtempSync(join(tmpdir(), 'dv-'))
+  fakeDir = join(tmp, 'bin')
+  area = join(tmp, 'area')
+  target = join(area, 'restored')
+  live = join(area, 'live')
+  for (const dir of [fakeDir, area, target, live]) mkdirSync(dir)
+  writeFileSync(join(fakeDir, 'litestream'), FAKE_LITESTREAM)
+  chmodSync(join(fakeDir, 'litestream'), 0o755)
+  // The live database, so the script's live-directory check has a real
+  // directory to resolve; every run points DATABASE_PATH here.
+  writeFileSync(join(live, 'divvy.sqlite3'), 'LIVE')
+})
+
+afterEach(() => {
+  rmSync(tmp, { recursive: true, force: true })
+})
+
+// Every entry under `dir`, symlinks not followed: a file by its content, a
+// link by its target, a directory by its own entries.
+function snapshot(dir: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const name of readdirSync(dir).sort()) {
+    const path = join(dir, name)
+    const st = lstatSync(path)
+    if (st.isSymbolicLink()) out[name] = `link:${readlinkSync(path)}`
+    else if (st.isDirectory())
+      out[name] = `dir:${JSON.stringify(snapshot(path))}`
+    else out[name] = `file:${readFileSync(path, 'utf8')}`
+  }
+  return out
+}
+
+interface RestoreRun {
+  status: number | null
+  stdout: string
+  stderr: string
+  calls: string[]
+}
+
+interface RestoreOptions {
+  env?: Record<string, string | undefined>
+  path?: string
+  cwd?: string
+}
+
+// The environment is built from scratch so nothing from the developer's shell
+// (a real replica URL or key, a real litestream) reaches the script. An `env`
+// value of undefined removes that variable.
+function runRestore(
+  args: string[],
+  { env = {}, path, cwd }: RestoreOptions = {},
+): RestoreRun {
+  const merged: Record<string, string | undefined> = {
+    PATH: path ?? `${fakeDir}:/usr/bin:/bin`,
+    FAKE_DIR: fakeDir,
+    LITESTREAM_REPLICA_URL: URL_SENTINEL,
+    LITESTREAM_ACCESS_KEY_ID: ID_SENTINEL,
+    LITESTREAM_SECRET_ACCESS_KEY: SECRET_SENTINEL,
+    DATABASE_PATH: join(live, 'divvy.sqlite3'),
+    ...env,
+  }
+  const childEnv: Record<string, string> = {}
+  for (const [key, value] of Object.entries(merged)) {
+    if (value !== undefined) childEnv[key] = value
+  }
+  const result = spawnSync('/bin/sh', [restoreScript, ...args], {
+    env: childEnv,
+    cwd,
+    encoding: 'utf8',
+    timeout: RUN_TIMEOUT_MS,
+  })
+  const log = join(fakeDir, 'calls.log')
+  return {
+    status: result.status,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    calls: existsSync(log)
+      ? readFileSync(log, 'utf8').split('\n').filter(Boolean)
+      : [],
+  }
+}
+
+// A PATH holding only the utilities the script itself runs, so litestream
+// cannot be found however the machine running the test is set up.
+function pathWithoutLitestream(): string {
+  const dir = join(tmp, 'bare')
+  mkdirSync(dir)
+  for (const tool of ['dirname', 'mv', 'rm']) {
+    const found = spawnSync('/bin/sh', ['-c', `command -v ${tool}`], {
+      encoding: 'utf8',
+    }).stdout.trim()
+    symlinkSync(found, join(dir, tool))
+  }
+  return dir
+}
+
+const restoreCall = (extra = ''): string =>
+  `restore -integrity-check quick ${extra}-o ${target}/divvy.sqlite3-restoring ${URL_SENTINEL}`
+
+type Setup = () => { args: string[]; options?: RestoreOptions }
+
+describe('scripts/restore.sh, run', { timeout: RUN_TIMEOUT_MS * 3 }, () => {
+  const existing = (name: string): Setup => () => {
+    writeFileSync(join(target, name), 'OLD')
+    return { args: [target] }
+  }
+  const badTxid = (txid: string): Setup => () => ({
+    args: [target],
+    options: { env: { RESTORE_TXID: txid } },
+  })
+  const badTimestamp = (timestamp: string): Setup => () => ({
+    args: [target],
+    options: { env: { RESTORE_TIMESTAMP: timestamp } },
+  })
+
+  it.each<[string, Setup, string]>([
+    ['no argument', () => ({ args: [] }), 'usage:'],
+    ['two arguments', () => ({ args: [target, live] }), 'usage:'],
+    ['an empty argument', () => ({ args: [''] }), 'empty string'],
+    [
+      'a target that does not exist',
+      () => ({ args: [join(area, 'missing')] }),
+      'does not exist',
+    ],
+    [
+      'a target that is a file',
+      () => {
+        writeFileSync(join(area, 'a-file'), 'FILE')
+        return { args: [join(area, 'a-file')] }
+      },
+      'is not a directory',
+    ],
+    [
+      'LITESTREAM_REPLICA_URL unset',
+      () => ({
+        args: [target],
+        options: { env: { LITESTREAM_REPLICA_URL: undefined } },
+      }),
+      'LITESTREAM_REPLICA_URL is not set',
+    ],
+    [
+      'LITESTREAM_REPLICA_URL empty',
+      () => ({ args: [target], options: { env: { LITESTREAM_REPLICA_URL: '' } } }),
+      'LITESTREAM_REPLICA_URL is not set',
+    ],
+    ['a database already in the target', existing('divvy.sqlite3'), 'divvy.sqlite3 already exists'],
+    ['a -wal in the target', existing('divvy.sqlite3-wal'), 'divvy.sqlite3-wal already exists'],
+    ['a -shm in the target', existing('divvy.sqlite3-shm'), 'divvy.sqlite3-shm already exists'],
+    [
+      'a -journal in the target',
+      existing('divvy.sqlite3-journal'),
+      'divvy.sqlite3-journal already exists',
+    ],
+    [
+      'a half-finished restore in the target',
+      existing('divvy.sqlite3-restoring'),
+      'divvy.sqlite3-restoring already exists',
+    ],
+    [
+      'a dangling symlink at the database name',
+      () => {
+        symlinkSync(join(area, 'gone'), join(target, 'divvy.sqlite3'))
+        return { args: [target] }
+      },
+      'divvy.sqlite3 already exists',
+    ],
+    [
+      "Litestream's state directory in the target",
+      () => {
+        mkdirSync(join(target, '.divvy.sqlite3-litestream'))
+        return { args: [target] }
+      },
+      '.divvy.sqlite3-litestream already exists',
+    ],
+    [
+      "the live database's directory as the target",
+      () => {
+        rmSync(join(live, 'divvy.sqlite3'))
+        return { args: [live] }
+      },
+      "is the live database's directory",
+    ],
+    [
+      "a symlink to the live database's directory as the target",
+      () => {
+        rmSync(join(live, 'divvy.sqlite3'))
+        symlinkSync(live, join(area, 'alias'))
+        return { args: [join(area, 'alias')] }
+      },
+      "is the live database's directory",
+    ],
+    [
+      'both RESTORE_TXID and RESTORE_TIMESTAMP',
+      () => ({
+        args: [target],
+        options: {
+          env: {
+            RESTORE_TXID: '0000000000000002',
+            RESTORE_TIMESTAMP: '2026-01-31T09:00:00Z',
+          },
+        },
+      }),
+      'both set',
+    ],
+    ['a short RESTORE_TXID', badTxid('2'), 'RESTORE_TXID must be'],
+    ['a 0x RESTORE_TXID', badTxid('0x00000000000002'), 'RESTORE_TXID must be'],
+    ['an uppercase RESTORE_TXID', badTxid('000000000000000A'), 'RESTORE_TXID must be'],
+    ['a 17-digit RESTORE_TXID', badTxid('00000000000000002'), 'RESTORE_TXID must be'],
+    ['a RESTORE_TXID with a flag in it', badTxid('0000000000000002 -force'), 'RESTORE_TXID must be'],
+    ['a word as RESTORE_TIMESTAMP', badTimestamp('yesterday'), 'RESTORE_TIMESTAMP must be'],
+    [
+      'a RESTORE_TIMESTAMP with a space',
+      badTimestamp('2026-01-31 09:00:00Z'),
+      'RESTORE_TIMESTAMP must be',
+    ],
+    [
+      'a RESTORE_TIMESTAMP with a command in it',
+      badTimestamp('2026-01-31T09:00:00Z;rm'),
+      'RESTORE_TIMESTAMP must be',
+    ],
+    [
+      'litestream not on PATH',
+      () => ({ args: [target], options: { path: pathWithoutLitestream() } }),
+      'litestream is not on PATH',
+    ],
+  ])('refuses %s: exit 2, litestream never runs, nothing changes', (_label, setup, reason) => {
+    const { args, options } = setup()
+    const before = snapshot(area)
+    const run = runRestore(args, options)
+
+    expect(run.status).toBe(2)
+    expect(run.calls).toEqual([])
+    const errors = run.stderr
+      .split('\n')
+      .filter((line) => line.startsWith('restore.sh: ERROR: '))
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toContain(reason)
+    expect(run.stdout).toBe('')
+    expect(snapshot(area)).toEqual(before)
+  })
+
+  it('restores the latest backup into the target through a temporary name', () => {
+    const run = runRestore([target])
+
+    expect(run.status).toBe(0)
+    expect(run.calls).toEqual([restoreCall()])
+    expect(readdirSync(target)).toEqual(['divvy.sqlite3'])
+    expect(readFileSync(join(target, 'divvy.sqlite3'), 'utf8')).toBe('RESTORED')
+    expect(run.stdout).toBe(`restored: ${target}/divvy.sqlite3\n`)
+    expect(readFileSync(join(live, 'divvy.sqlite3'), 'utf8')).toBe('LIVE')
+  })
+
+  it('takes a target relative to where it is run', () => {
+    const run = runRestore(['restored'], { cwd: area })
+
+    expect(run.status).toBe(0)
+    expect(run.calls).toEqual([
+      `restore -integrity-check quick -o restored/divvy.sqlite3-restoring ${URL_SENTINEL}`,
+    ])
+    expect(readdirSync(target)).toEqual(['divvy.sqlite3'])
+  })
+
+  it.each([
+    ['RESTORE_TXID', '00000000000000a2', '-txid 00000000000000a2 '],
+    ['RESTORE_TIMESTAMP', '2026-01-31T09:00:00Z', '-timestamp 2026-01-31T09:00:00Z '],
+    ['RESTORE_TIMESTAMP', '2026-01-31T22:00:00.5+13:00', '-timestamp 2026-01-31T22:00:00.5+13:00 '],
+  ])('restores to a point in time from %s=%s', (name, value, flags) => {
+    const run = runRestore([target], { env: { [name]: value } })
+
+    expect(run.status).toBe(0)
+    expect(run.calls).toEqual([restoreCall(flags)])
+    expect(readdirSync(target)).toEqual(['divvy.sqlite3'])
+  })
+
+  it.each(['fail', 'partial'])(
+    'exits 1 and leaves the target empty when litestream fails (%s)',
+    (mode) => {
+      const run = runRestore([target], { env: { FAKE_LITESTREAM: mode } })
+
+      expect(run.status).toBe(1)
+      expect(run.calls).toEqual([restoreCall()])
+      expect(readdirSync(target)).toEqual([])
+      expect(run.stderr).toContain('nothing was written')
+      expect(run.stdout).toBe('')
+    },
+  )
+
+  it('does not replace a database that appears while it restores', () => {
+    const run = runRestore([target], { env: { FAKE_LITESTREAM: 'race' } })
+
+    expect(run.status).toBe(2)
+    expect(run.stderr).toContain('appeared while restoring')
+    expect(readdirSync(target)).toEqual(['divvy.sqlite3'])
+    expect(readFileSync(join(target, 'divvy.sqlite3'), 'utf8')).toBe('INTRUDER')
+  })
+
+  it('hands litestream the credentials and never prints them or the replica URL', () => {
+    const ok = runRestore([target])
+    const okEnv = readFileSync(join(fakeDir, 'litestream.env'), 'utf8')
+    rmSync(join(target, 'divvy.sqlite3'))
+    const failed = runRestore([target], { env: { FAKE_LITESTREAM: 'fail' } })
+
+    expect(ok.status).toBe(0)
+    expect(failed.status).toBe(1)
+    expect(okEnv).toMatch(new RegExp(`^LITESTREAM_ACCESS_KEY_ID=${ID_SENTINEL}$`, 'm'))
+    expect(okEnv).toMatch(
+      new RegExp(`^LITESTREAM_SECRET_ACCESS_KEY=${SECRET_SENTINEL}$`, 'm'),
+    )
+    const calls = readFileSync(join(fakeDir, 'calls.log'), 'utf8')
+    expect(calls).not.toContain(ID_SENTINEL)
+    expect(calls).not.toContain(SECRET_SENTINEL)
+    for (const run of [ok, failed]) {
+      for (const secret of [ID_SENTINEL, SECRET_SENTINEL, URL_SENTINEL]) {
+        expect(run.stdout + run.stderr).not.toContain(secret)
+      }
+    }
   })
 })
