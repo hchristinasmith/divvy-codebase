@@ -27,9 +27,12 @@ import connection from './connection.ts'
 // `nzCalendarDate` is the shared one; a Date that is not an instant is
 // skipped before it is called, so its RangeError is never reached here.
 //
-// This module must stay write-free, because the insights agent imports it
-// and server/agents/__tests__/no-money-writes.test.ts refuses an agent
-// import of a server/db module that writes. Nothing it returns changes.
+// The insights agent imports this module, so it must stay write-free and
+// must not import a module that writes (./overview.ts does).
+// server/agents/__tests__/no-money-writes.test.ts refuses an agent import
+// of a server/db module that itself writes, but it does not follow that
+// module's own imports: the second half is held by this comment alone
+// until #336.
 
 type Db = typeof connection
 

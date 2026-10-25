@@ -15,16 +15,15 @@
 // not categorised by hand, or any row whose category is Drawings. A half she
 // categorised by hand stays and counts under her category. Finding the halves
 // needs both scopes' rows, so a `strawb` run makes one more read: every
-// candidate half, all-time, through `loadDrawingIds` (server/db/drawings.ts),
-// taking only id, scope, date and amount (so a personal inflow's merchant,
-// category and description are never read). A `personal` run never makes that read and
-// reads no strawb row: a personal half is an inflow, which is never spend.
-// It therefore cannot tell a drawing's in half from any other inflow, so the
-// interim own-account transfer rule (`excludeOwnAccountTransfers`, below)
-// may pair it with a personal outflow of equal cents on another personal
-// account, and that outflow is then not counted as spend. The strawb side
-// has no such gap. `loadDrawingIds` is imported from server/db/drawings.ts,
-// which only reads.
+// candidate half, all-time, through `loadDrawingIds` (server/db/drawings.ts,
+// which only reads), taking only id, scope, date and amount (so a personal
+// inflow's merchant, category and description are never read). A `personal`
+// run never makes that read and reads no strawb row: a personal half is an
+// inflow, which is never spend. It therefore cannot tell a drawing's in half
+// from any other inflow, so the interim own-account transfer rule
+// (`excludeOwnAccountTransfers`, below) may pair it with a personal outflow
+// of equal cents on another personal account, and that outflow is then not
+// counted as spend. The strawb side has no such gap.
 //
 // Own-account transfers. How a transfer between the scope's own accounts is
 // told from spending is not set by #47 or prd-04; it is the open question on
@@ -36,7 +35,8 @@
 //
 // Days are Pacific/Auckland calendar days (YYYY-MM-DD), bucketed here in JS:
 // SQL date functions would need raw SQL, which nothing under server/agents/
-// may use. The date helpers come from shared/nz-dates.ts.
+// may use. Parsing a date, adding days and the NZ calendar date come from
+// shared/nz-dates.ts; the ISO-week arithmetic is here.
 //
 // Money is integer cents. Spend is an outflow's amount made positive;
 // inflows are never netted against spend. Totals go through `sumCents`, and
