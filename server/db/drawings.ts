@@ -29,8 +29,10 @@ import connection from './connection.ts'
 //
 // The insights agent imports this module, so it must stay write-free and
 // must not import a module that writes (./overview.ts does).
-// server/agents/__tests__/no-money-writes.test.ts enforces both, following
-// this module's server/db imports transitively.
+// server/agents/__tests__/no-money-writes.test.ts enforces both for
+// server/db modules, following this module's server/db imports
+// transitively. It does not follow an import of a module outside
+// server/db/, so that is held by this comment alone.
 
 type Db = typeof connection
 
