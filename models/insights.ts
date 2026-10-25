@@ -1,7 +1,9 @@
 // The `insights` row and the chart spec it carries (prd-04 Ruling 2,
-// Ruling 3). The spec is data, never HTML: `validateChartSpec` is run on
-// write (before the row is stored) and on render (before the renderer sees
-// it). Changing the accepted subset below is a PRD amendment, not an edit.
+// Ruling 3, Ruling 8). The spec is data, never HTML: `validateChartSpec` is
+// run on write (before the row is stored) and on render (before the renderer
+// sees it), even though code writes it, because merchant text reaches its
+// labels (Ruling 8). Changing the accepted subset below is a PRD amendment,
+// not an edit.
 //
 // This file imports nothing, so client and server both use it as is.
 //
@@ -88,8 +90,8 @@ export interface ChartSpec {
 
 // Phase 1 caps. `maxDepth` counts containers, the root object included.
 // `maxRows` caps every array; `maxKeys` caps every object. `maxChars` caps
-// the stored text, and phase 1 holds an object to a running estimate of its
-// JSON length.
+// the stored text: phase 1 holds an object to a running estimate of its JSON
+// length, and the returned spec's exact JSON length is checked last.
 export const CHART_LIMITS = {
   maxChars: 64_000,
   maxNodes: 3_000,
@@ -117,6 +119,7 @@ export type ChartSpecRejection =
   | 'bad_value'
   | 'url_in_string'
   | 'markup_in_string'
+  | 'bidi_in_string'
 
 export type ChartSpecResult =
   | { ok: true; spec: ChartSpec }
@@ -335,9 +338,15 @@ function isInvisible(code: number): boolean {
     (code >= 0x7f && code <= 0x9f) ||
     (code >= 0x200b && code <= 0x200f) ||
     (code >= 0x202a && code <= 0x202e) ||
-    (code >= 0x2060 && code <= 0x2064) ||
+    (code >= 0x2060 && code <= 0x2069) ||
     INVISIBLE.has(code)
   )
+}
+
+// Embedding, override and isolate controls: they reorder how a label reads,
+// so a merchant name could be shown as something it is not.
+function isBidiControl(code: number): boolean {
+  return (code >= 0x202a && code <= 0x202e) || (code >= 0x2066 && code <= 0x2069)
 }
 
 // Rejects on doubt: "Metadata: x" is refused along with "data:x".
@@ -346,10 +355,12 @@ function checkText(value: string, path: string): string {
   let compact = ''
   for (const char of folded) {
     const code = char.codePointAt(0) ?? 0
+    if (isBidiControl(code)) reject('bidi_in_string', path)
     if (isInvisible(code) || /\s/.test(char)) continue
     compact += char
   }
-  if (compact.startsWith('//') || URL_SCHEMES.some((scheme) => compact.includes(scheme))) {
+  // A browser reads a leading `\\` or `/\` as `//`.
+  if (/^[\\/]{2}/.test(compact) || URL_SCHEMES.some((scheme) => compact.includes(scheme))) {
     reject('url_in_string', path)
   }
   if (compact.includes('<')) reject('markup_in_string', path)
@@ -455,7 +466,11 @@ function readSpec(root: Plain): ChartSpec {
 /** Checks an in-memory chart spec; returns a fresh copy built from named fields. */
 export function validateChartSpec(input: unknown): ChartSpecResult {
   try {
-    return { ok: true, spec: readSpec(snapshot(input)) }
+    const spec = readSpec(snapshot(input))
+    // The phase 1 estimate does not count escapes or commas; this holds the
+    // stored text to the cap `parseChartSpecJson` applies on render.
+    if (JSON.stringify(spec).length > CHART_LIMITS.maxChars) reject('too_large', '$')
+    return { ok: true, spec }
   } catch (err) {
     if (err instanceof Rejection) return err.result
     throw err

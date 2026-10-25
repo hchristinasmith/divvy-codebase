@@ -263,6 +263,8 @@ const URL_TEXT: [string, string][] = [
   ['fullwidth letters', `\uff48\uff54\uff54\uff50\uff1a//${CANARY}`],
   ['a protocol-relative URL', `//${CANARY}.example`],
   ['a protocol-relative URL after spaces', `  //${CANARY}.example`],
+  ['a backslash protocol-relative URL', `\\\\${CANARY}.example`],
+  ['a mixed-slash protocol-relative URL', `/\\${CANARY}.example`],
 ]
 
 const MARKUP_TEXT: [string, string][] = [
@@ -276,12 +278,18 @@ const TEXT_SITES: [string, (spec: MutableSpec, text: string) => void, string][] 
   ['a channel title', (s, text) => { s.encoding.y.title = text }, '$.encoding.y.title'],
 ]
 
+// Embedding, override and isolate controls reorder how a label reads.
+const BIDI_TEXT: [string, string][] = [0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069].map(
+  (code): [string, string] => [`U+${code.toString(16).toUpperCase()}`, `Example${String.fromCodePoint(code)}${CANARY}`],
+)
+
 type TextCase = [string, string, (spec: MutableSpec, text: string) => void, string, ChartSpecRejection, string]
 
 describe('strings carrying URLs or markup', () => {
   const cases = TEXT_SITES.flatMap(([site, put, path]): TextCase[] => [
     ...URL_TEXT.map(([name, text]): TextCase => [site, name, put, text, 'url_in_string', path]),
     ...MARKUP_TEXT.map(([name, text]): TextCase => [site, name, put, text, 'markup_in_string', path]),
+    ...BIDI_TEXT.map(([name, text]): TextCase => [site, name, put, text, 'bidi_in_string', path]),
   ])
 
   it.each(cases)('rejects %s with %s', (_site, _name, put, text, reason, path) => {
@@ -342,6 +350,7 @@ describe('non-plain input', () => {
     ['a non-enumerable property', (s) => { Object.defineProperty(s.encoding.x, 'title', { value: CANARY, enumerable: false }) }, 'not_plain', '$.encoding.x.title'],
     ['a hole in values', (s) => { s.data.values.length = 3 }, 'not_plain', '$.data.values'],
     ['an extra property on values', (s) => { Object.assign(s.data.values, { extra: CANARY }) }, 'not_plain', '$.data.values'],
+    ['values with a foreign prototype', (s) => { Object.setPrototypeOf(s.data.values, { note: CANARY }) }, 'not_plain', '$.data.values'],
     ['NaN', (s) => { s.data.values[0].cents = NaN }, 'bad_number', '$.data.values[0]'],
     ['Infinity', (s) => { s.data.values[0].cents = Infinity }, 'bad_number', '$.data.values[0]'],
     ['-Infinity', (s) => { s.data.values[0].cents = -Infinity }, 'bad_number', '$.data.values[0]'],
@@ -464,6 +473,15 @@ describe('size and nesting caps', () => {
     spec.data.values = Array.from({ length: CHART_LIMITS.maxRows }, () => ({ ...row }))
     expect(JSON.stringify(spec).length).toBeGreaterThan(CHART_LIMITS.maxChars)
     expect(rejection(validateChartSpec(spec)).reason).toBe('too_large')
+  })
+
+  it('rejects a spec on write whose stored text the render-side cap would refuse', () => {
+    const spec = base()
+    // Each control character is one char in memory and six in JSON.
+    const label = '\u0001'.repeat(CHART_LIMITS.maxStringChars)
+    spec.data.values = Array.from({ length: 50 }, (_, i) => ({ week: `Sample W${i}`, cents: i, a: label, b: label, c: label }))
+    expect(JSON.stringify(spec).length).toBeGreaterThan(CHART_LIMITS.maxChars)
+    expect(rejection(validateChartSpec(spec))).toEqual({ reason: 'too_large', path: '$' })
   })
 
   it('rejects a 10 MB string value quickly', () => {
