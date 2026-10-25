@@ -65,19 +65,20 @@ export interface Transaction {
   akahu_category_group_name?: string | null
 }
 
-// A `transactions` row as GET and PATCH /api/v1/transactions answer it (#212),
-// and as the agent accept route answers it (#297). An explicit column list, so
-// a column added to the table stays out of these responses until it is named
-// in TRANSACTION_ROW_COLUMNS below. Legacy category_*, Akahu's akahu_category_*,
-// conversion_*, source, posted_date and merchant_nzbn are deliberately absent.
+// A `transactions` row as GET and PATCH /api/v1/transactions (#212) and the
+// agent accept route (#297) answer it. It is read through
+// TRANSACTION_ROW_COLUMNS below, so a column added to the table stays out of
+// these responses until it is named there.
+//
+// Deliberately absent: the legacy category_* and Akahu's akahu_category_*,
+// because the response carries the effective `category` and its
+// `category_source` (prd-01 Ruling 4); conversion_*, which the Dashboard's
+// envelope does not carry; and source, posted_date and merchant_nzbn.
 //
 // Nullability follows the migrations, not the Transaction interface above:
 // every column the original table created is nullable, and a pending row
 // (prd-01 Ruling 1) has NULL `akahu_id`, `hash`, `created_at`, `balance_cents`
-// and `category`. The conversion_* columns are absent because the Dashboard's
-// envelope does not carry them; the legacy category_* and Akahu's
-// akahu_category_* are absent because the response carries the effective
-// `category` and its `category_source` (Ruling 4).
+// and `category`.
 export interface TransactionRow {
   id: number
   akahu_id: string | null
@@ -108,16 +109,14 @@ export interface TransactionRow {
 }
 
 // The select list for a TransactionRow, in the interface's order. Every reader
-// of `transactions` that answers or returns a row takes its columns from here
-// (server/db/synced.ts, server/db/transactions.ts), so there is one list to
-// keep in step with the interface. `satisfies` refuses a name the interface
-// lacks; a name the interface has and the list lacks is caught by the
-// key-set pins in the tests.
+// of `transactions` that returns a whole row selects these (server/db/synced.ts,
+// server/db/transactions.ts), so there is one list to keep in step with the
+// interface. `satisfies` refuses a name the interface lacks; a name the
+// interface has and the list lacks is caught by the literal key-set pins in
+// the tests.
 //
-// It lives here rather than in server/db/ because this file is the one both
-// server/ and mcp/ may import (mcp/ never imports server/**), and beside the
-// interface it is typed against. models/insights.ts keeps a runtime const for
-// the same reason.
+// It sits in models/, beside the interface it is typed against, because
+// mcp/ may import models/ but never server/**.
 export const TRANSACTION_ROW_COLUMNS = [
   'id',
   'akahu_id',

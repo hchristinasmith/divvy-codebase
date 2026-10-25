@@ -3,7 +3,6 @@ import connection from '../connection.ts'
 import { assertInMemory } from '../../test-utils/app.ts'
 import {
   getTransactionCategory,
-  getTransactionRow,
   searchTxns,
   setUserCategory,
 } from '../transactions.ts'
@@ -522,31 +521,6 @@ describe('getTransactionCategory', () => {
 
   it('an unknown id gives undefined', async () => {
     expect(await getTransactionCategory(999_999, connection)).toBeUndefined()
-  })
-})
-
-describe('getTransactionRow', () => {
-  it('a known id gives exactly the listed keys, with the stored values', async () => {
-    const stored = await rowFor('trans_fixture_002')
-
-    const row = await getTransactionRow(stored.id, connection)
-
-    expect(Object.keys(row ?? {}).sort()).toEqual([...ROW_KEYS].sort())
-    expect(row).toEqual(Object.fromEntries(ROW_KEYS.map((key) => [key, stored[key]])))
-  })
-
-  it('an unknown id gives undefined', async () => {
-    expect(await getTransactionRow(999_999, connection)).toBeUndefined()
-  })
-
-  it('works on a xero-sourced row, which PATCH also answers', async () => {
-    const { id } = await rowFor('trans_fixture_002')
-    await connection('transactions').where({ id }).update({ source: 'xero' })
-
-    const row = await getTransactionRow(id, connection)
-
-    expect(row?.akahu_id).toBe('trans_fixture_002')
-    expect(Object.keys(row ?? {}).sort()).toEqual([...ROW_KEYS].sort())
   })
 })
 

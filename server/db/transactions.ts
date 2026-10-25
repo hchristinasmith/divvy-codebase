@@ -39,17 +39,6 @@ export async function searchTxns(
 }
 
 /**
- * The row as it is stored now, with the TransactionRow columns, or undefined
- * when no transaction has that id. No source filter: any row, Xero included.
- */
-export async function getTransactionRow(
-  id: number,
-  db = connection,
-): Promise<TransactionRow | undefined> {
-  return db('transactions').where({ id }).first([...TRANSACTION_ROW_COLUMNS])
-}
-
-/**
  * A transaction's effective category and who set it, or undefined when no
  * transaction has that id. For the agent accept route's stale check (#51,
  * decision 70b41742): a proposal is refused once the category has moved, or
