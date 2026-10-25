@@ -82,9 +82,8 @@ Conclusions, and what the schema does about each:
   `transactions_account_status_idx`.
 - That set is **replaced wholesale** (every Akahu-sourced pending row, across
   accounts), delete then insert, inside the same database transaction as the
-  settled upsert (prd-01
-  Ruling 1). Akahu's own advice is the same: "completely rebuild your local
-  copy of this data".
+  settled upsert (prd-01 Ruling 1). Akahu's own advice is the same:
+  "completely rebuild your local copy of this data".
 - Two identical pending items become **two rows**; the test
   "holds identical pending rows with no akahu_id or hash side by side" pins
   that the schema allows it.

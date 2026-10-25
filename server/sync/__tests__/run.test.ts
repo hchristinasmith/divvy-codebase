@@ -427,7 +427,10 @@ describe('accounts: scope and source are never written by sync', () => {
 // so a re-sync that updates or drops the account must leave both in place.
 describe('accounts: a role and a bill link survive re-sync', () => {
   it('keeps the account_settings role and the bills.account_id through an update and a dropped account', async () => {
-    await runSync({ client: fakeAkahu().client, db, now: fixed(NOW) })
+    expect(
+      (await runSync({ client: fakeAkahu().client, db, now: fixed(NOW) }))
+        .outcome,
+    ).toBe('success')
     const credit = await db('accounts')
       .where({ akahu_id: 'acc_fixture0003credit' })
       .first()
@@ -467,30 +470,36 @@ describe('accounts: a role and a bill link survive re-sync', () => {
       '"Fixture Credit Card"',
       '"Fixture Credit Card Renamed"',
     )
-    await runSync({
+    // A failed run rolls back and would keep both vacuously, so each run
+    // must succeed.
+    const second = await runSync({
       client: fakeAkahu({ accounts: renamed }).client,
       db,
       now: fixed(at(15 * MINUTE_MS)),
     })
+    expect(second.outcome).toBe('success')
     expect((await db('accounts').where({ id: credit.id }).first()).name).toBe(
       'Fixture Credit Card Renamed',
     )
     await expectRoleAndBillKept()
 
     // Run 3: Akahu stops listing the card. Sync must not delete the account.
-    const listed = JSON.parse(accounts) as { items: { _id: string }[] }
-    const withoutCard = JSON.stringify({
-      ...listed,
-      items: listed.items.filter((a) => a._id !== 'acc_fixture0003credit'),
-    })
-    await runSync({
+    // Cut as text, like the rest of the harness: parsing the fixture would
+    // turn its balances into floats (docs/testing.md, Fixtures). The card is
+    // the last item, so the cut runs from the comma before it to the `]`.
+    const card = accounts.indexOf('"_id": "acc_fixture0003credit"')
+    const withoutCard =
+      accounts.slice(0, accounts.lastIndexOf(',', card)) +
+      accounts.slice(accounts.indexOf('\n  ]', card))
+    expect(withoutCard).not.toContain('acc_fixture0003credit')
+    const third = await runSync({
       client: fakeAkahu({ accounts: withoutCard }).client,
       db,
       now: fixed(at(30 * MINUTE_MS)),
     })
+    expect(third.outcome).toBe('success')
     expect(await db('accounts').select('id')).toHaveLength(3)
     await expectRoleAndBillKept()
-    expect(await db('account_settings').select()).toEqual([role])
   })
 })
 
@@ -576,6 +585,21 @@ describe('the settled window (Ruling 2, amended by Ruling 10)', () => {
       await windowAfter([
         { started_at: at(-15 * MINUTE_MS).toISOString(), outcome: 'success' },
         { started_at: 'not-a-timestamp', outcome: 'success' },
+      ]),
+    ).toEqual({
+      start: at(-30 * DAY_MS - 15 * MINUTE_MS).toISOString(),
+      end: NOW.toISOString(),
+    })
+  })
+
+  it("skips a start SQLite reads but Date.parse does not, such as 'now' (#169)", async () => {
+    // julianday('now') is the wall clock, later than every real start, while
+    // windowFor cannot parse 'now'; ranking it would send the first-run
+    // window forever, the bug above by another spelling.
+    expect(
+      await windowAfter([
+        { started_at: at(-15 * MINUTE_MS).toISOString(), outcome: 'success' },
+        { started_at: 'now', outcome: 'success' },
       ]),
     ).toEqual({
       start: at(-30 * DAY_MS - 15 * MINUTE_MS).toISOString(),
