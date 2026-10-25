@@ -40,4 +40,6 @@ export const TRANSACTION_COLUMNS = [
   'akahu_category_name',
   'akahu_category_group_id',
   'akahu_category_group_name',
+  'posted_date',
+  'merchant_nzbn',
 ]

@@ -129,6 +129,8 @@ describe('a first run', () => {
       akahu_category_name: 'Cafes and restaurants',
       akahu_category_group_id: 'group_fixture0001',
       akahu_category_group_name: 'Lifestyle',
+      posted_date: null,
+      merchant_nzbn: null,
     })
 
     const amounts = await db('transactions')
