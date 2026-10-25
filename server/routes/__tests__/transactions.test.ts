@@ -74,6 +74,33 @@ describe('GET /api/v1/transactions', () => {
     expect(Object.keys(row).sort()).toEqual([...TRANSACTION_COLUMNS].sort())
   })
 
+  it('today: returns a row whose source is xero, with every stored column', async () => {
+    await connection('transactions')
+      .where({ akahu_id: 'trans_fixture_002' })
+      .update({ source: 'xero' })
+
+    const res = await api.get('/api/v1/transactions')
+
+    expect(res.status).toBe(200)
+    const row = res.body.txns.find(
+      (t: { akahu_id: string }) => t.akahu_id === 'trans_fixture_002',
+    )
+    expect(row).toMatchObject({ source: 'xero' })
+    expect(Object.keys(row).sort()).toEqual([...TRANSACTION_COLUMNS].sort())
+  })
+
+  it('today: answers a repeated ?description= with 200', async () => {
+    const res = await api.get(
+      '/api/v1/transactions?description=Sample&description=Superette',
+    )
+
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body.txns)).toBe(true)
+    // Express turns the repeated key into an array, which the LIKE filter
+    // stringifies to 'Sample,Superette'; no description contains that comma.
+    expect(res.body.txns).toHaveLength(0)
+  })
+
   it("answers 500 with a fixed text and logs the error's class, never the search string", async () => {
     const SEARCH = 'Sample Superette'
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -227,6 +254,22 @@ describe('PATCH /api/v1/transactions/:id', () => {
 
     expect(Object.keys(res.body).sort()).toEqual(['transaction'])
     expect(res.body.transaction).toEqual(await rowFor('trans_fixture_002'))
+  })
+
+  it('today: answers a xero-sourced row with every stored column', async () => {
+    await connection('transactions')
+      .where({ akahu_id: 'trans_fixture_002' })
+      .update({ source: 'xero' })
+    const { id } = await rowFor('trans_fixture_002')
+
+    const res = await api
+      .patch(`/api/v1/transactions/${id}`)
+      .send({ category: 'Bakeries' })
+
+    expect(res.status).toBe(200)
+    expect(Object.keys(res.body.transaction).sort()).toEqual(
+      [...TRANSACTION_COLUMNS].sort(),
+    )
   })
 
   it('overwrites an earlier PATCH on the same row', async () => {
