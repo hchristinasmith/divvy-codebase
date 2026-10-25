@@ -61,6 +61,11 @@ Rejected alternatives:
 | Wishlist, `wish_web` concept | D11, still open; the Wishlist page is left untouched |
 | Per-account role/scope editing UI beyond a plain settings list | Not needed for one user; set once |
 
+### Out-of-scope addition (2026-10-25)
+| Theme presets and colour overrides | Later; Hannah 2026-10-25 "i dont want presets yet" |
+| Usage tags and the "Barely used" tile | Later; Hannah 2026-10-25 "Drop usage for now" |
+| Subscriptions from Xero bills | M4 (prd-05) |
+
 ## Done when
 
 1. The server returns one safe-to-spend number per scope, and the Overview shows exactly it. *Not met while* the client recomputes it, or a hand calculation from the same rows (liquid, bills, budgets, hold) differs by one cent.
@@ -71,6 +76,9 @@ Rejected alternatives:
 6. Each screen matches `Divvy.dc.html` at 1040px and 390px wide on colours, type sizes, radii and spacing. *Not met while* you, looking at both side by side, can point to a difference that is not a data difference.
 7. The phone tab bar shows Home, Budgets, Habits, Goals, Advisor and every tap target is at least 44px. *Not met while* a tab is smaller or a screen is unreachable.
 8. The Privacy screen says only things that are true of this build. *Not met while* it says "local model", "nightly" or "encrypted" without a checked basis.
+
+### Done-when addition (2026-10-25)
+9. The Subscriptions screen lists each regular charge in your data for the chosen scope, with per-month and per-year totals, and asks about name-matched merchants. *Not met while* a charge you know repeats is missing, a one-off charge appears without being asked about, a merchant you marked is shown the other way, or a personal subscription shows under Strawb (or the reverse).
 
 Items 1, 3, 4 are tests (the code does what is written). Items 2, 5 need a real-data check. Items 6–8 are a human reading. **Only 1 matters:** you read the hero number and agree it is what you could actually spend. Whether the *formula is right* is only judged by you, with your own bills and budgets in front of you.
 
@@ -130,6 +138,21 @@ Why: Hannah owes substantial personal income tax and is setting a personal accou
 ## Ruling 12 — Strawb's bills are paid from the Strawb tax pot first, so that money never counts as tax set aside (operator amendment, 2026-10-25; amends Ruling 11)
 Strawb's business account is both its tax pot and where its bills are paid from. So the Strawb pot is split, automatically, every time safe-to-spend runs: `strawb bills buffer = min(Strawb pot, Strawb unpaid bills)`; the pot counted against tax is `Strawb pot − buffer`, so `Strawb hold = max(0, taxRate × profit − (Strawb pot − buffer))`; and only the part of Strawb's unpaid bills the pot cannot cover, `Strawb unpaid bills − buffer`, is subtracted from liquid. No setting: the buffer follows the bills as they change, are added or are marked paid. Why: Hannah chose the automatic buffer over a fixed amount (2026-10-25); a fixed amount drifts out of date when a bill changes, and counting bill money as tax set aside understates the hold. Extends to: the Strawb and All views; the personal pot and personal bills are unchanged. Total money subtracted is the same as before whenever the pot covers the bills; only which line it sits on moves.
 
+## Ruling 13 — Handoff update 2 is the design reference (operator amendment, 2026-10-25)
+`docs/design/Divvy.dc.html` is replaced by handoff update 2, and its change list lands as `docs/design/CHANGES-2.md` beside `handoff.md` (unchanged). Update 2 is the "Candy pink" look: ten pink tokens as CSS custom properties, cards with no border and a hard offset shadow, 6px radius on pills, buttons, chips and bars, a text wordmark, and a new Overview layout (inset account tiles, Alerts and Recent activity side by side). Hannah chose (2026-10-25) to apply it to the built shell before any more screens, so the Overview (#45) and every later screen are built once, in the new look. Done-when 6 is judged against the new file from now on. Why: re-skinning after the screens exist would redo every screen. Extends to: every prd-02 screen. Theme presets and per-user colour overrides are out of scope (Hannah: "i dont want presets yet"); the tokens exist so presets can be added later without touching components. Where update 2 contradicts a ruling (its Google Fonts link against Ruling 7, its `taxRate` default against the settings rulings), the ruling wins.
+
+## Ruling 14 — Subscriptions is a screen, detected from Akahu transactions (operator amendment, 2026-10-25; amends Ruling 8 and the Out-of-scope row "Need/want tagging, subscription detection" in prd-04)
+A Subscriptions screen sits after Bills in the nav and follows the All / Personal / Strawb scope (CHANGES-2.md §3). On the phone it is reached from the Overview links (the #33 answer); the tab bar stays at five.
+- **Detection is computed on read, by a pure function in `shared/subscriptions.ts`.** A subscription is a merchant (Akahu `merchant_id`, else the normalised description) with at least 3 settled charges in scope whose gaps are all weekly (7 ± 2 days), all monthly (30 ± 4) or all yearly (365 ± 10). Its amount is the latest charge. These numbers are named constants with tests.
+- **Hannah has the last word on what is a subscription.** She can mark any merchant as a subscription, and unmark a detected one; her mark wins over detection both ways. A merchant with fewer than 3 charges whose name matches a fixed list of subscription hints (a named constant, e.g. streaming, software, "membership", "subscription") is not counted; it is shown as "Is this a subscription?" with Yes and No, and her answer is remembered. Hannah, 2026-10-25: "if i say that its a subscription then you can tag it as one … if it looks like it might be because of name of merchant too, then ask me".
+- **Totals are integer cents.** Per month sums monthly charges, weekly × 52 ÷ 12 and yearly ÷ 12, each rounded half-up once per subscription. Per year is the same set × 12 from those per-month figures.
+- **No usage tags.** Hannah dropped usage for now (2026-10-25): no Barely used / Some use / Used often chips and no "Barely used" tile. The summary shows Per month and Per year only.
+- **Cancel marks, it never acts.** "Cancel" records the date in a new table (keyed by scope and merchant key, which also holds her subscription / not-a-subscription answer); no call goes to the merchant or bank. If a charge lands after that date, the row shows "charged again on <date> after you cancelled" and returns to active.
+- **Subscriptions are not part of safe-to-spend.** Their charges already land as transactions and future ones are held by Bills where Hannah enters them.
+- **Xero bills are not read** until M4 (prd-05).
+- The advisor banner ("Help me cancel →") opens Claude desktop, like the Advisor placeholder; without usage tags it names no subscriptions.
+Ruling 8 still deletes the old Subscriptions page in wave 5; the new screen is a new component in the same nav slot. Why: Hannah added the screen to prd-02 on 2026-10-25 ("Add to prd-02 now"). Extends to: prd-03 may later read the same function; prd-04's detection row is superseded for subscriptions only.
+
 ## Sequencing
 
 Waves are **layers**: issues in a wave are fenced apart and built in parallel; one PR per wave. Where a screen and its route are in the same wave they are built against the typed contract from wave 1 (`shared/contracts.ts`), not against each other. `server/server.ts` is a shared mount point that prd-01 and prd-03 also touch; wave 1 turns it into a route barrel so later edits are one-line and merge trivially.
@@ -163,6 +186,11 @@ Waves are **layers**: issues in a wave are fenced apart and built in parallel; o
 - `prd02 w5: the old Dashboard, Transactions, Targets, Subscriptions and Challenges pages are gone`.
 
 Unfiled work implied, described not numbered: pixel review pass against the prototype; the Advisor screen becomes a chat if the API question in prd-03 resolves; Strawb gains Xero lines in M4.
+
+### Sequencing addition (2026-10-25)
+- **Wave 2:** `prd02 w2: the shell uses handoff update 2 (Candy pink tokens, borderless cards, wordmark)` (#228) — lands `Divvy.dc.html` and `CHANGES-2.md`, re-skins the built shell. Blocks #45.
+- **Wave 3:** `prd02 w3: subscriptions are detected from transactions and can be marked and cancelled` (#229) — `shared/subscriptions.ts`, a migration for the marks table (subscription / not, cancelled date), the route.
+- **Wave 4:** `prd02 w4: the Subscriptions screen shows regular charges, totals, "Is this a subscription?" and cancel` (#230).
 
 ## Open questions that block this
 
