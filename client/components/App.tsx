@@ -5,7 +5,6 @@ import { ScopeProvider } from '../context/ScopeContext.tsx'
 import { screenRoutes } from '../screens/routes.tsx'
 import Dashboard from './Dashboard/Dashboard.tsx'
 import Settings from './Settings.tsx'
-import Wishlist from './Wishlist/WishlistDashboard.tsx'
 import Challenges from './Challenges/ChallengesDashboard.tsx'
 import Subscriptions from './ManageSubscriptions/Subscriptions.tsx'
 import Transactions from './Transactions/TransactionsPage.tsx'
@@ -14,8 +13,8 @@ import Targets from './Targets/targets.tsx'
 // Every page renders inside the handoff shell, under one scope.
 //
 // The handoff's screens come from the route table in screens/routes.tsx.
-// The routes below are the old pages: Wishlist and Settings are linked from
-// the sidebar; the rest stay reachable by URL only until the prd-02 w5 sweep
+// The routes below are the old pages: Settings is linked from the sidebar;
+// the rest stay reachable by URL only until the prd-02 w5 sweep
 // deletes them (prd-02 Ruling 8). The old Dashboard moved to /dashboard when
 // the Overview took "/".
 export default function App() {
@@ -24,7 +23,6 @@ export default function App() {
       <Shell>
         <Routes>
           {screenRoutes}
-          <Route path="/wishlist" element={<Wishlist />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/transactions" element={<Transactions />} />

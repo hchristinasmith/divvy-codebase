@@ -12,12 +12,11 @@ export interface NavEntry {
 }
 
 // Below the handoff's screens: pages the handoff does not have that stay
-// reachable (prd-02 Ruling 8; Wishlist until D11). Their routes live in
+// reachable (prd-02 Ruling 8). Their routes live in
 // App.tsx with the other old pages. Transactions, Targets, Challenges and
 // the old Dashboard are routed there but linked from nowhere, and so is the
 // old Subscriptions page (/manage-subscriptions).
 export const SECONDARY_NAV: readonly NavEntry[] = [
-  { path: '/wishlist', label: 'Wishlist', icon: 'wishlist' },
   { path: '/settings', label: 'Settings', icon: 'settings' },
 ]
 
