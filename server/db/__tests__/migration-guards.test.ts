@@ -142,6 +142,15 @@ describe('migrations after category_corrections (#134)', () => {
     await expectSurvivedLatest(db, transactionId, before)
   })
 
+  // knex's directory source also loads `.ts` and `.cjs` files; the canary's
+  // `.js` filter would silently skip one, so the two lists are pinned equal.
+  it("canary's migration source lists the same real migrations as knex's directory source", async () => {
+    db = knex(config.test)
+    const [, pending] = (await db.migrate.list()) as [unknown, { file: string }[]]
+    const canary = (await withRebuild.getMigrations([])).map((m) => m.file)
+    expect(canary).toEqual([...pending.map((m) => m.file), REBUILD])
+  })
+
   it('canary: a migration that rebuilds transactions cascades the corrections away, and the guard catches it', async () => {
     db = knex({ ...config.test, migrations: { migrationSource: withRebuild } })
     await migrateThroughCorrections(db)
