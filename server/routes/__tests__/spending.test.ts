@@ -443,6 +443,7 @@ describe('refusals are fixed text', () => {
     ['top 51', '?scope=all&top=51', TOP],
     ['top 1.5', '?scope=all&top=1.5', TOP],
     ['top not a number', '?scope=all&top=abc', TOP],
+    ['top with a leading zero', '?scope=all&top=05', TOP],
     ['top repeated', '?scope=all&top=5&top=5', TOP],
   ])('%s is a 400', async (_why, query, error) => {
     const res = await get(query)
@@ -487,6 +488,23 @@ describe('errors', () => {
     expect(res.text).not.toContain('42')
     expect(error.mock.calls).toStrictEqual([
       ['spending: could not read spending by category', 'SpendingDataError'],
+    ])
+  })
+
+  it('any other failure is a 500 with fixed text, never its message, logging only the class', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await seed()
+    vi.mocked(drawings.loadDrawingIds).mockRejectedValueOnce(
+      new Error('disk gone 91'),
+    )
+
+    const res = await get('?scope=all')
+
+    expect(res.status).toBe(500)
+    expect(res.body).toStrictEqual({ error: 'Could not read spending' })
+    expect(res.text).not.toContain('disk gone')
+    expect(error.mock.calls).toStrictEqual([
+      ['spending: could not read spending by category', 'Error'],
     ])
   })
 

@@ -173,6 +173,22 @@ describe('spendingByCategory', () => {
     expect(r.totalCents).toBe(3000)
   })
 
+  it('a 0-cent row opens no line of its own', () => {
+    const r = run([
+      tx({ amountCents: -3000 }),
+      // The only row in this category is 0 cents: not spending.
+      tx({ category: 'Cafes Invented', amountCents: 0 }),
+    ])
+
+    expect(r.categories.map((l) => l.category)).not.toContain('Cafes Invented')
+    expect(r.categories).toStrictEqual([
+      { category: 'Groceries Invented', spentCents: 3000 },
+    ])
+    expect(r.otherCents).toBe(0)
+    expect(r.uncategorisedCents).toBe(0)
+    expect(r.totalCents).toBe(3000)
+  })
+
   it('all sums both scopes; personal and strawb keep to their own', () => {
     const rows = [
       tx({ scope: 'personal', amountCents: -1100 }),

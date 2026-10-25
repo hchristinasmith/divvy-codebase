@@ -232,6 +232,29 @@ describe('what it shows', () => {
     expect(within(card()).queryByRole('list')).toBeNull()
   })
 
+  it('shows only Uncategorised when nothing spent has a category', async () => {
+    installFetch({
+      spending: spendingByScope({
+        all: {
+          totalCents: 4321,
+          categories: [],
+          otherCents: 0,
+          uncategorisedCents: 4321,
+        },
+      }),
+    })
+    renderWithProviders(<SpendingCard scope="all" />)
+
+    expect(await total()).toBe(formatCents(4321))
+    const shown = segments()
+    expect(shown.map((s) => s.getAttribute('data-spending-segment'))).toEqual([
+      'uncategorised',
+    ])
+    expect(shown[0].className.split(' ').at(-1)).toBe('bg-ink')
+    expect(listRows()).toEqual([['', 'Uncategorised', formatCents(4321)]])
+    expect(within(card()).queryByText('No spending yet this month.')).toBeNull()
+  })
+
   it.each(['all', 'personal', 'strawb'] as const)(
     'in %s says nothing estimated, owed to you, invoiced or from Xero',
     async (scope) => {
