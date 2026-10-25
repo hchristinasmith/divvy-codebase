@@ -5,13 +5,15 @@ import { assertInMemory } from '../../test-utils/app.ts'
 import {
   getSettings,
   listAccountRoles,
-  setAccountRole,
+  updateAccountSettings,
   updateSettings,
   validateSettingsPatch,
 } from '../settings.ts'
 import {
+  ROW_SCOPES,
   SETTING_KEYS,
   SETTINGS_DEFAULTS,
+  type RowScope,
   type SettingsResponse,
   type UpdateSettingsRequest,
 } from '../../../shared/contracts.ts'
@@ -359,12 +361,22 @@ describe('listAccountRoles', () => {
   })
 })
 
-describe('setAccountRole', () => {
-  it('sets, changes and clears a role, one row per account, and never writes accounts', async () => {
+describe('ROW_SCOPES', () => {
+  it('holds every RowScope, in the order the switch shows them', () => {
+    // Fails to compile if a RowScope is added without a key here, and fails
+    // the key-set check if a key is added without a list entry.
+    const SCOPES: Record<RowScope, true> = { personal: true, strawb: true }
+    expect([...ROW_SCOPES]).toEqual(['personal', 'strawb'])
+    expect([...ROW_SCOPES].sort()).toEqual(Object.keys(SCOPES).sort())
+  })
+})
+
+describe('updateAccountSettings', () => {
+  it('sets, changes and clears a role, one row per account, and leaves the account alone', async () => {
     const [id] = await insertAccount({ akahu_id: 'acc_inv_1', name: 'Card D' })
     const accountBefore = await connection('accounts').where({ id }).first()
 
-    expect(await setAccountRole(id, 'current')).toStrictEqual({
+    expect(await updateAccountSettings(id, { role: 'current' })).toStrictEqual({
       id: String(id),
       name: 'Card D',
       scope: 'personal',
@@ -373,7 +385,9 @@ describe('setAccountRole', () => {
     const [{ id: settingId }] =
       await connection('account_settings').select('id')
 
-    expect((await setAccountRole(id, 'credit_card'))?.role).toBe('credit_card')
+    expect(
+      (await updateAccountSettings(id, { role: 'credit_card' }))?.role,
+    ).toBe('credit_card')
     const rows = await connection('account_settings').select(
       'id',
       'account_id',
@@ -388,7 +402,7 @@ describe('setAccountRole', () => {
     })
     expect(rows[0].updated_at).toMatch(ISO)
 
-    expect((await setAccountRole(id, null))?.role).toBeNull()
+    expect((await updateAccountSettings(id, { role: null }))?.role).toBeNull()
     expect(await connection('account_settings')).toEqual([])
 
     expect(await connection('accounts').where({ id }).first()).toStrictEqual(
@@ -405,9 +419,12 @@ describe('setAccountRole', () => {
     })
     const before = new Date().toISOString()
 
-    await setAccountRole(id, 'savings')
+    await updateAccountSettings(id, { role: 'savings' })
 
-    const rows = await connection('account_settings').select('role', 'updated_at')
+    const rows = await connection('account_settings').select(
+      'role',
+      'updated_at',
+    )
     expect(rows).toHaveLength(1)
     expect(rows[0].role).toBe('savings')
     expect(rows[0].updated_at).toMatch(ISO)
@@ -418,15 +435,97 @@ describe('setAccountRole', () => {
   it('clears a role that was never set without error', async () => {
     const [id] = await insertAccount({ akahu_id: 'acc_inv_1' })
 
-    expect((await setAccountRole(id, null))?.role).toBeNull()
+    expect((await updateAccountSettings(id, { role: null }))?.role).toBeNull()
     expect(await connection('account_settings')).toEqual([])
   })
 
   it('answers undefined for an unknown id or a Xero account, and writes nothing', async () => {
     const [xero] = await insertAccount({ source: 'xero', akahu_id: null })
 
-    expect(await setAccountRole(999999, 'current')).toBeUndefined()
-    expect(await setAccountRole(xero, 'current')).toBeUndefined()
+    expect(await updateAccountSettings(999999, { role: 'current' })).toBeUndefined()
+    expect(await updateAccountSettings(xero, { role: 'current' })).toBeUndefined()
+    expect(await updateAccountSettings(999999, { scope: 'strawb' })).toBeUndefined()
+    expect(await updateAccountSettings(xero, { scope: 'strawb' })).toBeUndefined()
+    expect(await connection('account_settings')).toEqual([])
+    expect((await connection('accounts').where({ id: xero }).first()).scope).toBe(
+      'personal',
+    )
+  })
+
+  it('sets only the scope and updated_at on the account, and leaves its role', async () => {
+    const [id] = await insertAccount({
+      akahu_id: 'acc_inv_1',
+      name: 'Pot E',
+      updated_at: OLD,
+    })
+    await connection('account_settings').insert({
+      account_id: id,
+      role: 'tax_pot',
+      updated_at: OLD,
+    })
+    const accountBefore = await connection('accounts').where({ id }).first()
+    const settingsBefore = await connection('account_settings').select()
+
+    const row = await updateAccountSettings(id, { scope: 'strawb' })
+
+    expect(row).toStrictEqual({
+      id: String(id),
+      name: 'Pot E',
+      scope: 'strawb',
+      role: 'tax_pot',
+    })
+    expect(Object.keys(row ?? {}).sort()).toEqual(['id', 'name', 'role', 'scope'])
+    const accountAfter = await connection('accounts').where({ id }).first()
+    expect(accountAfter.scope).toBe('strawb')
+    expect(accountAfter.updated_at).toMatch(ISO)
+    expect(accountAfter.updated_at > OLD).toBe(true)
+    expect({
+      ...accountAfter,
+      scope: accountBefore.scope,
+      updated_at: accountBefore.updated_at,
+    }).toStrictEqual(accountBefore)
+    expect(await connection('account_settings').select()).toStrictEqual(
+      settingsBefore,
+    )
+  })
+
+  it('sets the role and the scope in one patch', async () => {
+    const [id] = await insertAccount({ akahu_id: 'acc_inv_1', name: 'Card F' })
+
+    expect(
+      await updateAccountSettings(id, { role: 'savings', scope: 'strawb' }),
+    ).toStrictEqual({ id: String(id), name: 'Card F', scope: 'strawb', role: 'savings' })
+    expect(await connection('account_settings').select('role')).toStrictEqual([
+      { role: 'savings' },
+    ])
+  })
+
+  it('changes nothing for an empty patch, and answers the account as listed', async () => {
+    const [id] = await insertAccount({ akahu_id: 'acc_inv_1', name: 'Card G' })
+    const accountBefore = await connection('accounts').where({ id }).first()
+
+    expect(await updateAccountSettings(id, {})).toStrictEqual({
+      id: String(id),
+      name: 'Card G',
+      scope: 'personal',
+      role: null,
+    })
+    expect(await connection('accounts').where({ id }).first()).toStrictEqual(
+      accountBefore,
+    )
+    expect(await connection('account_settings')).toEqual([])
+  })
+
+  it('refuses an undefined role and writes nothing, so a scope in the same patch is not written either', async () => {
+    const [id] = await insertAccount({ akahu_id: 'acc_inv_1' })
+    const accountBefore = await connection('accounts').where({ id }).first()
+
+    await expect(
+      updateAccountSettings(id, { role: undefined, scope: 'strawb' }),
+    ).rejects.toThrow(new RangeError('role must be an account role or null'))
+    expect(await connection('accounts').where({ id }).first()).toStrictEqual(
+      accountBefore,
+    )
     expect(await connection('account_settings')).toEqual([])
   })
 })

@@ -1,10 +1,9 @@
 import request from 'superagent'
 import type {
-  AccountRole,
   AccountSettingsRow,
-  SetAccountRoleRequest,
   SettingsAccountsResponse,
   SettingsResponse,
+  UpdateAccountRequest,
   UpdateSettingsRequest,
 } from '../../shared/contracts.ts'
 
@@ -50,15 +49,17 @@ export function grabSettingsAccounts(): Promise<SettingsAccountsResponse> {
   return send(request.get(`${rootURL}/settings/accounts`))
 }
 
-/** PUT: `null` removes the role. Answers the account as listed afterwards. */
-export function updateAccountRole(
+/**
+ * PUT: `role` (`null` removes it), `scope`, or both. Answers the account as
+ * listed afterwards.
+ */
+export function updateAccount(
   id: string,
-  role: AccountRole | null,
+  patch: UpdateAccountRequest,
 ): Promise<AccountSettingsRow> {
-  const body: SetAccountRoleRequest = { role }
   return send(
     request
       .put(`${rootURL}/settings/accounts/${encodeURIComponent(id)}`)
-      .send(body),
+      .send(patch),
   )
 }

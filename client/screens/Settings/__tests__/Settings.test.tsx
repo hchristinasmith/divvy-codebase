@@ -10,7 +10,7 @@ import {
 import {
   grabSettings,
   grabSettingsAccounts,
-  updateAccountRole,
+  updateAccount,
   updateSettings,
 } from '../../../apis/settings.ts'
 import {
@@ -30,12 +30,12 @@ vi.mock('../../../apis/settings.ts', () => ({
   grabSettings: vi.fn(),
   updateSettings: vi.fn(),
   grabSettingsAccounts: vi.fn(),
-  updateAccountRole: vi.fn(),
+  updateAccount: vi.fn(),
 }))
 const grab = vi.mocked(grabSettings)
 const update = vi.mocked(updateSettings)
 const grabAccounts = vi.mocked(grabSettingsAccounts)
-const setRole = vi.mocked(updateAccountRole)
+const setAccount = vi.mocked(updateAccount)
 
 const SETTINGS: SettingsResponse = {
   taxRateBasisPoints: 2500,
@@ -406,8 +406,18 @@ describe('account roles', () => {
   async function roleSelect(name: string) {
     return screen.findByLabelText<HTMLSelectElement>(`Role for ${name}`)
   }
+  async function scopeSwitch(name: string) {
+    return screen.findByRole('group', { name: `Scope for ${name}` })
+  }
+  function pressed(group: HTMLElement): string | undefined {
+    return (
+      [...group.querySelectorAll('button')].find(
+        (button) => button.getAttribute('aria-pressed') === 'true',
+      )?.textContent ?? undefined
+    )
+  }
 
-  it('lists each account with its scope as plain text and its role', async () => {
+  it('lists each account with a Personal / Business switch and its role', async () => {
     renderWithProviders(<SettingsScreen />)
 
     const everyday = await roleSelect('Everyday Invented')
@@ -416,12 +426,24 @@ describe('account roles', () => {
     expect(pot.value).toBe('')
 
     const row = everyday.closest('li') as HTMLElement
-    expect(within(row).getByText('Personal').tagName).toBe('SPAN')
-    expect(within(row).getAllByRole('combobox')).toEqual([everyday])
-    expect(within(row).queryByRole('button')).toBeNull()
+    const group = await scopeSwitch('Everyday Invented')
     expect(
-      within(pot.closest('li') as HTMLElement).getByText('Strawb').tagName,
-    ).toBe('SPAN')
+      [...group.querySelectorAll('button')].map((b) => b.textContent),
+    ).toEqual(['Personal', 'Business'])
+    expect(within(row).getAllByRole('combobox')).toEqual([everyday])
+    expect(pressed(group)).toBe('Personal')
+    expect(pressed(await scopeSwitch('Pot Invented'))).toBe('Business')
+  })
+
+  it('shows no visible Strawb text in any account row', async () => {
+    renderWithProviders(<SettingsScreen />)
+    await roleSelect('Pot Invented')
+
+    for (const name of ['Everyday Invented', 'Pot Invented']) {
+      const row = (await roleSelect(name)).closest('li') as HTMLElement
+      expect(row.textContent).not.toMatch(/Strawb/)
+    }
+    expect(screen.getAllByRole('button', { name: 'Business' })).toHaveLength(2)
   })
 
   it('offers No role and every role', async () => {
@@ -436,8 +458,8 @@ describe('account roles', () => {
     ])
   })
 
-  it('sets a role and refetches settings and the overview', async () => {
-    setRole.mockResolvedValue({ ...POT, role: 'tax_pot' })
+  it('sets a role and refetches settings, the overview and the legacy accounts and transactions', async () => {
+    setAccount.mockResolvedValue({ ...POT, role: 'tax_pot' })
     const { client } = renderWithProviders(<SettingsScreen />)
     const invalidate = vi.spyOn(client, 'invalidateQueries')
 
@@ -445,16 +467,18 @@ describe('account roles', () => {
       target: { value: 'tax_pot' },
     })
 
-    await waitFor(() => expect(setRole).toHaveBeenCalledTimes(1))
-    expect(setRole.mock.calls[0].slice(0, 2)).toEqual(['12', 'tax_pot'])
+    await waitFor(() => expect(setAccount).toHaveBeenCalledTimes(1))
+    expect(setAccount.mock.calls[0]).toStrictEqual(['12', { role: 'tax_pot' }])
     await waitFor(() => {
       expect(invalidate).toHaveBeenCalledWith({ queryKey: ['settings'] })
       expect(invalidate).toHaveBeenCalledWith({ queryKey: ['overview'] })
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['accounts'] })
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['transactions'] })
     })
   })
 
   it('shows the change and disables the select while it is in flight', async () => {
-    setRole.mockReturnValue(new Promise<AccountSettingsRow>(() => {}))
+    setAccount.mockReturnValue(new Promise<AccountSettingsRow>(() => {}))
     renderWithProviders(<SettingsScreen />)
 
     const pot = await roleSelect('Pot Invented')
@@ -465,19 +489,19 @@ describe('account roles', () => {
   })
 
   it('sends null for No role', async () => {
-    setRole.mockResolvedValue({ ...EVERYDAY, role: null })
+    setAccount.mockResolvedValue({ ...EVERYDAY, role: null })
     renderWithProviders(<SettingsScreen />)
 
     fireEvent.change(await roleSelect('Everyday Invented'), {
       target: { value: '' },
     })
 
-    await waitFor(() => expect(setRole).toHaveBeenCalledTimes(1))
-    expect(setRole.mock.calls[0].slice(0, 2)).toEqual(['7', null])
+    await waitFor(() => expect(setAccount).toHaveBeenCalledTimes(1))
+    expect(setAccount.mock.calls[0]).toStrictEqual(['7', { role: null }])
   })
 
   it("shows the server's refusal and puts the select back", async () => {
-    setRole.mockRejectedValue(new Error('Account not found'))
+    setAccount.mockRejectedValue(new Error('Account not found'))
     renderWithProviders(<SettingsScreen />)
 
     const everyday = await roleSelect('Everyday Invented')
@@ -503,6 +527,77 @@ describe('account roles', () => {
   })
 })
 
+describe('account scope switch', () => {
+  async function scopeSwitch(name: string) {
+    return screen.findByRole('group', { name: `Scope for ${name}` })
+  }
+
+  it('saves a change to Business and refetches settings, the overview, accounts and transactions', async () => {
+    setAccount.mockResolvedValue({ ...EVERYDAY, scope: 'strawb' })
+    const { client } = renderWithProviders(<SettingsScreen />)
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    const group = await scopeSwitch('Everyday Invented')
+
+    fireEvent.click(within(group).getByRole('button', { name: 'Business' }))
+
+    await waitFor(() => expect(setAccount).toHaveBeenCalledTimes(1))
+    expect(setAccount.mock.calls[0]).toStrictEqual(['7', { scope: 'strawb' }])
+    await waitFor(() => {
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['settings'] })
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['overview'] })
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['accounts'] })
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['transactions'] })
+    })
+  })
+
+  it('sends nothing when the pressed option is clicked again', async () => {
+    renderWithProviders(<SettingsScreen />)
+    const group = await scopeSwitch('Everyday Invented')
+
+    fireEvent.click(within(group).getByRole('button', { name: 'Personal' }))
+
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)))
+    expect(setAccount).not.toHaveBeenCalled()
+  })
+
+  it('shows Business pressed and disables both options while the save is in flight', async () => {
+    setAccount.mockReturnValue(new Promise<AccountSettingsRow>(() => {}))
+    renderWithProviders(<SettingsScreen />)
+    const group = await scopeSwitch('Everyday Invented')
+
+    fireEvent.click(within(group).getByRole('button', { name: 'Business' }))
+
+    await waitFor(() =>
+      expect(within(group).getByRole('button', { name: 'Business' }).getAttribute('aria-pressed')).toBe('true'),
+    )
+    for (const button of within(group).getAllByRole('button')) {
+      expect((button as HTMLButtonElement).disabled).toBe(true)
+    }
+  })
+
+  it('shows a refused save in an alert, keeps the old option pressed, and re-enables both options', async () => {
+    setAccount.mockRejectedValue(new Error('Server error (500)'))
+    renderWithProviders(<SettingsScreen />)
+    const group = await scopeSwitch('Everyday Invented')
+    const row = group.closest('li') as HTMLElement
+
+    fireEvent.click(within(group).getByRole('button', { name: 'Business' }))
+
+    const alert = await within(row).findByRole('alert')
+    expect(alert.textContent).toBe('Server error (500)')
+    const personal = within(group).getByRole<HTMLButtonElement>('button', {
+      name: 'Personal',
+    })
+    const business = within(group).getByRole<HTMLButtonElement>('button', {
+      name: 'Business',
+    })
+    expect(personal.getAttribute('aria-pressed')).toBe('true')
+    expect(business.getAttribute('aria-pressed')).toBe('false')
+    expect(personal.disabled).toBe(false)
+    expect(business.disabled).toBe(false)
+  })
+})
+
 // The handoff's tokens where the settings screen uses them
 // (docs/design/handoff.md): class names, because the token is the behaviour.
 describe('design tokens', () => {
@@ -510,29 +605,21 @@ describe('design tokens', () => {
     return el.className.split(/\s+/)
   }
 
-  it('codes the scope tag by scope: Personal canvas and muted, Strawb solid pink', async () => {
+  it('codes the pressed switch option white with deep-rose text, the others transparent rose', async () => {
     renderWithProviders(<SettingsScreen />)
-    const row = (name: string) =>
-      within(
-        screen.getByLabelText(`Role for ${name}`).closest('li') as HTMLElement,
-      )
+    const option = (group: string, label: string) =>
+      within(screen.getByRole('group', { name: `Scope for ${group}` })).getByRole('button', { name: label })
     await screen.findByLabelText('Role for Pot Invented')
 
-    const personal = classes(row('Everyday Invented').getByText('Personal'))
-    const strawb = classes(row('Pot Invented').getByText('Strawb'))
-    for (const tag of [personal, strawb]) {
-      expect(tag).toEqual(
-        expect.arrayContaining(['rounded-tag', 'py-1', 'font-semibold']),
-      )
-      expect(tag).not.toContain('bg-blush')
-      expect(tag).not.toContain('py-0.5')
+    const pressed = classes(option('Pot Invented', 'Business'))
+    const unpressed = classes(option('Pot Invented', 'Personal'))
+    expect(pressed).toEqual(expect.arrayContaining(['bg-surface', 'text-deep']))
+    expect(unpressed).toEqual(
+      expect.arrayContaining(['bg-transparent', 'text-rose']),
+    )
+    for (const cls of [pressed, unpressed]) {
+      expect(cls).toEqual(expect.arrayContaining(['rounded-pill', 'font-semibold']))
     }
-    expect(personal).toEqual(
-      expect.arrayContaining(['bg-canvas', 'text-ink-muted']),
-    )
-    expect(strawb).toEqual(
-      expect.arrayContaining(['bg-pink-hover', 'text-surface']),
-    )
   })
 
   it('sets numbers in DM Mono and choices in DM Sans, each with a pink focus border', async () => {

@@ -1,8 +1,14 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { grabSettingsAccounts, updateAccountRole } from '../../apis/settings.ts'
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
+import type { QueryClient } from '@tanstack/react-query'
+import { grabSettingsAccounts, updateAccount } from '../../apis/settings.ts'
 import { invalidateOverview, queryKeys } from '../../apis/queryKeys.ts'
 import {
   ACCOUNT_ROLES,
+  ROW_SCOPES,
   type AccountRole,
   type AccountSettingsRow,
   type RowScope,
@@ -12,15 +18,18 @@ import {
   ERROR,
   HEADING,
   HINT,
+  SCOPE_TRACK,
   SECONDARY_BUTTON,
   SELECT,
-  scopeTag,
+  scopeOption,
 } from './styles.ts'
 
 // What each account is for (issue 46; prd-02 Rulings 2, 10 and 11). The
 // role decides what safe-to-spend counts: only Current accounts are
 // spendable, a credit card's owed balance is subtracted, and a tax pot nets
-// the tax hold of its own scope. The scope is shown, never edited here.
+// the tax hold of its own scope. The scope is the account's owner, Personal
+// or Business, set here (prd-01 Ruling 8, dated note 2026-10-25); sync never
+// sets it.
 
 // Under the settings prefix, so a settings change refetches it too.
 const ACCOUNTS_KEY = [...queryKeys.settings.all, 'accounts'] as const
@@ -32,13 +41,26 @@ const ROLE_LABELS: Record<AccountRole, string> = {
   credit_card: 'Credit card',
 }
 
+// The stored scope `strawb` is shown as Business.
 const SCOPE_LABELS: Record<RowScope, string> = {
   personal: 'Personal',
-  strawb: 'Strawb',
+  strawb: 'Business',
 }
 
 function toRole(value: string): AccountRole | null {
   return ACCOUNT_ROLES.find((role) => role === value) ?? null
+}
+
+// After a save, refetch what the Overview, Transactions and account lists
+// show. The last two keys are the legacy Dashboard's
+// (client/components/Dashboard/Dashboard.tsx); queryKeys has no entry for them.
+function refreshAfterSave(client: QueryClient): Promise<unknown> {
+  return Promise.all([
+    client.invalidateQueries({ queryKey: queryKeys.settings.all }),
+    invalidateOverview(client),
+    client.invalidateQueries({ queryKey: ['accounts'] }),
+    client.invalidateQueries({ queryKey: ['transactions'] }),
+  ])
 }
 
 export default function AccountRoles() {
@@ -88,50 +110,78 @@ export default function AccountRoles() {
 
 function AccountRow({ account }: { account: AccountSettingsRow }) {
   const queryClient = useQueryClient()
-  const mutation = useMutation({
+  const roleMutation = useMutation({
     mutationFn: (role: AccountRole | null) =>
-      updateAccountRole(account.id, role),
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.settings.all }),
-        invalidateOverview(queryClient),
-      ])
-    },
+      updateAccount(account.id, { role }),
+    onSuccess: () => refreshAfterSave(queryClient),
+  })
+  const scopeMutation = useMutation({
+    mutationFn: (scope: RowScope) => updateAccount(account.id, { scope }),
+    onSuccess: () => refreshAfterSave(queryClient),
   })
 
-  // While a change is in flight the select shows it; otherwise (including
-  // after a refusal) it shows what the server says.
-  const shown = mutation.isPending ? mutation.variables : account.role
+  // While a change is in flight the control shows it; otherwise (including
+  // after a refusal) it shows what the server says. Nothing is optimistic.
+  const shownRole = roleMutation.isPending
+    ? roleMutation.variables
+    : account.role
+  const shownScope = scopeMutation.isPending
+    ? scopeMutation.variables
+    : account.scope
 
   return (
     <li className="flex flex-col gap-1.5">
       <div className="flex flex-wrap items-center justify-between gap-3">
+        <span className="text-body-14 font-semibold text-ink">
+          {account.name}
+        </span>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-body-14 font-semibold text-ink">
-            {account.name}
-          </span>
-          <span className={scopeTag(account.scope)}>
-            {SCOPE_LABELS[account.scope]}
-          </span>
+          <div
+            role="group"
+            aria-label={`Scope for ${account.name}`}
+            className={SCOPE_TRACK}
+          >
+            {ROW_SCOPES.map((scope) => (
+              <button
+                key={scope}
+                type="button"
+                aria-pressed={shownScope === scope}
+                className={scopeOption(shownScope === scope)}
+                disabled={scopeMutation.isPending}
+                onClick={() => {
+                  if (scope !== account.scope) scopeMutation.mutate(scope)
+                }}
+              >
+                {SCOPE_LABELS[scope]}
+              </button>
+            ))}
+          </div>
+          <select
+            aria-label={`Role for ${account.name}`}
+            className={SELECT}
+            value={shownRole ?? ''}
+            disabled={roleMutation.isPending}
+            onChange={(event) =>
+              roleMutation.mutate(toRole(event.target.value))
+            }
+          >
+            <option value="">No role</option>
+            {ACCOUNT_ROLES.map((role) => (
+              <option key={role} value={role}>
+                {ROLE_LABELS[role]}
+              </option>
+            ))}
+          </select>
         </div>
-        <select
-          aria-label={`Role for ${account.name}`}
-          className={SELECT}
-          value={shown ?? ''}
-          disabled={mutation.isPending}
-          onChange={(event) => mutation.mutate(toRole(event.target.value))}
-        >
-          <option value="">No role</option>
-          {ACCOUNT_ROLES.map((role) => (
-            <option key={role} value={role}>
-              {ROLE_LABELS[role]}
-            </option>
-          ))}
-        </select>
       </div>
-      {mutation.isError && (
+      {roleMutation.isError && (
         <p role="alert" className={ERROR}>
-          {mutation.error.message}
+          {roleMutation.error.message}
+        </p>
+      )}
+      {scopeMutation.isError && (
+        <p role="alert" className={ERROR}>
+          {scopeMutation.error.message}
         </p>
       )}
     </li>

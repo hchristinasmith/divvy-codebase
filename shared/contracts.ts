@@ -136,6 +136,13 @@ export const ACCOUNT_ROLES: readonly AccountRole[] = [
 ]
 
 /**
+ * Every `RowScope`, for validating a sent scope and for the settings panel's
+ * Personal / Business switch. The same values the migration constrains
+ * `accounts.scope` to.
+ */
+export const ROW_SCOPES = ['personal', 'strawb'] as const satisfies readonly RowScope[]
+
+/**
  * One account as the settings panel lists it: who owns it and what it is
  * for. A display name only, never an account number or a balance.
  */
@@ -153,12 +160,15 @@ export interface SettingsAccountsResponse {
 }
 
 /**
- * PUT /api/v1/settings/accounts/:id. `null` removes the role (no role, not
- * liquid). Responds with the updated `AccountSettingsRow`. The scope is not
- * editable here.
+ * PUT /api/v1/settings/accounts/:id: `role`, `scope`, or both, and at least
+ * one of them. `role: null` removes the role (no role, not liquid). The scope
+ * is set here as Personal or Business (prd-01 Ruling 8, dated note
+ * 2026-10-25); sync never writes it. Responds with the updated
+ * `AccountSettingsRow`.
  */
-export interface SetAccountRoleRequest {
-  role: AccountRole | null
+export interface UpdateAccountRequest {
+  role?: AccountRole | null
+  scope?: RowScope
 }
 
 // ---------------------------------------------------------------------------
