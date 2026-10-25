@@ -12,7 +12,7 @@ import {
   getTransactionCategory,
   setUserCategory,
 } from '../../db/transactions.ts'
-import type { Transaction } from '../../../models/transactions.ts'
+import type { TransactionRow } from '../../../models/transactions.ts'
 
 // /api/v1/agents/proposals (prd-04 Rulings 2 and 7, #51), mounted by
 // ./index.ts, which also refuses a cross-site POST before it reaches here.
@@ -54,7 +54,7 @@ interface ListProposalsResponse {
 
 interface AcceptProposalResponse {
   proposal: CategoryProposal
-  transaction: Transaction
+  transaction: TransactionRow
 }
 
 interface RejectProposalResponse {

@@ -50,10 +50,10 @@ const PROPOSAL_KEYS = [
   'created_at',
 ]
 
-// Today's key set of the transaction in accept's body: every column of
-// `transactions`. A literal here, not the shared TRANSACTION_COLUMNS, so the
-// pin names the keys it expects. #297 narrows this set; the change flips it.
-const TODAY_ACCEPT_TRANSACTION_KEYS = [
+// The key set of the transaction in accept's body (#297): the TransactionRow
+// columns, written out here rather than imported from production, so a column
+// added to or dropped from the shared list fails this pin.
+const ACCEPT_TRANSACTION_KEYS = [
   'id',
   'akahu_id',
   'account_id',
@@ -63,37 +63,23 @@ const TODAY_ACCEPT_TRANSACTION_KEYS = [
   'updated_at',
   'date',
   'description',
+  'amount_cents',
+  'balance_cents',
   'type',
   'hash',
-  'category_id',
-  'category_name',
-  'category_group_id',
-  'category_group_name',
   'particulars',
   'code',
   'reference',
   'other_account',
   'logo',
-  'conversion_currency',
-  'conversion_rate',
   'card_suffix',
   'merchant_id',
   'merchant_name',
   'merchant_website',
   'merchant_logo',
-  'amount_cents',
-  'balance_cents',
-  'conversion_amount_cents',
   'category',
   'category_source',
   'status',
-  'source',
-  'akahu_category_id',
-  'akahu_category_name',
-  'akahu_category_group_id',
-  'akahu_category_group_name',
-  'posted_date',
-  'merchant_nzbn',
 ]
 
 const CORRECTION_KEYS = [
@@ -296,8 +282,12 @@ describe('POST /api/v1/agents/proposals/:id/accept', () => {
     expect(Object.keys(res.body.proposal).sort()).toEqual([...PROPOSAL_KEYS].sort())
     expect(res.body.proposal).toEqual(await proposalRow(targetProposal))
     expect(res.body.proposal.status).toBe('accepted')
-    expect(Object.keys(res.body.transaction).sort()).toEqual([...TODAY_ACCEPT_TRANSACTION_KEYS].sort())
-    expect(res.body.transaction).toEqual(await transactionRow(target))
+    expect(Object.keys(res.body.transaction).sort()).toEqual([...ACCEPT_TRANSACTION_KEYS].sort())
+    // The stored row, projected to the pinned keys: the body is the row as it is now.
+    const stored = await transactionRow(target)
+    expect(res.body.transaction).toEqual(
+      Object.fromEntries(ACCEPT_TRANSACTION_KEYS.map((key) => [key, stored[key]])),
+    )
   })
 
   it('a second accept is 409 and writes nothing', async () => {

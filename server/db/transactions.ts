@@ -79,16 +79,16 @@ export async function getTransactionCategory(
  * caller may pass its own transaction as `db`; the work then runs in a
  * savepoint inside it.
  *
- * Returns the updated row; `'pending'` when the row exists but is not
- * settled, in which case nothing is written; or undefined when no
- * transaction has that id.
+ * Returns the updated row, with the columns of TransactionRow and nothing
+ * else; `'pending'` when the row exists but is not settled, in which case
+ * nothing is written; or undefined when no transaction has that id.
  */
 export async function setUserCategory(
   id: number,
   category: string,
   db = connection,
   source: Extract<CorrectionSource, 'user' | 'rule'> = 'user',
-): Promise<Transaction | 'pending' | undefined> {
+): Promise<TransactionRow | 'pending' | undefined> {
   return db.transaction(async (trx) => {
     const before: Pick<Transaction, 'category'> | undefined = await trx(
       'transactions',
@@ -111,6 +111,9 @@ export async function setUserCategory(
     }
     await trx('category_corrections').insert(correction)
 
-    return trx('transactions').where({ id }).first()
+    const row: TransactionRow | undefined = await trx('transactions')
+      .where({ id })
+      .first([...TRANSACTION_ROW_COLUMNS])
+    return row
   })
 }
