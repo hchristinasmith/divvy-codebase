@@ -1,0 +1,35 @@
+# Litestream: replicate the SQLite database off the Fly volume, continuously
+# (D2; prd-01 Done-when 6; #24). scripts/start.sh runs
+# `litestream replicate -config /app/litestream.yml -exec "npm start"` when
+# this file is in the image, so the app runs as Litestream's child.
+#
+# Litestream expands environment variables over this whole file, comments
+# included, before it parses the YAML. So no comment here may contain a
+# dollar sign, and there is no default syntax: an unset variable becomes an
+# empty string, and Litestream then refuses to start ("must specify either
+# 'path' or 'dir'", "file replica path required"). That is the intent: no
+# replica URL, no app.
+#
+# - path is the DATABASE_PATH variable, the same one the production knexfile
+#   reads, so the app and Litestream cannot disagree about the file. The image
+#   and fly.toml both set it to /data/divvy.sqlite3.
+# - restore-if-db-not-exists: on a boot that finds no database at that path
+#   (a lost or new volume), restore the latest backup before starting the app.
+#   Without it the app would create a new, empty database and Litestream would
+#   replicate that as the newest state. A file already at the path is never
+#   touched. Only that file counts: a -wal left without it is replayed onto
+#   the restored copy, so never delete the database alone (docs/restore.md).
+#   If the replica cannot be reached the boot waits on it and the app
+#   does not start (docs/restore.md, "Boot hangs").
+# - The replica URL and its credentials come only from Fly secrets:
+#   LITESTREAM_REPLICA_URL here, and LITESTREAM_ACCESS_KEY_ID and
+#   LITESTREAM_SECRET_ACCESS_KEY, which Litestream reads from the environment
+#   itself. No bucket, key or provider is named in this file (the repo is
+#   public; where the backup lives is not yet decided).
+# - No metrics addr and no socket: a loopback listener would be reachable from
+#   the tailnet through userspace tailscaled (docs/deploy.md section 1).
+dbs:
+  - path: ${DATABASE_PATH}
+    restore-if-db-not-exists: true
+    replica:
+      url: ${LITESTREAM_REPLICA_URL}

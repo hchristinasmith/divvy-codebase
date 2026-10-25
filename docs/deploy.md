@@ -71,6 +71,8 @@ fly secrets set TS_AUTHKEY=<key from admin console> -a divvy-strawb
 
 This has been done once: `TS_AUTHKEY` is staged on `divvy-strawb`. Run it again only with a new key (section 3). With no machines yet, it only stages the secret for the next deploy. Keep the key out of your shell history: start the line with a space (zsh `HIST_IGNORE_SPACE`), or clear the line from history afterwards.
 
+The database backup needs three more secrets: `LITESTREAM_REPLICA_URL`, `LITESTREAM_ACCESS_KEY_ID` and `LITESTREAM_SECRET_ACCESS_KEY`. Set them before deploying an image that contains `litestream.yml`: without `LITESTREAM_REPLICA_URL` the machine does not boot. Setting them, and restoring from the backup, is in [restore.md](restore.md), section 1.
+
 ## 5. Deploy
 
 ```sh

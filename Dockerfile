@@ -80,7 +80,8 @@ COPY --from=build /app/server/db/migrations ./server/db/migrations
 # chmod as well as git's exec bit, so any builder gets a runnable script.
 COPY --from=build /app/scripts/start.sh ./scripts/start.sh
 RUN chmod 755 /app/scripts/start.sh
-# #24 adds the Litestream config here: COPY litestream.yml /app/litestream.yml
+# start.sh replicates under Litestream when this file exists (D2, #24).
+COPY litestream.yml /app/litestream.yml
 
 # The SQLite file and Tailscale's state live on a volume mounted here
 # (fly.toml [mounts]).
