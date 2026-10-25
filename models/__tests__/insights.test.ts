@@ -342,6 +342,73 @@ describe('strings carrying URLs or markup', () => {
   })
 })
 
+// #331 guard: every input refused today is still refused. This list is written
+// out as data, not imported, and it must stay green after the build too: the
+// build may refuse more, never less. Each code point is one the hand-written
+// invisible list strips today (C0, DEL and C1, the zero-width and direction
+// marks, the embedding and isolate controls, soft hyphen, combining grapheme
+// joiner, Arabic letter mark, Mongolian vowel separator, byte order mark).
+// Inside `java<c>script:` it is stripped, the scheme shows, and the title is
+// refused; the bidi controls are refused first, as bidi_in_string.
+const range = (from: number, to: number): number[] =>
+  Array.from({ length: to - from + 1 }, (_, i) => from + i)
+
+const STRIPPED_TODAY: number[] = [
+  ...range(0x00, 0x1f),
+  ...range(0x7f, 0x9f),
+  ...range(0x200b, 0x200f),
+  ...range(0x202a, 0x202e),
+  ...range(0x2060, 0x2069),
+  0x00ad,
+  0x034f,
+  0x061c,
+  0x180e,
+  0xfeff,
+]
+const BIDI_TODAY = new Set([0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069])
+
+describe('invisible characters inside a scheme (every input refused today is still refused)', () => {
+  it.each(
+    STRIPPED_TODAY.map((code): [string, number] => [`U+${code.toString(16).toUpperCase().padStart(4, '0')}`, code]),
+  )('refuses a title with %s inside javascript:', (_name, code) => {
+    const spec = base()
+    spec.title = `java${String.fromCodePoint(code)}script:${CANARY}`
+    const result = validateChartSpec(spec)
+    expect(rejection(result)).toEqual({
+      reason: BIDI_TODAY.has(code) ? 'bidi_in_string' : 'url_in_string',
+      path: '$.title',
+    })
+    expect(JSON.stringify(result)).not.toContain(CANARY)
+  })
+})
+
+// #331 regression: pins old behaviour; the build replaces this. Today these
+// are accepted because the hand-written list does not strip them. The build
+// makes isInvisible test /\p{DI}/u, so a default-ignorable character inside a
+// scheme or a leading `//` is stripped before the URL check. Expected to flip
+// to url_in_string: the Hangul filler in `htㅤtp://`, the variation selector in
+// `java<VS16>script:`, the tag character in `java<E0041>script:` and the
+// filler in `/ㅤ/`. Expected to stay accepted: `AㅤB` and `A<VS16>B`, which
+// hold no URL once the character is stripped.
+describe('default-ignorable characters the current list misses', () => {
+  const VS16 = '️'
+  const TAG_A = '\u{E0041}'
+  const ACCEPTED_TODAY: [string, string][] = [
+    ['a Hangul filler between letters (stays accepted)', 'AㅤB'],
+    ['a variation selector between letters (stays accepted)', `A${VS16}B`],
+    ['a Hangul filler splitting http (flips to url_in_string)', `htㅤtp://${CANARY}.example`],
+    ['a variation selector splitting javascript (flips to url_in_string)', `java${VS16}script:${CANARY}`],
+    ['a tag character splitting javascript (flips to url_in_string)', `java${TAG_A}script:${CANARY}`],
+    ['a Hangul filler splitting a leading // (flips to url_in_string)', `/ㅤ/${CANARY}.example`],
+  ]
+
+  it.each(ACCEPTED_TODAY)('accepts a title with %s', (_name, title) => {
+    const spec = base()
+    spec.title = title
+    expect(validateChartSpec(spec).ok).toBe(true)
+  })
+})
+
 describe('row key hygiene', () => {
   it.each(['constructor', 'toString', 'hasOwnProperty', 'valueOf'])('rejects row key %s', (key) => {
     const spec = base()
