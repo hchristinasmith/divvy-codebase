@@ -58,6 +58,12 @@ chmod 700 "$state_dir"
 #    TLS certs live on the volume so restarts keep identity and cert cache.
 #    `env -i` keeps AKAHU_*, XERO_* and the Litestream credentials out of
 #    tailscaled's /proc/<pid>/environ; env execs, so $! is tailscaled itself.
+#    Every tailscale and timeout call below starts the same way, with PATH
+#    alone (#319), so none of them holds those secrets either. They need
+#    nothing more: the socket goes by flag, the auth key by argv, and each
+#    call only talks to tailscaled over the socket; tailscaled, not the CLI,
+#    reaches the control plane. env execs, so each call's exit status is the
+#    command's own and `|| die` sees it unchanged.
 env -i PATH="$PATH" tailscaled --tun=userspace-networking --statedir="$state_dir" --socket="$socket" &
 tsd_pid=$!
 
@@ -71,7 +77,7 @@ done
 
 # 3. Join. Flags are not remembered: restate every boot; --reset makes this
 #    line the single source of config. --accept-dns=false keeps Fly's resolv.conf.
-tailscale --socket="$socket" up \
+env -i PATH="$PATH" tailscale --socket="$socket" up \
   --auth-key="$authkey" --hostname="$ts_hostname" \
   --accept-dns=false --reset --timeout=60s \
   || die "tailscale up failed or timed out; not starting the app"
@@ -80,11 +86,12 @@ unset authkey
 # 4. Publish on the tailnet. `serve` can exit 0 having configured nothing when
 #    HTTPS certs are off, so bound it and verify the result. The proxy match
 #    ends at a newline, so a target that merely starts with ours (:30050) fails.
-timeout 30 tailscale --socket="$socket" serve reset \
+#    timeout runs inside `env -i`, so the tailscale it execs inherits only PATH.
+env -i PATH="$PATH" timeout 30 tailscale --socket="$socket" serve reset \
   || die "tailscale serve reset failed"
-timeout 30 tailscale --socket="$socket" serve --bg --https=443 "$serve_target" \
+env -i PATH="$PATH" timeout 30 tailscale --socket="$socket" serve --bg --https=443 "$serve_target" \
   || die "tailscale serve failed or timed out (are MagicDNS and HTTPS certificates enabled on the tailnet?)"
-status="$(tailscale --socket="$socket" serve status 2>&1)" \
+status="$(env -i PATH="$PATH" tailscale --socket="$socket" serve status 2>&1)" \
   || die "tailscale serve status failed"
 case "$status" in
   *"Funnel on"*) die "Funnel is on: that would publish the app to the internet" ;;

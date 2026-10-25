@@ -1173,6 +1173,18 @@ esac
     }
   })
 
+  // What a process started under start.sh's `env -i PATH="$PATH"` may hold:
+  // PATH from start.sh, what the fake's own sh wrapper sets, and the variable
+  // macOS adds to every process it starts.
+  const ENV_I_ALLOWLIST = [
+    'PATH',
+    'PWD',
+    'OLDPWD',
+    'SHLVL',
+    '_',
+    '__CF_USER_TEXT_ENCODING',
+  ]
+
   it('starts tailscaled with none of the app secrets, while the server still gets them', () => {
     const appSecret = 'not-a-real-secret-sentinel-2'
     const run = runStart({
@@ -1186,34 +1198,24 @@ esac
     expect(tailscaledEnv).not.toContain(appSecret)
     expect(tailscaledEnv).not.toContain('AKAHU_USER_TOKEN')
     expect(tailscaledEnv).not.toContain('XERO_CLIENT_SECRET')
-    // An allowlist, so a scrub that drops only the names above still fails:
-    // PATH from start.sh, what the fake's own sh wrapper sets, and the
-    // variable macOS adds to every process it starts.
+    // An allowlist, so a scrub that drops only the names above still fails.
     const names = tailscaledEnv
       .split('\n')
       .filter(Boolean)
       .map((line) => line.slice(0, line.indexOf('=')))
     expect(names).toContain('PATH')
-    for (const name of names) {
-      expect([
-        'PATH',
-        'PWD',
-        'OLDPWD',
-        'SHLVL',
-        '_',
-        '__CF_USER_TEXT_ENCODING',
-      ]).toContain(name)
-    }
+    for (const name of names) expect(ENV_I_ALLOWLIST).toContain(name)
     expect(nodeEnv).toMatch(new RegExp(`^AKAHU_USER_TOKEN=${appSecret}$`, 'm'))
     expect(nodeEnv).toMatch(new RegExp(`^XERO_CLIENT_SECRET=${appSecret}$`, 'm'))
   })
 
-  // Pins what start.sh does today (#319): the short-lived tailscale calls, and
-  // the timeout that bounds two of them, inherit start.sh's whole environment.
-  // Every call is listed by subcommand, so a dump that never happens fails here
-  // rather than leaving nothing to check. One run covers both branches: every
-  // tailscale call comes before start.sh looks for the Litestream config.
-  it('today: the tailscale and timeout fakes see the app and backup secrets', () => {
+  // The tailscale CLI calls, and the timeout that bounds two of them, start
+  // with PATH alone, as tailscaled does (#319). Every call is listed by
+  // subcommand, so a dump that never happens fails here rather than leaving
+  // nothing to check. One run per shell covers both branches: every tailscale
+  // call comes before start.sh looks for the Litestream config. The image's
+  // sh is dash, so start.sh runs under /bin/dash too where there is one.
+  function expectTailscaleCallsWithoutSecrets(shell: string): void {
     const secret = 'not-a-real-secret-sentinel-6'
     const secrets = {
       AKAHU_USER_TOKEN: secret,
@@ -1222,7 +1224,7 @@ esac
       LITESTREAM_SECRET_ACCESS_KEY: secret,
       LITESTREAM_REPLICA_URL: secret,
     }
-    const run = runStart({ env: secrets })
+    const run = runStart({ shell, env: secrets })
     const socket = join(tmp, 's', 'ts.sock')
     const steps: [string, RegExp][] = [
       ['up', / up /],
@@ -1243,17 +1245,37 @@ esac
     expect(timeout.map(({ call }) => step(call)).sort()).toEqual(
       ['serve reset', 'serve --bg'].sort(),
     )
+    for (const { call, env } of [...tailscale, ...timeout]) {
+      const where = `the environment of: ${call.startsWith('timeout ') ? 'timeout ' : ''}${step(call)}`
+      expect(env, where).not.toContain(secret)
+      for (const name of Object.keys(secrets)) {
+        expect(env, where).not.toContain(name)
+      }
+      // An allowlist, so a call that keeps any other name still fails.
+      const names = env
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => line.slice(0, line.indexOf('=')))
+      expect(names, where).toContain('PATH')
+      for (const name of names) expect(ENV_I_ALLOWLIST, where).toContain(name)
+    }
+    // After the environments, so a call that moves env -i inside timeout
+    // fails on timeout's environment, not on its changed argv.
     for (const { call } of [...tailscale, ...timeout]) {
       expect(call).toMatch(
         new RegExp(`^(timeout \\d+ )?tailscale --socket=${socket} `),
       )
     }
-    for (const { call, env } of [...tailscale, ...timeout]) {
-      for (const [name, value] of Object.entries(secrets)) {
-        expect(env, `${name} in the environment of: ${step(call)}`).toMatch(
-          new RegExp(`^${name}=${value}$`, 'm'),
-        )
-      }
-    }
+  }
+
+  it('starts every tailscale and timeout call with none of the app or backup secrets, under sh', () => {
+    expectTailscaleCallsWithoutSecrets('sh')
   })
+
+  it.skipIf(!existsSync('/bin/dash'))(
+    'starts every tailscale and timeout call with none of the app or backup secrets, under dash',
+    () => {
+      expectTailscaleCallsWithoutSecrets('/bin/dash')
+    },
+  )
 })
