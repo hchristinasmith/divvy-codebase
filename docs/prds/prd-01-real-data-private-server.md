@@ -80,8 +80,12 @@ Items 1–4 and 7 are proven by tests (the code does what is written). Items 5�
 ## Ruling 1 — Settled transactions are keyed by Akahu's own id, pending ones are a replaced mirror
 Settled rows upsert on `transactions.akahu_id` (`ON CONFLICT ... DO UPDATE`). Pending rows carry `status='pending'` and are deleted-and-reinserted per account inside the same database transaction that upserts settled rows. Why: a pending item has no stable settled identity until it settles, so inventing a key for it is how duplicates and phantom rows appear; replacing the mirror makes cancelled items vanish with no special case. Extends to: nothing else may delete settled rows. Whether Akahu's pending items carry any id is **unverified from memory** and is the first thing wave 1 checks against Akahu's docs and a real response.
 
+*Implementation note 2026-10-25 (#21):* the pending replace is one `DELETE` of every `status='pending' AND source='akahu'` row, then an insert of the fetched list, rather than a delete per account. Akahu returns pending items for all accounts in one list, so the result is the same set, and pending rows of an account Akahu no longer lists are cleared too. It is the only delete in `server/sync/`, and it cannot reach a settled row.
+
 ## Ruling 2 — Sync re-reads an overlap window, not "since last run"
 Each run fetches back a fixed window (30 days) and upserts, rather than a cursor from the last run's end. Why: settled transactions can be amended or appear late, and a cursor silently misses them; idempotency (Ruling 1) is what makes the overlap free. First run backfills as far back as Akahu allows.
+
+*Amended 2026-10-25 by Ruling 10:* after a successful run the window starts 30 days before that run started, not 30 days before now, so an outage longer than 30 days is still covered; the first run reaches back 730 days.
 
 ## Ruling 3 — Money is converted to cents once, at the sync boundary
 Akahu dollars become integer cents in `server/sync/` and nowhere else (matches #8). The DB routes in this PRD convert back to dollars only to keep the existing Dashboard's Akahu-shaped envelope until prd-02 replaces it. Why: one conversion point is one place a rounding bug can live.
@@ -95,6 +99,8 @@ Every Akahu transaction is stored in full. `akahu_category_*` (id, name, group i
 ## Ruling 6 — The scheduler lives in the web process, one machine, one run at a time
 `setInterval` plus a guard against overlap, backed by an "in progress" row in `sync_runs`; exactly one Fly machine is ever run. This closes audit decision 7 (job runner) for now. Why: one user, one machine, a separate worker is a second thing to deploy and monitor. Revisit if the sync ever blocks request handling.
 
+*Implementation note 2026-10-25 (#21):* `runSync` does its own claiming and recovery. A `running` row younger than 30 minutes makes the run return `skipped` having written nothing; an older one is closed as `failed` with a fixed message at claim time, on every run, not only at boot. Wave 3 does not need a boot-time cleanup step for stale rows.
+
 ## Ruling 7 — No public surface, ever, in this PRD
 `fly.toml` has no `[http_service]` or public ports and the app gets no public IP; Tailscale runs inside the machine and serves the app (and the TLS certificate web push will need later, D5). No server-side auth is added (D4); the tailnet ACL is the access control.
 
@@ -103,6 +109,9 @@ Every Akahu transaction is stored in full. `akahu_category_*` (id, name, group i
 
 ## Ruling 9 — Business bank transactions come from Akahu; Xero's bank feed is the fallback only (amendment, 2026-10-23)
 Strawb's BNZ business transactions are synced from Akahu exactly like personal ones, into the same tables, with `accounts.scope = 'strawb'`. Xero's bank feed already holds the same BNZ transactions and is **not** a second source: importing both would duplicate every Strawb transaction. Each account has exactly one `source` (`akahu` or `xero`), set explicitly by Hannah, never inferred. Wave 1's migration adds `source` (default `akahu`) to `accounts` and `transactions` now, so a fallback needs no later change to prd-01's tables. Xero is used only if the BNZ business link cannot be made, and that fallback is prd-05's to implement behind the same tables with `source = 'xero'`. Why: a duplicate bank line is a silent double-count in every balance and budget downstream. Reason it may be needed: Akahu's docs say BNZ business accounts connect only through a personal customer access number, and that BNZ relies on a government exemption that expires on 1 June 2027 (https://developers.akahu.nz/docs/official-open-banking-feature-support-accounts, read 2026-10-23). Extends to: prd-05 must refuse to import Xero bank transactions for any account that has, or whose bank account has, an Akahu source.
+
+## Ruling 10 — The overlap window counts back from the last successful run (amendment, 2026-10-25)
+Amends Ruling 2. Each run fetches settled transactions from `min(now − 30 days, last success's start − 30 days)` to now, where the last success is the latest `sync_runs` row with outcome `success`; a failed or abandoned run does not count. With no successful run yet, the window starts 730 days before now, a personal app's history limit (`docs/akahu-pending-semantics.md` §3). Why: a window counted back from now silently skips every settled transaction dated inside an outage longer than 30 days (a lapsed consent, a stopped machine), and nothing would ever fetch them again; counting back from the last success covers everything since the data was last known good, plus Ruling 2's overlap. On a 15-minute schedule the two differ by minutes. Extends to: the wave 3 scheduler needs no catch-up logic of its own; a longer window costs only request time, because the upsert is idempotent (Ruling 1). Decided by Hannah, 2026-10-25 (#21).
 
 ## Sequencing
 
