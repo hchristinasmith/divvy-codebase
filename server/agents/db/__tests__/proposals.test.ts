@@ -363,29 +363,34 @@ describe('getProposal and listProposals', () => {
   })
 })
 
-// Done-when 2 and #31: no module under server/agents/ names a table outside
-// the inbox, writes raw SQL, or imports past its directory's allow-list. The
-// modules are parsed with the TypeScript compiler rather than grepped, so a
-// comment is never code and a string is never a comment.
+// #31: no module under server/agents/db/ names a table outside the inbox,
+// writes raw SQL, or imports past its directory's allow-list. The modules are
+// parsed with the TypeScript compiler rather than grepped, so a comment is
+// never code and a string is never a comment.
+//
+// The scope is db/ because the accessors there are the agents' only writers.
+// Agents elsewhere under server/agents/ may read `transactions` and
+// `category_corrections` (Done-when 2 forbids writing money state, not
+// reading it), so naming those tables is not wrong there; that they never
+// write them is for an eslint rule and review.
 //
 // A table name built at run time (`'trans' + 'actions'`, or one read from a
 // variable) is out of reach of any source check, this one included. The sound
 // guard is an eslint rule on server/agents/**, which lives in package.json,
 // outside #31's fence, and is a follow-up.
-describe('every module under server/agents/ touches only the inbox tables', () => {
-  const ROOT = new URL('../../', import.meta.url)
+describe('every module under server/agents/db/ touches only the inbox tables', () => {
+  const ROOT = new URL('../', import.meta.url)
   const OWN_TABLE: Record<string, string> = {
-    'db/proposals.ts': 'category_proposals',
-    'db/insights.ts': 'insights',
-    'db/agent-runs.ts': 'agent_runs',
+    'proposals.ts': 'category_proposals',
+    'insights.ts': 'insights',
+    'agent-runs.ts': 'agent_runs',
   }
   const INBOX = Object.values(OWN_TABLE)
-  // Per directory under server/agents/, exactly what its modules import. A
-  // module in a directory with no entry fails, and so does an entry nothing
+  // Per directory under server/agents/db/, exactly what its modules import.
+  // A module in a directory with no entry fails, and so does an entry nothing
   // imports, so the list cannot drift wider than the code.
   const IMPORTS: Record<string, string[]> = {
-    '.': ['../../models/sync.ts', '../db/categories.ts'],
-    db: [
+    '.': [
       '../../../models/insights.ts',
       '../../../models/sync.ts',
       '../../db/connection.ts',
@@ -396,7 +401,7 @@ describe('every module under server/agents/ touches only the inbox tables', () =
   const NAMED = /\b(transactions|category_corrections|budgets|bills|goals|settings)\b/
   const RAW = /\.raw\b|[a-z]Raw\b/
 
-  // Every non-test module under server/agents/, relative to it.
+  // Every non-test module under server/agents/db/, relative to it.
   const modules = (): string[] =>
     readdirSync(ROOT, { recursive: true, encoding: 'utf8' })
       .filter((f) => /\.[cm]?[jt]sx?$/.test(f))
@@ -473,10 +478,8 @@ describe('every module under server/agents/ touches only the inbox tables', () =
     return [...found, ...reached]
   }
 
-  it('finds the modules, contracts.ts and the accessors among them', () => {
-    expect(modules()).toEqual(
-      expect.arrayContaining(['contracts.ts', ...Object.keys(OWN_TABLE)]),
-    )
+  it('finds the modules, the accessors among them', () => {
+    expect(modules()).toEqual(expect.arrayContaining(Object.keys(OWN_TABLE)))
   })
 
   it('the table patterns catch a table named in code, and not its look-alikes', async () => {
@@ -511,7 +514,7 @@ describe('every module under server/agents/ touches only the inbox tables', () =
   ]
 
   it.each(BYPASSES)('catches %s', async (_, text, problem) => {
-    expect(problems(text, IMPORTS.db, await otherTables())).toContain(problem)
+    expect(problems(text, IMPORTS['.'], await otherTables())).toContain(problem)
   })
 
   it('passes code that names only the inbox, and ignores comments', async () => {
@@ -522,7 +525,7 @@ describe('every module under server/agents/ touches only the inbox tables', () =
       "await connection('category_proposals').where({ transaction_id: 1 }).first()",
       'const first = ids[0]',
     ].join('\n')
-    expect(problems(text, IMPORTS.db, await otherTables())).toEqual([])
+    expect(problems(text, IMPORTS['.'], await otherTables())).toEqual([])
     expect(stripComments("a // db('transactions')\nb /* bills */")).not.toMatch(NAMED)
   })
 
@@ -531,7 +534,7 @@ describe('every module under server/agents/ touches only the inbox tables', () =
     for (const file of modules()) {
       const dir = file.includes('/') ? file.slice(0, file.lastIndexOf('/')) : '.'
       const allowed = IMPORTS[dir]
-      expect(allowed, `server/agents/${dir} has no import allow-list`).toBeDefined()
+      expect(allowed, `server/agents/db/${dir} has no import allow-list`).toBeDefined()
       expect(problems(source(file), allowed, others), file).toEqual([])
     }
   })
