@@ -1,3 +1,5 @@
+import type { DataSource, TransactionStatus } from './sync.ts'
+
 // Who set a transaction's effective category (prd-01 Ruling 4). Sync may
 // change `category` only while this is 'akahu'; nothing overwrites 'user'.
 export type CategorySource = 'akahu' | 'user' | 'rule' | 'claude'
@@ -47,6 +49,20 @@ export interface Transaction {
   // when Akahu sent none and nobody has set one.
   category: string | null
   category_source: CategorySource
+
+  // prd-01 wave 1 (#19). The server returns every column, so these are
+  // present on rows it sends; they are optional only so existing code that
+  // builds a Transaction by hand keeps compiling. A pending row has null
+  // `akahu_id` and `hash`.
+  status?: TransactionStatus
+  source?: DataSource
+
+  // Akahu's category as received (prd-01 Ruling 4), copied from the legacy
+  // category_* fields above. Only sync writes these.
+  akahu_category_id?: string | null
+  akahu_category_name?: string | null
+  akahu_category_group_id?: string | null
+  akahu_category_group_name?: string | null
 }
 
 // Body of PATCH /api/v1/transactions/:id, the one category-edit route.
