@@ -1137,3 +1137,209 @@ describe('#354: a 500 carrying a constant-shaped err.code logs the name, the cod
     },
   )
 })
+
+// #363: an Error whose traps throw. Each read of the error that throws falls
+// back to a fixed value in server.ts, so the answer and the log are the fixed
+// ones whichever read throws, and the trap's text reaches neither. Each test
+// asserts that a trap was reached, so a pass cannot come from another path.
+
+// The Error the last trap threw, so a test can assert a trap was reached.
+let lastTrap: Error | undefined
+function trapError(): Error {
+  lastTrap = new Error(FIELD_SECRET)
+  return lastTrap
+}
+
+// `get` throws for every key.
+const GET_THROWS = (err: Error): Error =>
+  new Proxy(err, {
+    get() {
+      throw trapError()
+    },
+  })
+
+// `get` passes through, so `stack` stays readable; `has` throws for every key.
+const HAS_THROWS = (err: Error): Error =>
+  new Proxy(err, {
+    get(target, prop) {
+      return Reflect.get(target, prop) as unknown
+    },
+    has() {
+      throw trapError()
+    },
+  })
+
+const PROTOTYPE_THROWS = (err: Error): Error =>
+  new Proxy(err, {
+    getPrototypeOf() {
+      throw trapError()
+    },
+  })
+
+// Every trap other than `get` and `has`, each throwing.
+const OTHER_TRAPS_THROW: ProxyHandler<Error> = {
+  getPrototypeOf() {
+    throw trapError()
+  },
+  getOwnPropertyDescriptor() {
+    throw trapError()
+  },
+  ownKeys() {
+    throw trapError()
+  },
+  defineProperty() {
+    throw trapError()
+  },
+  set() {
+    throw trapError()
+  },
+  deleteProperty() {
+    throw trapError()
+  },
+  isExtensible() {
+    throw trapError()
+  },
+  preventExtensions() {
+    throw trapError()
+  },
+  setPrototypeOf() {
+    throw trapError()
+  },
+}
+
+const EVERY_TRAP_THROWS = (err: Error): Error =>
+  new Proxy(err, {
+    ...OTHER_TRAPS_THROW,
+    get() {
+      throw trapError()
+    },
+    has() {
+      throw trapError()
+    },
+  })
+
+// A 401 whose `get` throws for every key: `'status' in err` is true, and then
+// reading `status` throws.
+const GET_THROWS_ON_401 = (err: Error): Error =>
+  new Proxy(Object.assign(err, { status: 401 }), {
+    get() {
+      throw trapError()
+    },
+  })
+
+// A 401 whose `status` is readable and whose every other trap and key throws.
+// Its class cannot be read, so the 4xx line names it `unknown`.
+const ONLY_STATUS_READS = (err: Error): Error =>
+  new Proxy(Object.assign(err, { status: 401 }), {
+    ...OTHER_TRAPS_THROW,
+    get(target, prop) {
+      if (prop === 'status') return Reflect.get(target, prop) as unknown
+      throw trapError()
+    },
+    has(target, prop) {
+      if (prop === 'status') return Reflect.has(target, prop)
+      throw trapError()
+    },
+  })
+
+// `get` throws only for `name`; `code` stays readable, so the logged line is
+// `Error` and the code, with no frames once the name cannot be read.
+const NAME_THROWS_CODED = (err: Error): Error =>
+  new Proxy(Object.assign(err, { code: SQLITE_CODE }), {
+    get(target, prop) {
+      if (prop === 'name') throw trapError()
+      return Reflect.get(target, prop) as unknown
+    },
+  })
+
+// `get` throws only for `statusCode`, the second half of the status read; the
+// first half, `status`, is absent.
+const STATUS_CODE_THROWS = (err: Error): Error =>
+  new Proxy(Object.assign(err, { statusCode: 404 }), {
+    get(target, prop) {
+      if (prop === 'statusCode') throw trapError()
+      return Reflect.get(target, prop) as unknown
+    },
+  })
+
+// The logged text when the name and the stack read cleanly and no code is
+// logged: `Error`, then the coded Error's frames.
+function codedLine(): string {
+  return ['Error', ...framesOfCoded()].join('\n')
+}
+
+describe('#363: an Error behind a Proxy whose traps throw', () => {
+  it.each([
+    ['a get trap that throws for every key', GET_THROWS, (): string => 'Error'],
+    ['a has trap that throws for every key', HAS_THROWS, codedLine],
+    ['a getPrototypeOf trap that throws', PROTOTYPE_THROWS, (): string => 'object'],
+    ['every trap that throws', EVERY_TRAP_THROWS, (): string => 'object'],
+    ['a 401 whose get trap throws for every key', GET_THROWS_ON_401, (): string => 'Error'],
+    ['a name getter that throws, code readable', NAME_THROWS_CODED, (): string => `Error ${SQLITE_CODE}`],
+    ['a statusCode getter that throws', STATUS_CODE_THROWS, codedLine],
+  ] as const)(
+    '%s on the normal path answers the fixed JSON 500 and logs its fixed line',
+    async (_what, make, logged) => {
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      codeCase.make = make
+      lastTrap = undefined
+
+      const res = await api
+        .get('/api/v1/__test/coded-case')
+        .set('X-Divvy-Test', HEADER_SECRET)
+
+      expect(lastTrap).toBeInstanceOf(Error)
+      expectFixed500(res)
+      expect(errorLog.mock.calls).toStrictEqual([
+        ['Unhandled /api error:', logged()],
+      ])
+      expectNoLogLeak(errorLog.mock.calls)
+    },
+  )
+
+  it('a 401 whose status is readable and whose other traps and keys throw answers the fixed 401 and logs `unknown`', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+    codeCase.make = ONLY_STATUS_READS
+    lastTrap = undefined
+
+    const res = await api
+      .get('/api/v1/__test/coded-case')
+      .set('X-Divvy-Test', HEADER_SECRET)
+
+    expect(lastTrap).toBeInstanceOf(Error)
+    expect(res.status).toBe(401)
+    expect(res.headers['content-type']).toMatch(/^application\/json/)
+    expect(res.body).toStrictEqual({ error: 'Client error' })
+    expect(Object.keys(res.body)).toEqual(['error'])
+    expectNoLeak(res.text)
+    expect(errorLog.mock.calls).toStrictEqual([
+      [UNKNOWN_4XX_LOG, 401, 'unknown'],
+    ])
+    expectNoLogLeak(errorLog.mock.calls)
+  })
+
+  it.each([
+    ['a get trap that throws for every key', GET_THROWS, (): string => 'Error'],
+    ['a has trap that throws for every key', HAS_THROWS, codedLine],
+    ['a getPrototypeOf trap that throws', PROTOTYPE_THROWS, (): string => 'object'],
+    ['every trap that throws', EVERY_TRAP_THROWS, (): string => 'object'],
+    ['a 401 whose get trap throws for every key', GET_THROWS_ON_401, (): string => 'Error'],
+    ['a 401 whose other traps and keys throw', ONLY_STATUS_READS, (): string => 'object'],
+    ['a name getter that throws, code readable', NAME_THROWS_CODED, (): string => `Error ${SQLITE_CODE}`],
+  ] as const)(
+    '%s after the response started logs its fixed line and resets the connection',
+    async (_what, make, logged) => {
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      codeCase.make = make
+      lastTrap = undefined
+
+      await requestAfterHeaders('/api/v1/__test/after-headers-coded-case')
+
+      expect(lastTrap).toBeInstanceOf(Error)
+      expect(errorLog.mock.calls).toStrictEqual([
+        ['Unhandled /api error after the response started:', logged()],
+      ])
+      expectNoLogLeak(errorLog.mock.calls)
+    },
+  )
+})
