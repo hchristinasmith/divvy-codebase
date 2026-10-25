@@ -320,7 +320,7 @@ describe('schema (Ruling 2, #31 amended by Ruling 7)', () => {
       kind: [...INSIGHT_KINDS],
       scope: Object.keys(SCOPES),
     })
-    // AGENT_KINDS, AGENT_TRIGGERS and AGENT_RUN_OUTCOMES in agent-runs.ts are
+    // AGENT_KINDS, AGENT_TRIGGERS and AGENT_RUN_OUTCOMES in contracts.ts are
     // pinned to these in agent-runs.test.ts.
     expect(await enums('agent_runs')).toStrictEqual({
       kind: ['category', 'insights'],

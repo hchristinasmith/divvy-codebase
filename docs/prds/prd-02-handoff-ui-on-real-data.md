@@ -27,7 +27,7 @@ Rejected alternatives:
 ## Evidence
 
 - **The design is final and specific.** 8 screens, tokens, formulas and state in `docs/design/handoff.md:22-80`; high fidelity, "Recreate pixel-close" (`:9-10`).
-- **The formula is given, the inputs are not.** `handoff.md:25` states `liquid − unpaid bills − remaining budget − tax hold`; the prototype defines liquid as two hand-picked balances and tax hold as a constant (`docs/design/Divvy.dc.html:419-426`), and clamps at zero (`:426`).
+- **The formula is given, the inputs are not.** `handoff.md:25` states `liquid − unpaid bills − remaining budget − tax hold`; the prototype defines liquid as two hand-picked balances and tax hold as a constant (`docs/design/Divvy.dc.html:494-499`), and clamps at zero (`:499`).
 - **Only budgets have a table, and it is unused.** `server/db/migrations/20250619122142_targets.js:6-20` (unique on user, category, period; amount decimal); no `server/routes/` file serves it (`server/server.ts:22-24` mounts only accounts, categories, transactions). The Dashboard's budgets are hardcoded (`client/components/Dashboard/Dashboard.tsx:19-24`).
 - **No bills, goals or habit tables exist.** Migrations list: transactions, users, targets, wishlist_items, settings, user_challenges. Audit gap matrix rows "Bill reminders", "Progress bars + streaks" (`docs/audit-2026-10-23.md:93-101`).
 - **A key/value settings table exists for tax rate and payday.** `server/db/migrations/20250619122207_settings.js:6-14`.
@@ -85,7 +85,7 @@ Items 1, 3, 4 are tests (the code does what is written). Items 2, 5 need a real-
 ## Rulings
 
 ## Ruling 1 — Safe-to-spend is computed on the server, by one shared pure function
-`shared/safe-to-spend.ts` takes rows and a scope and returns the signed result and its parts; the overview route calls it and the client displays what it returns. prd-03's `get_safe_to_spend` imports the same function. Why: two implementations of the number is how the advisor and the screen come to disagree. The prototype recomputes in the browser (`Divvy.dc.html:424-426`); the real build does not. Extends to: any new consumer imports it, never re-derives it.
+`shared/safe-to-spend.ts` takes rows and a scope and returns the signed result and its parts; the overview route calls it and the client displays what it returns. prd-03's `get_safe_to_spend` imports the same function. Why: two implementations of the number is how the advisor and the screen come to disagree. The prototype recomputes in the browser (`Divvy.dc.html:497-499`); the real build does not. Extends to: any new consumer imports it, never re-derives it.
 
 ## Ruling 2 — The inputs of the formula are defined, not guessed
 - **liquid**: sum of balances of in-scope accounts whose `account_settings.role` is `current`. Savings and the tax pot are not liquid.
@@ -103,7 +103,7 @@ Why: the handoff's formula (`handoff.md:25`) only works once each term is pinned
 > Roles are stored as `current`, `savings`, `tax_pot` and `credit_card`; the text above writes "tax pot" and "credit card".
 
 ## Ruling 3 — A negative result is shown as $0 plus how short you are
-The function returns the signed value; the hero shows `$0` and a "short by $X" line when it is negative. The design clamps silently (`Divvy.dc.html:426`), which would hide an overspend and contradicts "never flattering" (`handoff.md:42`).
+The function returns the signed value; the hero shows `$0` and a "short by $X" line when it is negative. The design clamps silently (`Divvy.dc.html:499`), which would hide an overspend and contradicts "never flattering" (`handoff.md:42`).
 
 ## Ruling 4 — Strawb is Akahu business accounts only until Xero exists
 No Xero line, no estimated or sample invoice figure, no "Owed to you". The Strawb card shows business-scope accounts and the tax pot. Why: nothing may look like data we do not have. Extends to: when M4 lands it adds the line; this PRD adds no placeholder for it.

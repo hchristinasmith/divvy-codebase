@@ -14,39 +14,20 @@
 // poller does the difference.
 // `cursor` is the agent's own opaque place in a backlog sweep.
 //
-// The row type and value lists live here, not in models/, until a follow-up
-// moves them (out of #31's fence). The migration repeats the lists, and
-// agent-runs.test.ts pins them to it.
+// The row type and value lists live in contracts.ts, beside the category
+// proposal's. The migration repeats the lists, and agent-runs.test.ts pins
+// them to it.
 //
-// A refused write throws SQLite's words without the row (`scrubbed`).
-import type { IsoTimestamp } from '../../../models/sync.ts'
+// A refused write throws SQLite's words without the row (`scrubbed`, in
+// ./scrubbed.ts).
+import type {
+  AgentKind,
+  AgentRun,
+  AgentRunOutcome,
+  AgentTrigger,
+} from '../contracts.ts'
 import connection from '../../db/connection.ts'
-import { scrubbed } from './proposals.ts'
-
-export const AGENT_KINDS = ['category', 'insights'] as const
-export type AgentKind = (typeof AGENT_KINDS)[number]
-
-export const AGENT_TRIGGERS = ['sync', 'weekly', 'manual'] as const
-export type AgentTrigger = (typeof AGENT_TRIGGERS)[number]
-
-export const AGENT_RUN_OUTCOMES = ['running', 'success', 'failed'] as const
-export type AgentRunOutcome = (typeof AGENT_RUN_OUTCOMES)[number]
-
-// A row of `agent_runs`.
-export interface AgentRun {
-  id: number
-  kind: AgentKind
-  trigger: AgentTrigger
-  started_at: IsoTimestamp
-  // Null exactly while `outcome` is `running`.
-  finished_at: IsoTimestamp | null
-  outcome: AgentRunOutcome
-  considered_count: number
-  written_count: number
-  // Set exactly when `trigger` is `sync`.
-  sync_run_id: number | null
-  cursor: string | null
-}
+import { scrubbed } from './scrubbed.ts'
 
 export interface StartRun {
   kind: AgentKind

@@ -311,7 +311,7 @@ export interface OverviewResponse {
   dataAsOf: IsoTimestamp | null
 }
 
-/** POST /api/v1/alerts/:id/dismiss */
+/** POST /api/v1/overview/alerts/:id/dismiss */
 export interface DismissAlertResponse {
   id: string
   dismissedAt: IsoTimestamp
