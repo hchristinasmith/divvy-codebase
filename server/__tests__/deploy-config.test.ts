@@ -330,16 +330,17 @@ const SENTINEL = 'not-a-real-secret-sentinel'
 const SOCKET_WAIT_SECS = 15
 const NO_SOCKET_WAIT_SECS = 2
 // How long spawnSync lets one start.sh run go before it kills it, for every
-// runStart call that expects a status (#374). It is above the socket wait, so
-// a slow socket fails on start.sh's own message, not on spawnSync killing it.
-// A test that runs start.sh twice spends this twice; the describe block's
-// timeout is set for that. On 2026-10-26 a boot run hit the old 30 s limit
-// under load and failed as `expected null to be +0` (#369): spawnSync killed
-// start.sh and returned no status. That day, boot runs at load 130-210 took
-// 5.3-13.2 s, but the failing run's length is unknown, so this limit doubles
-// the one it ran past. vitest's timeout never ends a synchronous spawnSync:
-// this limit is the one that ends a hang.
-const RUN_TIMEOUT_MS = 60 * 1000
+// runStart call that expects a status (#374). It is derived from the socket
+// wait, so it stays above it: a slow socket fails on start.sh's own message,
+// not on spawnSync killing it. On 2026-10-26 a boot run hit the old limit,
+// (SOCKET_WAIT_SECS + 15) s, under load and failed as `expected null to be +0`
+// (#369): spawnSync killed start.sh and returned no status. That day, boot
+// runs at load 130-210 took 5.3-13.2 s, but the failing run's length is
+// unknown, so this limit doubles the one it ran past. vitest arms a test's
+// timeout only after a synchronous test returns, so it never ends a
+// spawnSync: this limit is the one that ends a hang. The describe block's
+// timeout is still sized for a test that runs start.sh twice.
+const RUN_TIMEOUT_MS = 2 * (SOCKET_WAIT_SECS + 15) * 1000
 const SERVE_OK = '|-- / proxy http://127.0.0.1:3005\n'
 
 // tailscaled is node so it can hold a real unix socket. It is wrapped in sh
