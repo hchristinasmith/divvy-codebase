@@ -1,5 +1,5 @@
 import { formatCents } from '../../../shared/money.ts'
-import type { SubscriptionRow } from '../../../shared/contracts.ts'
+import type { IsoDate, SubscriptionRow } from '../../../shared/contracts.ts'
 import SideChip from './SideChip.tsx'
 import { cadenceLabel, cycleLabel, formatDay, plural } from './format.ts'
 import { FOCUS, PILL_BUTTON, SECONDARY_BUTTON } from './styles.ts'
@@ -14,10 +14,10 @@ import type { SubscriptionActions } from './useSubscriptionActions.ts'
 // the cancel. A charge after the cancel date makes the row active again,
 // and a warning line says when it landed.
 
-function metaLine(row: SubscriptionRow): string {
+function metaLine(row: SubscriptionRow, today: IsoDate): string {
   const parts = [
     cadenceLabel(row.cadence),
-    `Last charged ${formatDay(row.lastChargedOn)}`,
+    `Last charged ${formatDay(row.lastChargedOn, today)}`,
     plural(row.chargeCount, 'charge'),
     row.marked ? 'You marked it' : 'Found automatically',
   ]
@@ -30,7 +30,7 @@ function metaLine(row: SubscriptionRow): string {
     parts.push(`counts as ${formatCents(row.perMonthCents)} a month`)
   }
   if (row.status === 'cancelled' && row.cancelledOn !== null) {
-    parts.push(`Cancelled ${formatDay(row.cancelledOn)}`)
+    parts.push(`Cancelled ${formatDay(row.cancelledOn, today)}`)
   }
   return parts.join(' · ')
 }
@@ -40,9 +40,11 @@ const TEXT_BUTTON = `self-start cursor-pointer bg-transparent p-0 text-body-12 f
 export default function SubscriptionItem({
   row,
   actions,
+  today,
 }: {
   row: SubscriptionRow
   actions: SubscriptionActions
+  today: IsoDate
 }) {
   const cancelled = row.status === 'cancelled'
   const target = { scope: row.scope, merchantKey: row.merchantKey }
@@ -65,11 +67,11 @@ export default function SubscriptionItem({
           <SideChip scope={row.scope} />
         </div>
         <span data-testid="subscription-meta" className="text-body-12 text-ink-muted">
-          {metaLine(row)}
+          {metaLine(row, today)}
         </span>
         {row.chargedAgainOn !== null && (
           <span className="text-body-12 text-warn">
-            {`Charged again on ${formatDay(row.chargedAgainOn)} after you cancelled`}
+            {`Charged again on ${formatDay(row.chargedAgainOn, today)} after you cancelled`}
           </span>
         )}
         {row.detected ? (

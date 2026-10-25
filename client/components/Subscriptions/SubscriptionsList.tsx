@@ -1,4 +1,4 @@
-import type { SubscriptionRow } from '../../../shared/contracts.ts'
+import type { IsoDate, SubscriptionRow } from '../../../shared/contracts.ts'
 import SubscriptionItem from './SubscriptionItem.tsx'
 import { CARD, MUTED } from './styles.ts'
 import type { SubscriptionActions } from './useSubscriptionActions.ts'
@@ -9,9 +9,11 @@ import type { SubscriptionActions } from './useSubscriptionActions.ts'
 export default function SubscriptionsList({
   rows,
   actions,
+  today,
 }: {
   rows: SubscriptionRow[]
   actions: SubscriptionActions
+  today: IsoDate
 }) {
   return (
     <section aria-label="Subscriptions" className={`${CARD} px-6 py-2`}>
@@ -24,6 +26,7 @@ export default function SubscriptionsList({
               key={`${row.scope}:${row.merchantKey}`}
               row={row}
               actions={actions}
+              today={today}
             />
           ))}
         </ul>

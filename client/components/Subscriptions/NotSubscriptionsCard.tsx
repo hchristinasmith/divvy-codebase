@@ -1,4 +1,4 @@
-import type { SubscriptionMerchant } from '../../../shared/contracts.ts'
+import type { IsoDate, SubscriptionMerchant } from '../../../shared/contracts.ts'
 import MerchantRow from './MerchantRow.tsx'
 import { CARD, CARD_TITLE, SECONDARY_BUTTON } from './styles.ts'
 import type { SubscriptionActions } from './useSubscriptionActions.ts'
@@ -9,9 +9,11 @@ import type { SubscriptionActions } from './useSubscriptionActions.ts'
 export default function NotSubscriptionsCard({
   merchants,
   actions,
+  today,
 }: {
   merchants: SubscriptionMerchant[]
   actions: SubscriptionActions
+  today: IsoDate
 }) {
   return (
     <section
@@ -26,7 +28,11 @@ export default function NotSubscriptionsCard({
       </p>
       <ul className="m-0 flex list-none flex-col p-0">
         {merchants.map((merchant) => (
-          <MerchantRow key={`${merchant.scope}:${merchant.merchantKey}`} merchant={merchant}>
+          <MerchantRow
+            key={`${merchant.scope}:${merchant.merchantKey}`}
+            merchant={merchant}
+            today={today}
+          >
             <button
               type="button"
               className={SECONDARY_BUTTON}

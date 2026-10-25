@@ -1,4 +1,4 @@
-import type { SubscriptionMerchant } from '../../../shared/contracts.ts'
+import type { IsoDate, SubscriptionMerchant } from '../../../shared/contracts.ts'
 import MerchantRow from './MerchantRow.tsx'
 import { CARD, CARD_TITLE, PRIMARY_BUTTON, SECONDARY_BUTTON } from './styles.ts'
 import type { SubscriptionActions } from './useSubscriptionActions.ts'
@@ -10,9 +10,11 @@ import type { SubscriptionActions } from './useSubscriptionActions.ts'
 export default function QuestionsCard({
   questions,
   actions,
+  today,
 }: {
   questions: SubscriptionMerchant[]
   actions: SubscriptionActions
+  today: IsoDate
 }) {
   return (
     <section
@@ -29,7 +31,11 @@ export default function QuestionsCard({
         {questions.map((merchant) => {
           const target = { scope: merchant.scope, merchantKey: merchant.merchantKey }
           return (
-            <MerchantRow key={`${merchant.scope}:${merchant.merchantKey}`} merchant={merchant}>
+            <MerchantRow
+              key={`${merchant.scope}:${merchant.merchantKey}`}
+              merchant={merchant}
+              today={today}
+            >
               <button
                 type="button"
                 className={PRIMARY_BUTTON}

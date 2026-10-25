@@ -27,6 +27,7 @@ import {
   CARD_ACCOUNT,
   EVERYDAY,
   GROUPS,
+  INCOME_ROW,
   OVER_BUDGET,
   installFetch,
   overviewByScope,
@@ -59,6 +60,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
   vi.unstubAllGlobals()
   vi.resetAllMocks()
 })
@@ -134,7 +136,7 @@ describe('the hero shows exactly the safeCents the server sent', () => {
       '$925.00 a day for the next 6 days',
     )
     expect(screen.queryByTestId('hero-short-by')).toBeNull()
-    expect(screen.getByText(/until payday on 3 Nov/)).not.toBeNull()
+    expect(screen.getByText(/until payday on 3 Nov · after tax/)).not.toBeNull()
   })
 
   it('sets the bar to safeCents as a share of liquidCents', async () => {
@@ -355,6 +357,116 @@ describe('an invalidation of the overview key refetches the hero', () => {
     await waitFor(() =>
       expect(screen.getByTestId('hero-amount').textContent).toBe('$7,777.00'),
     )
+  })
+})
+
+describe("a date from another year than today's shows its year", () => {
+  function alertText(id: string): string {
+    const row = document.querySelector<HTMLElement>(`[data-alert-id="${id}"]`)
+    if (!row) throw new Error(`no alert ${id}`)
+    return row.textContent ?? ''
+  }
+
+  function paydayLine(): string {
+    return screen.getByText(/until payday on/).textContent ?? ''
+  }
+
+  it('shows the year on a payday in another year', async () => {
+    setup('all', {
+      all: { safeToSpend: { today: '2026-12-29', nextPayday: '2027-01-01' } },
+    })
+    await hero()
+
+    expect(paydayLine()).toContain('until payday on 1 Jan 2027 · after tax')
+  })
+
+  it('leaves the year off a payday in this year', async () => {
+    setup('all', {
+      all: { safeToSpend: { today: '2026-12-29', nextPayday: '2026-12-31' } },
+    })
+    await hero()
+
+    expect(paydayLine()).toContain('until payday on 31 Dec · after tax')
+  })
+
+  it('shows the year on an alert due in another year, and none on this year', async () => {
+    setup('all', {
+      all: {
+        alerts: [
+          {
+            ...BILL_OVERDUE,
+            id: 'bill_overdue:5:2025-12-18',
+            subject: 'Old Invented',
+            dueDate: '2025-12-18',
+          },
+          BILL_SOON,
+          {
+            ...BILL_SOON,
+            id: 'bill_due_soon:6:2027-01-04',
+            subject: 'New Invented',
+            dueDate: '2027-01-04',
+          },
+        ],
+      },
+    })
+    await hero()
+
+    expect(alertText('bill_overdue:5:2025-12-18')).toContain(
+      'Old Invented ($18.00) is overdue, due 18 Dec 2025.',
+    )
+    expect(alertText(BILL_SOON.id)).toContain(
+      'Rent Invented ($1,200.00) is due 30 Oct.',
+    )
+    expect(alertText(BILL_SOON.id)).not.toContain('30 Oct 2026')
+    expect(alertText('bill_due_soon:6:2027-01-04')).toContain(
+      'New Invented ($1,200.00) is due 4 Jan 2027.',
+    )
+  })
+
+  it('shows the year on an activity row dated in another year, and none on this year', async () => {
+    setup('all', {
+      all: {
+        recentActivity: [
+          { ...CAFE_ROW, id: '201', date: '2025-12-30' },
+          { ...INCOME_ROW, id: '202', date: '2026-10-20' },
+          { ...INCOME_ROW, id: '203', date: '2027-01-02' },
+        ],
+      },
+    })
+    await hero()
+
+    expect(within(activityRow('201')).getByText('30 Dec 2025')).not.toBeNull()
+    expect(within(activityRow('202')).getByText('20 Oct')).not.toBeNull()
+    expect(within(activityRow('203')).getByText('2 Jan 2027')).not.toBeNull()
+  })
+
+  it("takes this year from the server's today, not the browser's clock or the last payday", async () => {
+    // The server's today is in 2027; the browser's clock (pinned here, in
+    // Auckland too) and the last payday are in 2026. An alert and a row
+    // dated in 2026 show their year only if the cards read
+    // safeToSpend.today. Only Date is faked, so react-query keeps real timers.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-27T23:00:00Z'))
+    setup('all', {
+      all: {
+        safeToSpend: {
+          today: '2027-01-04',
+          lastPayday: '2026-12-29',
+          nextPayday: '2027-01-05',
+        },
+        alerts: [BILL_SOON],
+        recentActivity: [CAFE_ROW],
+      },
+    })
+    await hero()
+
+    expect(paydayLine()).toContain('until payday on 5 Jan · after tax')
+    expect(alertText(BILL_SOON.id)).toContain(
+      'Rent Invented ($1,200.00) is due 30 Oct 2026.',
+    )
+    expect(
+      within(activityRow(CAFE_ROW.id)).getByText('21 Oct 2026'),
+    ).not.toBeNull()
   })
 })
 

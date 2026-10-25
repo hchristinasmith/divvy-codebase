@@ -3,6 +3,7 @@ import ScreenHeader from '../Shell/ScreenHeader.tsx'
 import { subscriptionsQuery } from '../../apis/subscriptions.ts'
 import { useScope } from '../../context/ScopeContext.tsx'
 import type { SubscriptionsResponse } from '../../../shared/contracts.ts'
+import { nzCalendarDate } from '../../../shared/nz-dates.ts'
 import AdvisorBanner from './AdvisorBanner.tsx'
 import NotSubscriptionsCard from './NotSubscriptionsCard.tsx'
 import QuestionsCard from './QuestionsCard.tsx'
@@ -74,6 +75,7 @@ export default function Subscriptions() {
 
 function SubscriptionsBody({ data }: { data: SubscriptionsResponse }) {
   const actions = useSubscriptionActions()
+  const today = nzCalendarDate(new Date())
   return (
     <div className="flex flex-col gap-4">
       <SummaryTiles totals={data.totals} />
@@ -82,13 +84,17 @@ function SubscriptionsBody({ data }: { data: SubscriptionsResponse }) {
           {actions.error}
         </p>
       )}
-      <SubscriptionsList rows={data.subscriptions} actions={actions} />
+      <SubscriptionsList rows={data.subscriptions} actions={actions} today={today} />
       <AdvisorBanner />
       {data.questions.length > 0 && (
-        <QuestionsCard questions={data.questions} actions={actions} />
+        <QuestionsCard questions={data.questions} actions={actions} today={today} />
       )}
       {data.notSubscriptions.length > 0 && (
-        <NotSubscriptionsCard merchants={data.notSubscriptions} actions={actions} />
+        <NotSubscriptionsCard
+          merchants={data.notSubscriptions}
+          actions={actions}
+          today={today}
+        />
       )}
     </div>
   )

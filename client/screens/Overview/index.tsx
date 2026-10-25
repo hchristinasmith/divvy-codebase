@@ -90,11 +90,16 @@ function OverviewBody({
       <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] items-start gap-4.5">
         {/* Keyed by scope, so a switch drops a failed request's message and
             the sub-filter rather than carrying them into the new scope. */}
-        <AlertsCard key={`alerts-${scope}`} alerts={data.alerts} />
+        <AlertsCard
+          key={`alerts-${scope}`}
+          alerts={data.alerts}
+          today={data.safeToSpend.today}
+        />
         <ActivityCard
           key={`activity-${scope}`}
           rows={data.recentActivity}
           scope={scope}
+          today={data.safeToSpend.today}
         />
       </div>
       <MoreLinks />

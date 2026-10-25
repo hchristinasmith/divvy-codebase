@@ -6,7 +6,7 @@ import {
 } from '../../apis/overview.ts'
 import { invalidateOverview } from '../../apis/queryKeys.ts'
 import { SCOPES } from '../../context/ScopeContext.tsx'
-import type { ActivityRow, Scope } from '../../../shared/contracts.ts'
+import type { ActivityRow, IsoDate, Scope } from '../../../shared/contracts.ts'
 import ActivityRowItem from './ActivityRowItem.tsx'
 import {
   CARD,
@@ -39,9 +39,11 @@ interface CategoryEdit {
 export default function ActivityCard({
   rows,
   scope,
+  today,
 }: {
   rows: ActivityRow[]
   scope: Scope
+  today: IsoDate
 }) {
   const [filter, setFilter] = useState<Scope>(scope)
   const client = useQueryClient()
@@ -108,6 +110,7 @@ export default function ActivityCard({
                   ? edit.error.message
                   : null
               }
+              today={today}
               onCategory={(category) => edit.mutate({ id: row.id, category })}
             />
           ))}
