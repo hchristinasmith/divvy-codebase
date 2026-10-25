@@ -1013,6 +1013,37 @@ describe('dates', () => {
     expect(() => isoWeekOf('0000-01-01')).toThrow(RangeError)
   })
 
+  // Pins behaviour as it is before #337. The build changes the 9999 messages
+  // below to weekRange's own refusal, and changes the malformed monthsEnding
+  // labels for the year 0000; these tests then need updating with it.
+  it.each(['9999-W52', '9999-W53', '9999-W54'])(
+    'weekRange(%s) throws the shared date helper message before #337',
+    (label) => {
+      let caught: unknown
+      try {
+        weekRange(label)
+      } catch (err) {
+        caught = err
+      }
+      expect(caught).toBeInstanceOf(RangeError)
+      expect((caught as Error).message).toBe('a bill date falls outside the years 0000 to 9999')
+    },
+  )
+
+  // Valid today, and must stay valid: 0000-W01 is Monday 0000-01-03 to Sunday 0000-01-09.
+  it('weekRange(0000-W01) is returned, not refused', () => {
+    expect(weekRange('0000-W01')).toStrictEqual({ label: '0000-W01', start: '0000-01-03', end: '0000-01-09' })
+  })
+
+  // Pins behaviour as it is before #337: a window that reaches back past the
+  // year 0000 returns malformed labels ('00-1--1', '00-1-00'), not a refusal.
+  // The build changes these outputs.
+  it('monthsEnding across the year 0000 returns malformed labels before #337', () => {
+    expect(monthsEnding('0000-01-01', 3)).toStrictEqual(['00-1--1', '00-1-00', '0000-01'])
+    expect(monthsEnding('0000-03-15', 3)).toStrictEqual(['0000-01', '0000-02', '0000-03'])
+    expect(monthsEnding('0000-01-01', 1)).toStrictEqual(['0000-01'])
+  })
+
   it('lastCompleteWeek refuses an invalid instant', () => {
     expect(() => lastCompleteWeek(new Date('not a date'))).toThrow('date is not a valid instant')
   })
