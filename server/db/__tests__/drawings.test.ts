@@ -179,6 +179,28 @@ describe('loadDrawingIds', () => {
     expect(sorted(await loadDrawingIds(connection))).toStrictEqual([])
   })
 
+  it.each([
+    [
+      'a date past year 9999',
+      tx(5, TRADING, '+275760-09-13T00:00:00.000Z', -30000),
+    ],
+    [
+      'an amount that is not whole cents',
+      tx(5, TRADING, '2026-10-27T01:00:00.000Z', -30000.5),
+    ],
+  ])(
+    'skips a candidate with %s and still finds the pair beside it',
+    async (_why, odd) => {
+      await seedAccounts()
+      await connection('transactions').insert([
+        tx(1, TRADING, '2026-10-27T01:00:00.000Z', -30000),
+        tx(2, EVERYDAY, '2026-10-28T01:00:00.000Z', 30000),
+        odd,
+      ])
+      expect(sorted(await loadDrawingIds(connection))).toStrictEqual([1, 2])
+    },
+  )
+
   it('a Xero-sourced account with a matching akahu_id is not read', async () => {
     await seedAccounts()
     await connection('accounts')

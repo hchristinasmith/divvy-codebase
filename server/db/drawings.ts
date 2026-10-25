@@ -30,6 +30,9 @@ import { nzCalendarDate } from './overview.ts'
 
 type Db = typeof connection
 
+/** The only date shape the shared matcher accepts. */
+const NZ_DAY = /^\d{4}-\d{2}-\d{2}$/
+
 interface CandidateRow {
   id: number
   scope: RowScope
@@ -60,10 +63,15 @@ export async function loadDrawingIds(
   for (const row of rows) {
     const at = new Date(row.date)
     if (Number.isNaN(at.getTime())) continue
+    // The shared matcher is strict and throws on one bad candidate; a row it
+    // cannot place (a year past 9999, an amount that is not whole cents) is
+    // skipped here instead, so one odd row never fails every list.
+    const date = nzCalendarDate(at)
+    if (!NZ_DAY.test(date) || !Number.isSafeInteger(row.amount_cents)) continue
     candidates.push({
       id: row.id,
       scope: row.scope,
-      date: nzCalendarDate(at),
+      date,
       amountCents: row.amount_cents,
     })
   }

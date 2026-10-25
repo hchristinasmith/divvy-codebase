@@ -634,6 +634,57 @@ describe('running sync again changes no drawing and never writes category (DW6)'
   })
 })
 
+describe('a row the matcher cannot place does not break the transaction lists', () => {
+  // A fractional amount already fails /accounts/transactions on its own
+  // (`centsToDollars` refuses it), so only the date case checks that list.
+  it.each([
+    ['a date past year 9999', '+275760-09-13T00:00:00.000Z', -30000, true],
+    ['an amount that is not whole cents', '2026-10-27T01:00:00.000Z', -1234.5, false],
+  ])(
+    'the transaction lists still answer 200 beside %s',
+    async (_why, date, cents, checkAccounts) => {
+      await seedBase()
+      await insertAll('transactions', [
+        ...outHalves(),
+        ...inHalves(),
+        tx(90, TRADING, date, cents),
+      ])
+      const list = await api.get('/api/v1/transactions')
+      expect(list.status).toBe(200)
+      const byId = new Map<number, Row>(
+        (list.body.txns as Row[]).map((r) => [r.id as number, r]),
+      )
+      expect(byId.get(OCT_OUT)?.category).toBe('Drawings')
+      expect(byId.get(90)?.category).toBeNull()
+      if (checkAccounts) {
+        const accounts = await api.get('/api/v1/accounts/transactions')
+        expect(accounts.status).toBe(200)
+        const items = accounts.body.items as Row[]
+        expect(items.map((i) => i._id)).toContain('trans_fixture_90')
+      }
+    },
+  )
+
+  it('GET /api/v1/transactions logs only the class when the drawings read fails', async () => {
+    await seedBase()
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    // The rows are read; the drawings read joins accounts, which is away.
+    await connection.schema.renameTable('accounts', 'accounts_away')
+    try {
+      const res = await api.get('/api/v1/transactions')
+      expect(res.status).toBe(500)
+      expect(res.text).toBe("Couldn't search transactions")
+    } finally {
+      await connection.schema.renameTable('accounts_away', 'accounts')
+    }
+    // Never the message, which names SQL (or a matcher's ids and amounts).
+    expect(error.mock.calls).toStrictEqual([
+      ['Error searching transactions:', 'Error'],
+    ])
+    error.mockRestore()
+  })
+})
+
 describe('reads write nothing', () => {
   const TABLES = [
     'transactions',
