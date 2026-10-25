@@ -49,3 +49,40 @@ describe('ScreenHeader', () => {
     expect(buttons).toEqual(['All', 'Personal', 'Strawb'])
   })
 })
+
+// #390 pins today's header markup before it gains a controls slot: the scope
+// switch and sync pill must stay where and how they are. Class lists are
+// exact sorted sets.
+describe('ScreenHeader markup (pinned before the #390 controls slot)', () => {
+  it('is a header with its exact class set', () => {
+    const { container } = renderWithProviders(<ScreenHeader title="Goals" />)
+    const header = container.querySelector('header')
+    expect(header).not.toBeNull()
+    expect([...(header as HTMLElement).classList].sort()).toEqual(
+      ['flex', 'flex-wrap', 'gap-4', 'items-end', 'justify-between'].sort(),
+    )
+  })
+
+  it('has the title block first and the controls group second, nothing else', () => {
+    const { container } = renderWithProviders(<ScreenHeader title="Goals" />)
+    const header = container.querySelector('header') as HTMLElement
+    const title = screen.getByRole('heading', { level: 1 })
+    const scope = screen.getByRole('group', { name: 'Scope' })
+    expect(header.children).toHaveLength(2)
+    expect(header.children[0].contains(title)).toBe(true)
+    expect(header.children[1].contains(scope)).toBe(true)
+  })
+
+  it('keeps the scope group then the sync pill in the right-hand group, with its exact class set', () => {
+    renderWithProviders(<ScreenHeader title="Goals" />)
+    const scope = screen.getByRole('group', { name: 'Scope' })
+    const right = scope.parentElement as HTMLElement
+    expect(right.tagName).toBe('DIV')
+    expect([...right.classList].sort()).toEqual(
+      ['flex', 'flex-wrap', 'gap-2', 'items-center'].sort(),
+    )
+    expect(right.children).toHaveLength(2)
+    expect(right.children[0]).toBe(scope)
+    expect(right.children[1].hasAttribute('data-sync-state')).toBe(true)
+  })
+})
