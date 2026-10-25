@@ -30,12 +30,13 @@ const HANDOFF = [
   ['goals', '/goals', 'Goals, built by its own issue'],
   ['habits', '/habits', 'Habits'],
   ['advisor', '/advisor', 'Advisor'],
+  ['sort', '/sort', 'Sort'],
   ['sync', '/sync', 'Sync'],
   ['privacy', '/privacy', 'Privacy'],
 ] as const
 
 describe('the route table', () => {
-  it('holds the nine handoff screens in sidebar order', () => {
+  it('holds the shell screens in sidebar order', () => {
     expect(screens.map((s) => [s.key, s.path])).toEqual(
       HANDOFF.map(([key, path]) => [key, path]),
     )
@@ -65,13 +66,14 @@ describe('the route table', () => {
 
   it('every stub tells you it is not built yet rather than showing numbers', () => {
     // Goals is mocked above; Overview (issue 45), Subscriptions (issue 230),
-    // Advisor and Privacy (issue 60) are built.
+    // Advisor and Privacy (issue 60) and Sort (issue 259) are built.
     for (const [, path] of HANDOFF.filter(
       ([key]) =>
         key !== 'goals' &&
         key !== 'overview' &&
         key !== 'subscriptions' &&
         key !== 'advisor' &&
+        key !== 'sort' &&
         key !== 'privacy',
     )) {
       renderWithProviders(

@@ -1,6 +1,7 @@
 import { Settings, Wand } from 'lucide-react'
 
-// The screens of docs/design/handoff.md, by key.
+// The screens of docs/design/handoff.md, by key, and Sort (prd-02 Ruling 16),
+// which the handoff does not have.
 export type ScreenKey =
   | 'overview'
   | 'budgets'
@@ -9,6 +10,7 @@ export type ScreenKey =
   | 'goals'
   | 'habits'
   | 'advisor'
+  | 'sort'
   | 'sync'
   | 'privacy'
 
@@ -36,6 +38,9 @@ const PATHS: Record<ScreenKey, string[]> = {
     'M17 12h3',
     'M12 8.5 13.3 10.7 15.5 12 13.3 13.3 12 15.5 10.7 13.3 8.5 12 10.7 10.7z',
   ],
+  // Not a handoff screen (prd-02 Ruling 16), so no handoff icon: a funnel,
+  // in the same 24 viewBox, stroke 2 line style.
+  sort: ['M4 5h16l-6 7.5V19l-4-2v-4.5z'],
   sync: [
     'M5 12a7 7 0 0 1 12-5l1.5 1.5',
     'M18.5 5v3.5H15',

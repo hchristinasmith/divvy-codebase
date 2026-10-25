@@ -8,10 +8,12 @@ import Subscriptions from '../components/Subscriptions/index.tsx'
 import Goals from './Goals/index.tsx'
 import Habits from './Habits/index.tsx'
 import Advisor from './Advisor/index.tsx'
+import Sort from './Sort/index.tsx'
 import Sync from './Sync/index.tsx'
 import Privacy from './Privacy/index.tsx'
 
-// The one route table for the handoff's screens. The sidebar, the phone tab
+// The one route table for the handoff's screens, and Sort (prd-02 Ruling 16),
+// which the handoff does not have. The sidebar, the phone tab
 // bar and App.tsx's routes all read it. A screen's issue replaces the default
 // export of its stub, ./<Name>/index.tsx, and leaves this file and App.tsx
 // alone. A screen with no stub (Subscriptions, issue 230, in
@@ -29,7 +31,8 @@ export interface ScreenRoute {
   tab?: { label: string; order: number }
 }
 
-// In the handoff's sidebar order. The tab bar has its own order.
+// In the handoff's sidebar order, with Sort before Sync. The tab bar has its
+// own order.
 export const screens: readonly ScreenRoute[] = [
   {
     key: 'overview',
@@ -74,6 +77,7 @@ export const screens: readonly ScreenRoute[] = [
     Component: Advisor,
     tab: { label: 'Advisor', order: 5 },
   },
+  { key: 'sort', path: '/sort', label: 'Sort', Component: Sort },
   { key: 'sync', path: '/sync', label: 'Sync', Component: Sync },
   { key: 'privacy', path: '/privacy', label: 'Privacy', Component: Privacy },
 ]
