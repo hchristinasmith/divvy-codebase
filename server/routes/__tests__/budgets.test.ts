@@ -727,6 +727,16 @@ describe('POST /api/v1/budgets', () => {
     expect((await budgetRows())[0].note).toBeNull()
   })
 
+  it('takes a limit at the cap', async () => {
+    await seedAccounts()
+
+    const res = await postBudget({ ...VALID, limitCents: 1_000_000_000 })
+
+    expect(res.status).toBe(201)
+    expect(res.body.limitCents).toBe(1_000_000_000)
+    expect((await budgetRows())[0].limit_cents).toBe(1_000_000_000)
+  })
+
   it('takes a note of 500 characters', async () => {
     await seedAccounts()
     const note = 'n'.repeat(500)
@@ -1146,6 +1156,21 @@ describe('a stored note that is not text', () => {
     expect(logged.mock.calls).toStrictEqual([
       ['budgets: could not list budgets', 'BudgetsDataError'],
     ])
+  })
+
+  it('fails only its own scope’s list', async () => {
+    await seedAccounts()
+    await connection('budgets').insert([
+      budget(1, 'personal', BAKERIES, 100, Buffer.from('zz-sentinel-blob')),
+      budget(2, 'strawb', BAKERIES, 100),
+    ])
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const strawb = await getBudgets('strawb')
+
+    expect(strawb.status).toBe(200)
+    expect(strawb.body.items.map((i: BudgetResponse) => i.id)).toEqual(['2'])
+    expect((await getBudgets('personal')).status).toBe(500)
   })
 })
 

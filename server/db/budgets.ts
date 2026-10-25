@@ -249,17 +249,14 @@ async function readBudgets(
     'id',
     'note',
   )
-  const notes = new Map<string, string | null>()
-  for (const row of noteRows) {
-    if (row.note !== null && typeof row.note !== 'string') {
-      throw new BudgetsDataError('a stored budget is not valid')
-    }
-    notes.set(String(row.id), row.note)
-  }
+  const notes = new Map<string, unknown>()
+  for (const row of noteRows) notes.set(String(row.id), row.note)
   const items: BudgetResponse[] = safeToSpend.budgets.map((line) => {
+    // Only an in-scope note is checked, so a bad row in one scope never
+    // fails the other scope's list. A missing id is not reachable: both
+    // reads are of one snapshot.
     const note = notes.get(line.id)
-    // Not reachable: both reads are of one snapshot.
-    if (note === undefined) {
+    if (note === undefined || (note !== null && typeof note !== 'string')) {
       throw new BudgetsDataError('a stored budget is not valid')
     }
     return {
