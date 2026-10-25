@@ -401,6 +401,221 @@ describe('the fields #155 adds', () => {
   })
 })
 
+// The fields #191 adds: posted_date on settled rows (Akahu sends none on a
+// pending item) and merchant.nzbn on settled and pending rows alike.
+
+const NEW_191_COLUMNS = ['merchant_nzbn', 'posted_date'] as const
+
+type New191Columns = Record<(typeof NEW_191_COLUMNS)[number], unknown>
+
+const NO_191_FIELDS: New191Columns = { merchant_nzbn: null, posted_date: null }
+
+const ITEM_A_191: New191Columns = {
+  merchant_nzbn: 'fixture-nzbn-full-a',
+  posted_date: '2026-10-23T00:00:00.000Z',
+}
+
+async function new191ColumnsOf(akahuId: string): Promise<New191Columns> {
+  const row: New191Columns | undefined = await db('transactions')
+    .where({ akahu_id: akahuId })
+    .first(...NEW_191_COLUMNS)
+  if (row === undefined) throw new Error(`no row for ${akahuId}`)
+  return row
+}
+
+async function pending191Columns(): Promise<New191Columns[]> {
+  return db('transactions')
+    .where({ status: 'pending' })
+    .orderBy('amount_cents')
+    .select(...NEW_191_COLUMNS)
+}
+
+/** The full transactions fixture with item A's NZBN made digits only. */
+function digitNzbn(): string {
+  return replaceOnce(
+    fixture('akahu-transactions-full.json'),
+    '"nzbn": "fixture-nzbn-full-a"',
+    '"nzbn": "9400000000001"',
+  )
+}
+
+describe('the fields #191 adds', () => {
+  it('stores posted_date and merchant.nzbn a fixture item carries, and NULL where it has none', async () => {
+    const result = await syncAt(0, full())
+
+    expect(result).toMatchObject({ outcome: 'success', insertedCount: 3 })
+    const a = await new191ColumnsOf('trans_fixture_full_a')
+    expect(Object.keys(a).sort()).toEqual([...NEW_191_COLUMNS].sort())
+    expect(a).toEqual(ITEM_A_191)
+    expect(await new191ColumnsOf('trans_fixture_full_b')).toEqual(NO_191_FIELDS)
+    expect(await new191ColumnsOf('trans_fixture_full_c')).toEqual(NO_191_FIELDS)
+    expect(await pending191Columns()).toEqual([NO_191_FIELDS])
+  })
+
+  it('stores what every settled item in the default fixture carries', async () => {
+    // Parsed only to read text fields; no money is taken from the JSON.
+    const items: {
+      _id: string
+      posted_date?: string
+      merchant?: { nzbn?: string }
+    }[] = JSON.parse(fixture('akahu-transactions.json')).items
+    const expected = items
+      .map((item) => ({
+        akahu_id: item._id,
+        merchant_nzbn: item.merchant?.nzbn ?? null,
+        posted_date: item.posted_date ?? null,
+      }))
+      .sort((x, y) => x.akahu_id.localeCompare(y.akahu_id))
+    expect(expected.some((r) => r.posted_date !== null)).toBe(true)
+    expect(expected.some((r) => r.merchant_nzbn !== null)).toBe(true)
+
+    await syncAt(0)
+
+    expect(
+      await db('transactions')
+        .where({ status: 'settled' })
+        .orderBy('akahu_id')
+        .select('akahu_id', ...NEW_191_COLUMNS),
+    ).toEqual(expected)
+  })
+
+  it('stores the NZBN on a pending row and never a posted_date', async () => {
+    await syncAt(0)
+
+    expect(await pending191Columns()).toEqual([
+      { merchant_nzbn: 'fixture-nzbn-0004', posted_date: null },
+      NO_191_FIELDS,
+    ])
+  })
+
+  it('stores both as SQLite text', async () => {
+    await syncAt(0)
+
+    const types = await db.raw(
+      `SELECT status,
+              typeof(posted_date) AS posted_date,
+              typeof(merchant_nzbn) AS merchant_nzbn
+         FROM transactions
+        WHERE akahu_id = 'trans_fixture0001'
+           OR (status = 'pending' AND amount_cents = -6420)
+        ORDER BY status`,
+    )
+    expect(types).toEqual([
+      { status: 'pending', posted_date: 'null', merchant_nzbn: 'text' },
+      { status: 'settled', posted_date: 'text', merchant_nzbn: 'text' },
+    ])
+  })
+
+  it.each([
+    ['as the fixture has it', () => fixture('akahu-transactions-full.json')],
+    // A column that turned digit text into a number would never equal the
+    // incoming text, and every run would rewrite the row.
+    ['with a digit-only NZBN', digitNzbn],
+  ])('writes nothing on a second run over the same data, %s', async (_label, text) => {
+    await syncAt(0, full(text()))
+    const a = await new191ColumnsOf('trans_fixture_full_a')
+    expect(a.posted_date).not.toBeNull()
+    expect(a.merchant_nzbn).not.toBeNull()
+    const before = await snapshot()
+
+    const second = await syncAt(15, full(text()))
+
+    expect(second).toMatchObject({
+      outcome: 'success',
+      insertedCount: 0,
+      updatedCount: 0,
+    })
+    expect(await snapshot()).toEqual(before)
+  })
+
+  it('writes NULL when Akahu stops sending posted_date and merchant.nzbn', async () => {
+    await syncAt(0, full())
+    let text = fixture('akahu-transactions-full.json')
+    text = withoutMember(text, '"posted_date": "2026-10-23T00:00:00.000Z"')
+    text = withoutMember(text, '"nzbn": "fixture-nzbn-full-a"')
+
+    const second = await syncAt(15, full(text))
+
+    expect(second).toMatchObject({ outcome: 'success', updatedCount: 1 })
+    expect(await new191ColumnsOf('trans_fixture_full_a')).toEqual(NO_191_FIELDS)
+  })
+
+  it('writes NULL on a pending row when Akahu stops sending merchant.nzbn', async () => {
+    await syncAt(0)
+    const pending = withoutMember(
+      fixture('akahu-pending.json'),
+      '"nzbn": "fixture-nzbn-0004"',
+    )
+
+    const second = await syncAt(15, { pending })
+
+    expect(second).toMatchObject({ outcome: 'success', pendingMirroredCount: 2 })
+    expect(await pending191Columns()).toEqual([NO_191_FIELDS, NO_191_FIELDS])
+  })
+
+  it.each([
+    [
+      'NZBN',
+      '"nzbn": "fixture-nzbn-full-a"',
+      '"nzbn": "fixture-nzbn-full-a2"',
+      { ...ITEM_A_191, merchant_nzbn: 'fixture-nzbn-full-a2' },
+    ],
+    [
+      'posted date',
+      '"posted_date": "2026-10-23T00:00:00.000Z"',
+      '"posted_date": "2026-10-24T00:00:00.000Z"',
+      { ...ITEM_A_191, posted_date: '2026-10-24T00:00:00.000Z' },
+    ],
+  ])('updates the row when Akahu changes the %s', async (_label, from, to, columns) => {
+    await syncAt(0, full())
+    const text = replaceOnce(fixture('akahu-transactions-full.json'), from, to)
+
+    const second = await syncAt(15, full(text))
+
+    expect(second).toMatchObject({ outcome: 'success', updatedCount: 1 })
+    expect(await new191ColumnsOf('trans_fixture_full_a')).toEqual(columns)
+  })
+
+  it('fills both into a row stored before the migration, leaving the user category (Ruling 4)', async () => {
+    await syncAt(0, full())
+    const { id } = await db('transactions')
+      .where({ akahu_id: 'trans_fixture_full_a' })
+      .first('id')
+    // As the migration leaves a row stored before it: both NULL. The user
+    // has already set its category.
+    await db('transactions')
+      .where({ id })
+      .update({
+        category: 'Bakeries',
+        category_source: 'user',
+        posted_date: null,
+        merchant_nzbn: null,
+      })
+    await db('category_corrections').insert({
+      transaction_id: id,
+      from_category: null,
+      to_category: 'Bakeries',
+      corrected_at: at(5 * MINUTE_MS).toISOString(),
+      source: 'user',
+    })
+    const before = await snapshot()
+
+    const second = await syncAt(15, full())
+
+    expect(second).toMatchObject({ outcome: 'success', updatedCount: 1 })
+    const after = await snapshot()
+    const row = before.settled.find((r) => r.id === id)
+    expect(after.settled.find((r) => r.id === id)).toEqual({
+      ...row,
+      ...ITEM_A_191,
+    })
+    expect(after.corrections).toEqual(before.corrections)
+    expect(after.settled.filter((r) => r.id !== id)).toEqual(
+      before.settled.filter((r) => r.id !== id),
+    )
+  })
+})
+
 // The account fields #155 adds: attributes, the connection's type and logo,
 // and Akahu's authorisation and credentials ids.
 

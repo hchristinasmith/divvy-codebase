@@ -129,6 +129,8 @@ describe('a first run', () => {
       akahu_category_name: 'Cafes and restaurants',
       akahu_category_group_id: 'group_fixture0001',
       akahu_category_group_name: 'Lifestyle',
+      posted_date: '2026-10-21T00:00:00.000Z',
+      merchant_nzbn: 'fixture-nzbn-0001',
     })
 
     const amounts = await db('transactions')
@@ -186,6 +188,7 @@ describe('a first run', () => {
       merchant_id: 'merchant_fixture0004',
       merchant_name: 'Example Fuel',
       merchant_website: 'https://example.com/fuel',
+      merchant_nzbn: 'fixture-nzbn-0004',
     })
     expect(pending[1]).toEqual({
       ...blank,

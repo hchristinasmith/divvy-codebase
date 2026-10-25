@@ -325,12 +325,13 @@ describe('backfill of existing transactions (Done-when 1)', () => {
 
     await db.migrate.latest()
 
+    // Each row is compared on the columns it had before `latest`: a later
+    // migration may add `transactions` columns, and the TRANSACTION_COLUMNS
+    // pin is what catches a column appearing or disappearing.
     const after: Row[] = await db('transactions').orderBy('id')
-    const kept = after.map((row) => {
-      const copy = { ...row }
-      for (const c of NEW_TRANSACTION_COLUMNS) delete copy[c]
-      return copy
-    })
+    const kept = after.map((row) =>
+      Object.fromEntries(beforeColumns.map((c) => [c, row[c]])),
+    )
     const expected = before.map((row) =>
       row.akahu_id === R1 ? { ...row, category: 'Bakeries' } : row,
     )
