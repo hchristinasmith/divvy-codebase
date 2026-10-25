@@ -8,8 +8,10 @@
 app = "divvy-strawb"
 primary_region = "syd"
 
-# SIGTERM is what node, npm and litestream all handle; the timeout gives
-# Litestream (#24) time for a final sync before the machine stops.
+# Fly signals start.sh's process, which by then is Litestream (#24), or the
+# node server when backups are off. Litestream passes SIGTERM on to node, its
+# direct child with no npm in between (npm does not pass it on, #255), waits
+# for it to exit, then does a final sync; the timeout gives it time for that.
 kill_signal = "SIGTERM"
 kill_timeout = "30s"
 

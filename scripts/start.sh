@@ -1,8 +1,8 @@
 #!/bin/sh
 # Boot path for the Fly machine (D1, D4): join the tailnet, publish the app on
-# it (tailnet only), then run migrations + the app (`npm start`), under
-# Litestream when #24's config is present. Fails closed: if any tailnet step
-# fails the app never starts. Never `set -x` here: the auth key is in argv.
+# it (tailnet only), then run migrations + the app (`node dist/server.js`),
+# under Litestream when #24's config is present. Fails closed: if any tailnet
+# step fails the app never starts. Never `set -x` here: the auth key is in argv.
 set -eu
 
 log() { echo "start.sh: $*" >&2; }
@@ -92,10 +92,20 @@ case "$status
 esac
 log "serving $serve_target on the tailnet as $ts_hostname"
 
-# 5. Last command is exec'd so Fly's SIGTERM reaches it.
+# 5. The app: migrations, then the server. Migrations run inside the command
+#    Litestream starts, after its restore-if-db-not-exists: run here, before
+#    Litestream, they would create an empty database on a fresh volume and
+#    the backup would never be restored. start.sh execs Litestream, or the
+#    app when backups are off, so Fly's SIGTERM lands on this process. In the
+#    app each step execs (sh, then node), so the server is the process
+#    Litestream passes the signal to, or the one Fly signals directly; npm
+#    would not pass SIGTERM on to node (#255). The -exec string is split by
+#    Litestream's shellwords, not a shell: everything sh must see is inside
+#    the single quotes, and nothing outside them is special to either.
+app='npm run migrate:latest && exec node dist/server.js'
 if [ -f "$litestream_config" ]; then
   log "backups ON (litestream, $litestream_config)"
-  exec litestream replicate -config "$litestream_config" -exec "npm start"
+  exec litestream replicate -config "$litestream_config" -exec "sh -c '$app'"
 fi
 echo "start.sh: WARNING: backups are OFF: no $litestream_config, so nothing replicates the database off the volume (D2, #24)" >&2
-exec npm start
+exec sh -c "$app"

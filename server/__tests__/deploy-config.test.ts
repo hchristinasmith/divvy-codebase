@@ -349,11 +349,54 @@ shift
 exec "$@"
 `
 
+// Exits with FAKE_<NAME>_EXIT (default 0).
 const fakeRecorder = (name: string): string => `#!/bin/sh
 echo "${name} $*" >> "$FAKE_DIR/calls.log"
 env > "$FAKE_DIR/${name}.env"
 echo "$$" > "$FAKE_DIR/${name}.pid"
-exit 0
+echo "$PPID" > "$FAKE_DIR/${name}.ppid"
+exit "\${FAKE_${name.toUpperCase()}_EXIT:-0}"
+`
+
+// Litestream 0.5.17 runs its -exec string as a child, not through a shell:
+// it splits it with go-shellwords, starts it with exec.Command, passes on the
+// signal it gets, and exits once the child has. This does the same, and
+// refuses any character outside single quotes that shellwords and sh might
+// read differently (shellwords stops at an unquoted & or ;, dropping the rest).
+// The sh wrapper records the call and the pid, then execs node, which keeps it.
+const FAKE_LITESTREAM_JS = `
+const fs = require('node:fs')
+const { spawn } = require('node:child_process')
+const dir = __dirname
+fs.writeFileSync(dir + '/litestream.env', Object.entries(process.env).map(([k, v]) => k + '=' + v).join('\\n'))
+const at = process.argv.indexOf('-exec')
+const line = at === -1 ? '' : process.argv[at + 1] ?? ''
+const words = []
+let word = null
+let quoted = false
+for (const ch of line) {
+  if (quoted) {
+    if (ch === "'") quoted = false
+    else word += ch
+  } else if (ch === "'") {
+    quoted = true
+    word = word ?? ''
+  } else if (/\\s/.test(ch)) {
+    if (word !== null) words.push(word)
+    word = null
+  } else if (/[\\\\"$\`()<>|&;]/.test(ch)) {
+    console.error('fake litestream: -exec has ' + ch + ' outside single quotes')
+    process.exit(64)
+  } else {
+    word = (word ?? '') + ch
+  }
+}
+if (quoted) process.exit(64)
+if (word !== null) words.push(word)
+if (words.length === 0) process.exit(0)
+const child = spawn(words[0], words.slice(1), { stdio: 'inherit' })
+fs.writeFileSync(dir + '/litestream.child.pid', String(child.pid))
+child.on('exit', (code) => process.exit(code ?? 1))
 `
 
 interface Run {
@@ -392,7 +435,18 @@ beforeEach(() => {
   writeExecutable(join(fakeDir, 'tailscale'), FAKE_TAILSCALE)
   writeExecutable(join(fakeDir, 'timeout'), FAKE_TIMEOUT)
   writeExecutable(join(fakeDir, 'npm'), fakeRecorder('npm'))
-  writeExecutable(join(fakeDir, 'litestream'), fakeRecorder('litestream'))
+  writeExecutable(join(fakeDir, 'node'), fakeRecorder('node'))
+  writeFileSync(join(fakeDir, 'litestream.cjs'), FAKE_LITESTREAM_JS)
+  writeExecutable(
+    join(fakeDir, 'litestream'),
+    [
+      '#!/bin/sh',
+      `echo "litestream $*" >>"${fakeDir}/calls.log"`,
+      `echo "$$" >"${fakeDir}/litestream.pid"`,
+      `exec "${process.execPath}" "${fakeDir}/litestream.cjs" "$@"`,
+      '',
+    ].join('\n'),
+  )
   writeFileSync(join(fakeDir, 'serve-status'), SERVE_OK)
 })
 
@@ -464,6 +518,10 @@ function runStart({
 
 const ran = (calls: string[], prefix: string): boolean =>
   calls.some((line) => line.startsWith(prefix))
+const recorded = (file: string): string =>
+  readFileSync(join(fakeDir, file), 'utf8').trim()
+const MIGRATE = 'npm run migrate:latest'
+const SERVER = 'node dist/server.js'
 const dump = (name: string): string => {
   const path = join(fakeDir, `${name}.env`)
   return existsSync(path) ? readFileSync(path, 'utf8') : ''
@@ -481,7 +539,7 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
     expect(run.calls).toEqual([])
   })
 
-  it('joins the tailnet, publishes the app there, then runs npm start with backups OFF', () => {
+  it('joins the tailnet, publishes the app there, then migrates and runs the server with backups OFF', () => {
     const run = runStart()
 
     expect(run.status).toBe(0)
@@ -491,7 +549,8 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
       `tailscale --socket=${join(tmp, 's', 'ts.sock')} serve reset`,
       `tailscale --socket=${join(tmp, 's', 'ts.sock')} serve --bg --https=443 http://127.0.0.1:3005`,
       `tailscale --socket=${join(tmp, 's', 'ts.sock')} serve status`,
-      'npm start',
+      MIGRATE,
+      SERVER,
     ].map((prefix) => run.calls.findIndex((line) => line.startsWith(prefix)))
     expect(order.every((index) => index >= 0)).toBe(true)
     expect([...order].sort((a, b) => a - b)).toEqual(order)
@@ -518,11 +577,10 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
     )
     expect(warning).toBeGreaterThan(lines.indexOf(serving))
     expect(ran(run.calls, 'litestream')).toBe(false)
-    // exec'd, not a child: npm runs in start.sh's own process, so Fly's
-    // SIGTERM to that process reaches it.
-    expect(readFileSync(join(fakeDir, 'npm.pid'), 'utf8').trim()).toBe(
-      String(run.pid),
-    )
+    // exec'd all the way down: the server runs in start.sh's own process, so
+    // Fly's SIGTERM to that process reaches it, not a wrapper that keeps it.
+    expect(recorded('node.pid')).toBe(String(run.pid))
+    expect(recorded('npm.ppid')).toBe(String(run.pid))
   })
 
   it('refuses to start anything when HOST names an address other than loopback', () => {
@@ -533,20 +591,43 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
     expect(run.calls).toEqual([])
   })
 
-  it('runs npm start under litestream replicate when the Litestream config exists', () => {
+  it('runs migrations and then the server as litestream replicate\'s -exec child when the Litestream config exists', () => {
     const config = join(tmp, 'litestream.yml')
     writeFileSync(config, 'dbs: []\n')
     const run = runStart()
 
     expect(run.status).toBe(0)
-    expect(run.calls.filter((line) => line.startsWith('litestream'))).toEqual([
-      `litestream replicate -config ${config} -exec npm start`,
+    const litestream = run.calls.filter((line) => line.startsWith('litestream'))
+    expect(litestream).toHaveLength(1)
+    expect(litestream[0]).toMatch(
+      new RegExp(`^litestream replicate -config ${config} -exec `),
+    )
+    expect(recorded('litestream.pid')).toBe(String(run.pid))
+    // After Litestream started (so after its restore-if-db-not-exists), from
+    // inside the command it runs, and before the server.
+    expect(run.calls.slice(1 + run.calls.indexOf(litestream[0]))).toEqual([
+      MIGRATE,
+      SERVER,
     ])
-    expect(
-      readFileSync(join(fakeDir, 'litestream.pid'), 'utf8').trim(),
-    ).toBe(String(run.pid))
-    expect(ran(run.calls, 'npm')).toBe(false)
+    const child = recorded('litestream.child.pid')
+    expect(recorded('npm.ppid')).toBe(child)
+    // The server is the -exec child itself, so the SIGTERM Litestream passes
+    // on lands on it and Litestream waits for it before its final sync.
+    expect(recorded('node.pid')).toBe(child)
+    expect(recorded('node.ppid')).toBe(String(run.pid))
     expect(run.stderr).not.toContain('WARNING')
+  })
+
+  it.each([
+    ['backups OFF', false],
+    ['under litestream', true],
+  ])('does not start the server when migrations fail, %s', (_label, backups) => {
+    if (backups) writeFileSync(join(tmp, 'litestream.yml'), 'dbs: []\n')
+    const run = runStart({ env: { FAKE_NPM_EXIT: '1' } })
+
+    expect(run.status).not.toBe(0)
+    expect(ran(run.calls, MIGRATE)).toBe(true)
+    expect(ran(run.calls, 'node')).toBe(false)
   })
 
   it('bounds tailscale serve reset and serve --bg with a timeout', () => {
@@ -596,6 +677,7 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
         ),
       ).toBe(true)
       expect(ran(run.calls, 'npm')).toBe(false)
+      expect(ran(run.calls, 'node')).toBe(false)
     },
   )
 
@@ -636,7 +718,7 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
     [
       'tailscale serve status fails',
       { env: { FAKE_STATUS_EXIT: '1' } },
-      'npm start',
+      MIGRATE,
       'tailscale serve status failed',
     ],
   ])('fails closed when %s', (_label, options, neverReached, reason) => {
@@ -657,6 +739,7 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
     )
     expect(reached).toBe(false)
     expect(ran(run.calls, 'npm')).toBe(false)
+    expect(ran(run.calls, 'node')).toBe(false)
     expect(run.stderr).not.toContain('start.sh: serving ')
   })
 
@@ -698,35 +781,37 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
     expect(ran(run.calls, 'litestream replicate ')).toBe(true)
   })
 
-  it('never hands the auth key to tailscaled, npm or litestream, and never prints it', () => {
+  it('never hands the auth key to tailscaled, npm, node or litestream, and never prints it', () => {
     const plain = runStart()
     const npmEnv = dump('npm')
+    const nodeEnv = dump('node')
     const tailscaledEnv = dump('tailscaled')
     stopFakeTailscaled()
     writeFileSync(join(tmp, 'litestream.yml'), 'dbs: []\n')
     const underLitestream = runStart()
     const litestreamEnv = dump('litestream')
+    const childEnv = dump('node')
 
     expect(plain.status).toBe(0)
     expect(underLitestream.status).toBe(0)
-    for (const env of [npmEnv, tailscaledEnv, litestreamEnv]) {
+    for (const env of [npmEnv, nodeEnv, tailscaledEnv, litestreamEnv, childEnv]) {
       expect(env).not.toBe('')
       expect(env).not.toContain(SENTINEL)
       expect(env).not.toContain('TS_AUTHKEY')
     }
-    expect(npmEnv).not.toMatch(/^HOST=/m)
+    expect(nodeEnv).not.toMatch(/^HOST=/m)
     for (const out of [plain, underLitestream]) {
       expect(out.stdout + out.stderr).not.toContain(SENTINEL)
     }
   })
 
-  it('starts tailscaled with none of the app secrets, while npm still gets them', () => {
+  it('starts tailscaled with none of the app secrets, while the server still gets them', () => {
     const appSecret = 'not-a-real-secret-sentinel-2'
     const run = runStart({
       env: { AKAHU_USER_TOKEN: appSecret, XERO_CLIENT_SECRET: appSecret },
     })
     const tailscaledEnv = dump('tailscaled')
-    const npmEnv = dump('npm')
+    const nodeEnv = dump('node')
 
     expect(run.status).toBe(0)
     expect(tailscaledEnv).not.toBe('')
@@ -751,7 +836,7 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
         '__CF_USER_TEXT_ENCODING',
       ]).toContain(name)
     }
-    expect(npmEnv).toMatch(new RegExp(`^AKAHU_USER_TOKEN=${appSecret}$`, 'm'))
-    expect(npmEnv).toMatch(new RegExp(`^XERO_CLIENT_SECRET=${appSecret}$`, 'm'))
+    expect(nodeEnv).toMatch(new RegExp(`^AKAHU_USER_TOKEN=${appSecret}$`, 'm'))
+    expect(nodeEnv).toMatch(new RegExp(`^XERO_CLIENT_SECRET=${appSecret}$`, 'm'))
   })
 })
