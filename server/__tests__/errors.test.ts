@@ -36,6 +36,35 @@ vi.mock('../routes/index.ts', async (importOriginal) => {
   router.get('/__test/status-503', (req, res, next) => {
     next(Object.assign(new Error(SECRET), { body: FIELD_SECRET, status: 503 }))
   })
+  router.get('/__test/status-503-code-404', (req, res, next) => {
+    next(
+      Object.assign(new Error(SECRET), {
+        body: FIELD_SECRET,
+        status: 503,
+        statusCode: 404,
+      }),
+    )
+  })
+  router.get('/__test/status-string-code-404', (req, res, next) => {
+    next(
+      Object.assign(new Error(SECRET), {
+        body: FIELD_SECRET,
+        status: '418',
+        statusCode: 404,
+      }),
+    )
+  })
+  router.get('/__test/status-302', (req, res, next) => {
+    next(Object.assign(new Error(SECRET), { body: FIELD_SECRET, status: 302 }))
+  })
+  router.get('/__test/status-404-point-5', (req, res, next) => {
+    next(Object.assign(new Error(SECRET), { body: FIELD_SECRET, status: 404.5 }))
+  })
+  router.get('/__test/status-code-404-point-5', (req, res, next) => {
+    next(
+      Object.assign(new Error(SECRET), { body: FIELD_SECRET, statusCode: 404.5 }),
+    )
+  })
   router.use(actual.default)
   return { default: router }
 })
@@ -181,6 +210,15 @@ describe('a client error on /api answers its own status with fixed text, and is 
           .get('/api/v1/__test/status-code-404')
           .set('X-Divvy-Test', HEADER_SECRET),
     ],
+    [
+      'a non-integer status of "418" beside a statusCode of 404',
+      404,
+      'Client error',
+      () =>
+        api
+          .get('/api/v1/__test/status-string-code-404')
+          .set('X-Divvy-Test', HEADER_SECRET),
+    ],
   ] as const)(
     '%s answers %i with { error: "%s" }',
     async (_what, status, text, send) => {
@@ -202,6 +240,13 @@ describe('a route error on /api with no client status is a fixed JSON 500', () =
   it.each([
     ['a synchronous throw', '/api/v1/__test/throws'],
     ['next(err) with a 5xx status', '/api/v1/__test/status-503'],
+    // status wins over statusCode, so a 5xx status is not overruled by a 404.
+    ['a 5xx status beside a statusCode of 404', '/api/v1/__test/status-503-code-404'],
+    // A 3xx is a redirect, not a client error.
+    ['next(err) with a 3xx status', '/api/v1/__test/status-302'],
+    // A non-integer status is not an HTTP status, and nothing else is read.
+    ['next(err) with a non-integer status of 404.5', '/api/v1/__test/status-404-point-5'],
+    ['next(err) with a non-integer statusCode of 404.5', '/api/v1/__test/status-code-404-point-5'],
   ])(
     '%s answers { error: "Internal server error" } with no message or stack',
     async (_how, path) => {
@@ -217,6 +262,8 @@ describe('a route error on /api with no client status is a fixed JSON 500', () =
       expect(errorLog).toHaveBeenCalledTimes(1)
       // The stack is logged, never the error object and its fields.
       expect(inspect(errorLog.mock.calls)).not.toContain(FIELD_SECRET)
+      // The request header reaches neither the response nor the log.
+      expect(inspect(errorLog.mock.calls)).not.toContain(HEADER_SECRET)
     },
   )
 })

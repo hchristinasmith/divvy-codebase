@@ -173,7 +173,9 @@ describe('GET /api/v1/sync/status', () => {
     expect(res.body.lastSuccessAt).toBe(iso(61))
   })
 
-  it.each(['not-a-timestamp', 'now'])(
+  // The last value is an ISO form julianday() reads but toISOString() never
+  // writes (no milliseconds): only the strftime filter keeps it out of lastRun.
+  it.each(['not-a-timestamp', 'now', '2999-01-01T00:00:00Z'])(
     'ranks a success whose started_at is %s below a valid one, as the claim step does (#188)',
     async (badStart) => {
       await insertRuns(success(0))
