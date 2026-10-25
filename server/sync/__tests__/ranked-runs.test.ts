@@ -112,7 +112,10 @@ describe('static guard on the sync_runs ranking (#206)', () => {
   const squashed = (name: string): string =>
     readFileSync(Path.join(serverDir, name), 'utf8').replace(/\s+/g, '')
 
-  /** Every non-test `.ts` file under `dir`, relative to server/. */
+  /**
+   * Every non-test `.ts` or `.js` file under `dir`, relative to server/:
+   * the knexfile, migrations and seeds under server/db are `.js`.
+   */
   function sourceFiles(dir: string): string[] {
     return readdirSync(Path.join(serverDir, dir), { withFileTypes: true })
       .flatMap((entry) => {
@@ -120,7 +123,7 @@ describe('static guard on the sync_runs ranking (#206)', () => {
         if (entry.isDirectory()) {
           return entry.name === '__tests__' ? [] : sourceFiles(relative)
         }
-        return entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts')
+        return /\.[jt]s$/.test(entry.name) && !/\.test\.[jt]s$/.test(entry.name)
           ? [relative]
           : []
       })
@@ -134,6 +137,7 @@ describe('static guard on the sync_runs ranking (#206)', () => {
         Path.join('sync', 'run.ts'),
         Path.join('routes', 'sync.ts'),
         Path.join('db', 'overview.ts'),
+        Path.join('db', 'knexfile.js'),
       ]),
     )
 
