@@ -69,7 +69,7 @@ export async function runInsightsAgent(
   // The one start reading: see the header.
   const now = clock()
   const period = options.period ?? lastCompleteWeek(now)
-  weekRange(period) // throws naming `period`, before any run is logged
+  weekRange(period) // refuses a period that names no week, with weekRange's own text, before any run is logged
 
   const run = await startRun({ kind: 'insights', trigger }, now, db)
   let outcome: InsightsRunResult['outcome'] = 'success'

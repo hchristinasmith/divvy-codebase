@@ -148,13 +148,20 @@ export function weekRange(label: string): WeekRange {
   const [, y, w] = match
   const week = Number(w)
   if (week < 1) throw refused
-  const jan4 = `${y}-01-04`
-  const firstMonday = addDaysIso(jan4, 1 - isoWeekday(jan4))
-  const start = addDaysIso(firstMonday, 7 * (week - 1))
-  // Week 53 exists only in some years; a label past the year's last week
-  // round-trips to the next year's week and is refused.
-  if (isoWeekOf(start) !== label) throw refused
-  return { label, start, end: addDaysIso(start, 6) }
+  try {
+    const jan4 = `${y}-01-04`
+    const firstMonday = addDaysIso(jan4, 1 - isoWeekday(jan4))
+    const start = addDaysIso(firstMonday, 7 * (week - 1))
+    // Week 53 exists only in some years; a label past the year's last week
+    // round-trips to the next year's week and is refused.
+    if (isoWeekOf(start) !== label) throw refused
+    return { label, start, end: addDaysIso(start, 6) }
+  } catch (err) {
+    // A week whose days leave the years 0000 to 9999 makes a date helper
+    // throw its own RangeError (#337). The caller gets this refusal instead.
+    if (err instanceof RangeError) throw refused
+    throw err
+  }
 }
 
 /** The last full Monday-to-Sunday NZ week strictly before the NZ week `now` falls in. */
@@ -164,12 +171,19 @@ export function lastCompleteWeek(now: Date): string {
   return isoWeekOf(addDaysIso(thisMonday, -7))
 }
 
-/** The `n` calendar months ending with the one `end` falls in, ascending, as `YYYY-MM`. */
+/**
+ * The `n` calendar months ending with the one `end` falls in, ascending, as `YYYY-MM`.
+ * Throws when the window would start before 0000-01, which has no label.
+ */
 export function monthsEnding(end: IsoDate, n: number = MONTHLY_MONTHS): string[] {
   const { year, month } = parseIsoDate(end)
   const last = year * 12 + (month - 1)
+  const first = last - n + 1
+  if (first < 0) {
+    throw new RangeError('end leaves no room for the months asked: the window would start before 0000-01')
+  }
   const months: string[] = []
-  for (let index = last - n + 1; index <= last; index += 1) {
+  for (let index = first; index <= last; index += 1) {
     months.push(`${pad(Math.floor(index / 12), 4)}-${pad((index % 12) + 1, 2)}`)
   }
   return months
