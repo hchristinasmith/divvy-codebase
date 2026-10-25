@@ -17,7 +17,8 @@
 // bound values and all, in its error message, and `scrubbed` rethrows it as
 // SQLite's own words alone. A reason past its length cap is a refused input
 // too, as a title or body_md is in insights.ts, and so is a reason with
-// nothing visible in it (control characters count as invisible too).
+// nothing visible in it (control characters count as invisible too;
+// `notBlank` and `atMostLength`, in ./text-checks.ts).
 //
 // current_category is capped at the column's width, in code points, and kept
 // raw, never trimmed or normalised: the accept route's stale check compares
@@ -31,6 +32,7 @@ import {
 } from '../contracts.ts'
 import connection from '../../db/connection.ts'
 import { scrubbed } from './scrubbed.ts'
+import { atMostLength, notBlank } from './text-checks.ts'
 
 export interface NewProposal {
   transaction_id: number
@@ -49,21 +51,6 @@ export type InsertProposalResult =
 // is one code point and two units.
 const REASON_MAX_LENGTH = 2_000
 const CURRENT_CATEGORY_MAX_LENGTH = 255
-
-// A private copy of insights.ts's notBlank, not an export: a lift is a
-// separate issue. Blank means nothing visible, so whitespace, default-
-// ignorable characters and control characters are removed before the test.
-function notBlank(value: unknown, field: string): void {
-  if (typeof value !== 'string' || value.replace(/[\s\p{DI}\p{Cc}]/gu, '') === '') {
-    throw new Error(`${field} must not be blank`)
-  }
-}
-
-function atMostLength(value: string, field: string, max: number): void {
-  if (Array.from(value).length > max) {
-    throw new Error(`${field} must be at most ${max} characters`)
-  }
-}
 
 /**
  * Stores a `pending` proposal. A proposed category outside data/cats.js is

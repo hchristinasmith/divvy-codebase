@@ -576,6 +576,7 @@ describe('every module under server/agents/db/ touches only the inbox tables', (
       '../../db/connection.ts',
       '../contracts.ts',
       './scrubbed.ts',
+      './text-checks.ts',
     ],
   }
   const NAMED = /\b(transactions|category_corrections|budgets|bills|goals|settings)\b/

@@ -15,8 +15,9 @@
 // A refused input throws an error naming the field, never its value, and a
 // title, body_md or period past its length cap is a refused input, and so is
 // a title, body_md or period with nothing visible in it: control characters
-// count as invisible too. A refused write throws
-// SQLite's words without the row (`scrubbed`, in ./scrubbed.ts).
+// count as invisible too (`notBlank` and `atMostLength`, in ./text-checks.ts).
+// A refused write throws SQLite's words without the row (`scrubbed`, in
+// ./scrubbed.ts).
 import {
   INSIGHT_KINDS,
   parseChartSpecJson,
@@ -28,6 +29,7 @@ import {
 } from '../../../models/insights.ts'
 import connection from '../../db/connection.ts'
 import { scrubbed } from './scrubbed.ts'
+import { atMostLength, notBlank } from './text-checks.ts'
 
 // A Record so that TypeScript refuses this file if `InsightScope` changes.
 const SCOPES: Record<InsightScope, true> = { personal: true, strawb: true }
@@ -53,21 +55,6 @@ export type InsertInsightResult =
   | { ok: false; reason: ChartSpecRejection; path: string }
 
 type InsightRow = Omit<Insight, 'mermaid'>
-
-// Blank means nothing visible: whitespace, default-ignorable characters and
-// control characters are removed before the test, and the value is stored
-// exactly as given.
-function notBlank(value: unknown, field: string): void {
-  if (typeof value !== 'string' || value.replace(/[\s\p{DI}\p{Cc}]/gu, '') === '') {
-    throw new Error(`${field} must not be blank`)
-  }
-}
-
-function atMostLength(value: string, field: string, max: number): void {
-  if (Array.from(value).length > max) {
-    throw new Error(`${field} must be at most ${max} characters`)
-  }
-}
 
 /**
  * Stores an insight. A chart spec the validator refuses returns its reason
