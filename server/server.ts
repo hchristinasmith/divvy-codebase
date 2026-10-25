@@ -42,22 +42,56 @@ server.get('*', (req, res, next) => {
 // on a malformed body before any router runs, and Express's default handler
 // answers with an HTML page carrying the stack and absolute paths outside
 // production. The response never carries the error's message, stack or
-// fields; a body-parser error holds the raw request text in `err.body`, so
-// only the stack of a 500 is logged, never the error object. Other paths
-// keep Express's default handling.
+// fields. Other paths keep Express's default handling.
 //
 // An error whose `status` is a 4xx integer, or which has no integer `status`
-// and a 4xx integer `statusCode`, is the client's fault (#185): it answers
-// that status with a fixed text, and nothing is logged. That covers a
-// malformed body (400), an oversize body (413), an unsupported charset or
-// Content-Encoding (415) and a bad percent-encoded path (400). Anything else,
-// including a 5xx status, is a 500 with the fixed text, and only its stack is
-// logged.
+// and a 4xx integer `statusCode`, answers that status with a fixed text
+// (#185). Anything else, including a 5xx status, is a 500 with the fixed text.
+//
+// What is logged, never the error object, its message or its fields (a
+// body-parser error holds the raw request text in `err.body`; a Knex error's
+// message holds the SQL and its bound values, #204):
+// - A 4xx carrying a `type` that body-parser or raw-body sets on the request
+//   itself (a malformed or oversize body, an unsupported charset or
+//   Content-Encoding), or the router's URIError for a bad percent-encoded
+//   path: nothing. It is the client's fault.
+// - Any other 4xx, such as an upstream 401 or 429 carried on an AkahuError or
+//   XeroClientError (#203): one fixed line with the status and the
+//   constructor name, or `unknown` if reading the error to decide or to name
+//   it throws; the answer is the same either way. An expired token or a rate
+//   limit is not the caller's mistake and must leave a trace. A gzip or
+//   deflate body that does not inflate is body-parser's 400 with no `type`,
+//   so it logs this line too.
+// - A 500 from an Error: `err.name` and the stack frames, without the stack's
+//   first line, which is `name: message`. When the stack does not start with
+//   that line, or a line after it is not a frame, only `err.name` is logged.
+//   A message shortened after its stack was formatted is not caught: any
+//   frame-shaped lines it lost are logged as frames. An error raised from
+//   native code (node-sqlite3, under Knex) has no frames, so it logs as its
+//   name alone.
+// - A 500 from anything that is not an Error: its `typeof`.
+// - An error after the response started: the same as a 500, on its own line,
+//   whatever its status; the socket is destroyed.
 const CLIENT_ERROR_TEXT: Partial<Record<number, string>> = {
   400: 'Bad request',
   413: 'Payload too large',
   415: 'Unsupported media type',
 }
+
+// The `type` body-parser 1.20 and raw-body 2.5 set on every 4xx error they
+// raise about a request. Read from their source; their 5xx types are not here
+// because a 5xx never reaches the 4xx branch.
+const REQUEST_ERROR_TYPES: ReadonlySet<string> = new Set([
+  'charset.unsupported',
+  'encoding.unsupported',
+  'entity.parse.failed',
+  'entity.too.large',
+  'entity.verify.failed',
+  'parameters.too.many',
+  'querystring.parse.rangeError',
+  'request.aborted',
+  'request.size.invalid',
+])
 
 /** The 4xx status an error carries, or undefined for anything else. */
 function clientStatus(err: unknown): number | undefined {
@@ -76,12 +110,99 @@ function clientStatus(err: unknown): number | undefined {
     : undefined
 }
 
+/**
+ * Whether a 4xx error is body-parser's or the router's verdict on the request.
+ * Express's router turns a path parameter that does not percent-decode into a
+ * URIError with status 400.
+ */
+function isRequestError(err: object): boolean {
+  if (err instanceof URIError) return true
+  return (
+    'type' in err &&
+    typeof err.type === 'string' &&
+    REQUEST_ERROR_TYPES.has(err.type)
+  )
+}
+
+/** The name of the class an object was made by, read from its prototype. */
+function constructorName(err: object): string {
+  const proto: unknown = Object.getPrototypeOf(err)
+  if (typeof proto !== 'object' || proto === null) return 'null prototype'
+  const ctor: unknown = Object.getOwnPropertyDescriptor(proto, 'constructor')
+    ?.value
+  return typeof ctor === 'function' && ctor.name !== '' ? ctor.name : 'unknown'
+}
+
+const FRAME = /^ {4}at \S/
+
+/**
+ * `err.name` and the stack frames, never the message (#204). V8 writes the
+ * stack as a header, which is `Error.prototype.toString` of the error (`name:
+ * message`, and the message can span lines), then one line per frame. The
+ * header is cut off by its exact text, not by counting lines, so a message
+ * that contains a line shaped like a frame goes with it. If the stack does not
+ * start with that header (it was formatted before the message changed, or it
+ * was replaced), or anything after it is not a frame line, the frames are
+ * dropped and only the name is logged. A message cut down to a prefix of
+ * itself after formatting still matches, and its lost lines that look like
+ * frames pass as frames.
+ */
+function nameAndFrames(err: Error): string {
+  const name = typeof err.name === 'string' ? err.name : 'Error'
+  let stack: unknown
+  let header: string
+  try {
+    stack = err.stack
+    header = Error.prototype.toString.call(err)
+  } catch {
+    return name
+  }
+  if (typeof stack !== 'string' || !stack.startsWith(`${header}\n`)) {
+    return name
+  }
+  const frames = stack.slice(header.length + 1).split('\n')
+  return frames.every((line) => FRAME.test(line))
+    ? [name, ...frames].join('\n')
+    : name
+}
+
 server.use(
   '/api',
+  // Express tells an error handler from a route by its four parameters.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   (err: unknown, req: Request, res: Response, next: NextFunction) => {
-    if (res.headersSent) return next(err)
+    // A response already under way cannot be answered. Express's default
+    // handler would destroy the socket, as here, but would also log
+    // `err.stack`, message included, outside tests.
+    if (res.headersSent) {
+      console.error(
+        'Unhandled /api error after the response started:',
+        err instanceof Error ? nameAndFrames(err) : typeof err,
+      )
+      req.socket.destroy()
+      return
+    }
     const client = clientStatus(err)
     if (client !== undefined) {
+      // clientStatus is only defined for a non-null object. Deciding and
+      // naming read the error (a getter, a Proxy trap) and may throw; the
+      // answer must not change, so a throw logs the line with a fixed name.
+      let name: string | undefined
+      try {
+        name =
+          typeof err === 'object' && err !== null && !isRequestError(err)
+            ? constructorName(err)
+            : undefined
+      } catch {
+        name = 'unknown'
+      }
+      if (name !== undefined) {
+        console.error(
+          '4xx /api error not raised by body-parser or the router:',
+          client,
+          name,
+        )
+      }
       res
         .status(client)
         .json({ error: CLIENT_ERROR_TEXT[client] ?? 'Client error' })
@@ -89,7 +210,7 @@ server.use(
     }
     console.error(
       'Unhandled /api error:',
-      err instanceof Error ? err.stack : typeof err,
+      err instanceof Error ? nameAndFrames(err) : typeof err,
     )
     res.status(500).json({ error: 'Internal server error' })
   },
