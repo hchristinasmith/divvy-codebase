@@ -230,10 +230,12 @@ account carried `overdrawn`.
 
 Sync reads the docs-required `_authorisation`, `attributes`,
 `connection.connection_type` and `connection.logo` as optional, on purpose
-(#155). A missing one is stored as NULL, or as `[]` for
-`attributes`. A value of the wrong type fails the whole `/v1/accounts`
-listing, so the client returns no account from it. `_credentials`, which the
-docs call deprecated, is read the same way. Sync goes the other way on
+(#155). A missing one is stored as NULL, or as `[]` for `attributes`. A
+value that is not text (for `attributes`, not a list of text) fails the whole
+`/v1/accounts` listing, so the client returns no account from it. A JSON
+number is not refused: the client reads every number as its text, so a
+number is kept as those digits. `_credentials`, which the docs call
+deprecated, is read the same way. Sync goes the other way on
 `balance`: it reads `balance` as required, so a missing one fails the
 listing, and reads `balance.currency` as optional, though the docs require it.
 
@@ -247,13 +249,14 @@ where JSON sends strings. `AkahuTransaction` has no `_migrated`,
 type for a pending transaction.
 
 Sync does not use `models/akahu.ts`; nothing in `server/sync/` imports it.
-Its types are in `server/sync/types.ts`, which has `PendingTransaction`. Since
-#155 they carry the merchant `logo`, `meta.card_suffix`, `meta.conversion`,
-the account `_authorisation` and `_credentials` ids, `attributes`, and the
-connection type and logo. `posted_date` and `merchant.nzbn` are read by the
-client, but no upsert stores them yet; #191 adds their columns. A conversion
-amount is in hundredths of its currency, JPY included (`types.ts`); #192
-tracks currency minor units.
+Sync's own types are in `server/sync/types.ts`, which has
+`PendingTransaction`. Since #155 they carry the merchant `logo`,
+`meta.card_suffix`, `meta.conversion`, the account `_authorisation` and
+`_credentials` ids, `attributes`, and the connection type and logo.
+`posted_date` and `merchant.nzbn` are read by the client, but no upsert
+stores them yet; #191 adds their columns. A conversion amount is in
+hundredths of its currency, JPY included (`types.ts`); #192 tracks currency
+minor units.
 
 [guide]: https://developers.akahu.nz/docs/accessing-transactional-data
 [model]: https://developers.akahu.nz/docs/the-transaction-model
