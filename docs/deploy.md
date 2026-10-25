@@ -75,6 +75,8 @@ The database backup needs three more secrets: `LITESTREAM_REPLICA_URL`, `LITESTR
 
 ## 5. Deploy
 
+Before this command, the three Litestream secrets must be set (section 4, [restore.md](restore.md) section 1). The image always starts under Litestream, and without them the machine does not boot.
+
 ```sh
 fly deploy --ha=false --no-public-ips -a divvy-strawb
 ```
@@ -100,8 +102,10 @@ fly logs -a divvy-strawb
 - If there is more than one machine, run `fly scale count 1 -a divvy-strawb`. A second machine would get a fresh, empty volume and a second database.
 - `fly logs` should show, in this order:
   - `start.sh: serving http://127.0.0.1:3005 on the tailnet as divvy`
-  - `start.sh: WARNING: backups are OFF: ...` (until #24 ships the Litestream config)
+  - `start.sh: backups ON (litestream, /app/litestream.yml)`
+  - Litestream's own lines. On a fresh volume they are the restore: see [restore.md](restore.md) section 5b.
   - `Listening on 127.0.0.1:3005`
+- If a `start.sh: WARNING: backups are OFF` line appears, the image lacks `/app/litestream.yml`. That is wrong for this deploy.
 
 Check the node from inside the machine:
 
@@ -146,6 +150,7 @@ If a stale node named `divvy` already exists on the tailnet (from an earlier att
 - **`tailscale serve status failed`.** The command that reads the serve config back failed, so `start.sh` cannot confirm the proxy or that Funnel is off, and it does not start the app. Read the lines before it in `fly logs`, then `fly machine restart -a divvy-strawb`.
 - **`start.sh: ERROR: leftover database files with no database`.** The volume holds a `-wal`, `-shm` or `-journal` (named in the message) but no `/data/divvy.sqlite3`, so someone deleted the database without its files. Booting would replay them onto the restored or new database. The machine exits 1 before it joins the tailnet. Move the named files off the volume, keeping them, then restart (restore.md, "What backs up what").
 - **`serve status does not show a proxy` or `Funnel is on`.** The serve config is not what `start.sh` set. It resets the config on every boot, so this means something else changed it; check `serve status` (section 6).
+- **Litestream fails, or the boot hangs before the app starts.** Its messages and their fixes are in [restore.md](restore.md), section 8.
 
 ## 11. Bumping Tailscale or Litestream
 
@@ -165,4 +170,4 @@ fly machine stop <machine id> -a divvy-strawb                 # stop without del
 fly machine destroy <machine id> -a divvy-strawb              # the volume survives
 ```
 
-`fly volumes destroy` and `fly apps destroy` delete the volume, which holds the database and the node's identity. That is data loss, and until #24 there is no backup.
+`fly volumes destroy` and `fly apps destroy` delete the volume, which holds the database and the node's identity. That is data loss. The database can be restored from the replica ([restore.md](restore.md) section 5b; that procedure is not yet run on Fly) if the Litestream secrets were set and replication ran. The tailnet node cannot be restored: it registers again only with a valid `TS_AUTHKEY` (section 3).

@@ -621,6 +621,11 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
     const run = runStart()
 
     expect(run.status).toBe(0)
+    // The line docs/deploy.md section 6 tells the operator to look for, with
+    // the path the image uses in place of the test's tmp config.
+    const backups = `start.sh: backups ON (litestream, ${config})`
+    expect(run.stderr.split('\n')).toContain(backups)
+    expect(deployMd).toContain('start.sh: backups ON (litestream, /app/litestream.yml)')
     const litestream = run.calls.filter((line) => line.startsWith('litestream'))
     expect(litestream).toHaveLength(1)
     expect(litestream[0]).toMatch(
