@@ -995,12 +995,6 @@ describe('dates', () => {
     expect(isoWeekOf('9999-12-31')).toBe('9999-W52')
   })
 
-  // That week's Sunday is 10000-01-02, which no YYYY-MM-DD names, so the
-  // range is refused rather than returned with a five-digit year.
-  it('weekRange(9999-W52) is a RangeError', () => {
-    expect(() => weekRange('9999-W52')).toThrow(RangeError)
-  })
-
   // The class only: the refusal's text belongs to whichever parser reads the
   // date, so it is not pinned.
   it.each(['2026-02-30', '2026-13-01', 'x'])('isoWeekOf and monthsEnding refuse %j with a RangeError', (date) => {
@@ -1013,9 +1007,10 @@ describe('dates', () => {
     expect(() => isoWeekOf('0000-01-01')).toThrow(RangeError)
   })
 
-  // Past the year 9999 the date helpers throw their own RangeErrors. weekRange
-  // turns each one into its own refusal, so the caller always gets the period
-  // text, whichever helper refused.
+  // 9999-W52's Sunday is 10000-01-02, which no YYYY-MM-DD names, and a later
+  // week has no day in 9999 at all, so a date helper throws its own
+  // RangeError. weekRange turns it into its own refusal, so the range is
+  // never returned with a five-digit year and the caller gets the period text.
   it.each(['9999-W52', '9999-W53', '9999-W54'])(
     'weekRange(%s) refuses with the period message, not a date helper message',
     (label) => {
