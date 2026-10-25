@@ -162,6 +162,42 @@ vi.mock('../routes/index.ts', async (importOriginal) => {
     res.status(200).write('partial')
     next(new Error(`insert into t (a) values ('${BOUND_VALUE}')`))
   })
+  // A client status once the response has started is answered no differently.
+  router.get('/__test/after-headers-401', (req, res, next) => {
+    res.status(200).write('partial')
+    next(Object.assign(new Error(SECRET), { status: 401 }))
+  })
+  // A non-Error once the response has started; turned into a string, it would
+  // be SECRET.
+  router.get('/__test/after-headers-non-error', (req, res, next) => {
+    res.status(200).write('partial')
+    next({
+      toString() {
+        return SECRET
+      },
+    })
+  })
+  // A 500 whose stack cannot be read.
+  router.get('/__test/stack-getter-throws', () => {
+    const err = new Error(SECRET)
+    Object.defineProperty(err, 'stack', {
+      get() {
+        throw new Error(FIELD_SECRET)
+      },
+    })
+    throw err
+  })
+  // A 500 whose name is not a string.
+  router.get('/__test/name-not-a-string', () => {
+    throw Object.assign(new Error(SECRET), { name: 42 })
+  })
+  router.get('/__test/null-prototype-404', (req, res, next) => {
+    next(Object.assign(Object.create(null) as object, { status: 404 }))
+  })
+  // A class expression bound to no name has an empty `name`.
+  router.get('/__test/anonymous-class-404', (req, res, next) => {
+    next(Object.assign(new (class {})(), { status: 404 }))
+  })
   router.get('/__test/knex-insert', async (req, res, next) => {
     try {
       await connection('nonexistent_table').insert({ a: BOUND_VALUE })
@@ -399,6 +435,26 @@ describe('a client error on /api answers its own status with fixed text; only on
           .set('X-Divvy-Test', HEADER_SECRET),
       [[UNKNOWN_4XX_LOG, 404, 'Object']],
     ],
+    [
+      'a null-prototype object with a status of 404',
+      404,
+      'Client error',
+      () =>
+        api
+          .get('/api/v1/__test/null-prototype-404')
+          .set('X-Divvy-Test', HEADER_SECRET),
+      [[UNKNOWN_4XX_LOG, 404, 'null prototype']],
+    ],
+    [
+      'an instance of an anonymous class with a status of 404',
+      404,
+      'Client error',
+      () =>
+        api
+          .get('/api/v1/__test/anonymous-class-404')
+          .set('X-Divvy-Test', HEADER_SECRET),
+      [[UNKNOWN_4XX_LOG, 404, 'unknown']],
+    ],
     // Nothing read from the error names it when reading throws.
     [
       'a 401 whose type getter throws',
@@ -614,29 +670,81 @@ describe('#204: a 500 on /api logs the error name and stack frames, never the me
     expectNoLogLeak(errorLog.mock.calls)
   })
 
+  it('a 500 whose stack getter throws answers the fixed JSON and logs only its name', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const res = await api
+      .get('/api/v1/__test/stack-getter-throws')
+      .set('X-Divvy-Test', HEADER_SECRET)
+
+    expect(res.status).toBe(500)
+    expect(res.headers['content-type']).toMatch(/^application\/json/)
+    expect(res.body).toStrictEqual({ error: 'Internal server error' })
+    expect(Object.keys(res.body)).toEqual(['error'])
+    expectNoLeak(res.text)
+    expect(the500Log(errorLog.mock.calls)).toBe('Error')
+    expectNoLogLeak(errorLog.mock.calls)
+  })
+
+  it('a 500 whose name is not a string logs `Error` and its frames', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const res = await api
+      .get('/api/v1/__test/name-not-a-string')
+      .set('X-Divvy-Test', HEADER_SECRET)
+
+    expect(res.status).toBe(500)
+    expect(res.headers['content-type']).toMatch(/^application\/json/)
+    expect(res.body).toStrictEqual({ error: 'Internal server error' })
+    expect(Object.keys(res.body)).toEqual(['error'])
+    expectNoLeak(res.text)
+    expect(the500Log(errorLog.mock.calls)).toMatch(/^Error\n {4}at \S/)
+    expectNoLogLeak(errorLog.mock.calls)
+  })
+
   // Express's default handler logs `err.stack` only outside env `test`, so the
   // app runs as production here: handing the error on would log the bound
   // value.
-  it('an error after the response started resets the connection and logs no message', async () => {
-    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
-    app.set('env', 'production')
-    try {
-      await expect(
-        api.get('/api/v1/__test/after-headers').set('X-Divvy-Test', HEADER_SECRET),
-      ).rejects.toMatchObject({ code: 'ECONNRESET' })
-      // Express's default handler logs on the next turn.
-      await new Promise((resolve) => setImmediate(resolve))
-    } finally {
-      app.set('env', 'test')
-    }
+  it.each([
+    [
+      'an Error carrying a bound value',
+      '/api/v1/__test/after-headers',
+      /^Error\n {4}at \S/,
+    ],
+    [
+      'an Error with a status of 401',
+      '/api/v1/__test/after-headers-401',
+      /^Error\n {4}at \S/,
+    ],
+    [
+      'a value that is not an Error',
+      '/api/v1/__test/after-headers-non-error',
+      /^object$/,
+    ],
+  ] as const)(
+    '%s after the response started resets the connection and logs no message',
+    async (_what, path, logged) => {
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const env: unknown = app.get('env')
+      app.set('env', 'production')
+      try {
+        await expect(
+          api.get(path).set('X-Divvy-Test', HEADER_SECRET),
+        ).rejects.toMatchObject({ code: 'ECONNRESET' })
+        // Express's default handler logs on the next turn.
+        await new Promise((resolve) => setImmediate(resolve))
+      } finally {
+        app.set('env', env)
+      }
 
-    expectNoLogLeak(errorLog.mock.calls)
-    expect(errorLog.mock.calls).toHaveLength(1)
-    const [call] = errorLog.mock.calls
-    expect(call).toHaveLength(2)
-    expect(call[0]).toBe('Unhandled /api error after the response started:')
-    expect(call[1]).toMatch(/^Error\n {4}at \S/)
-  })
+      expectNoLogLeak(errorLog.mock.calls)
+      expect(errorLog.mock.calls).toHaveLength(1)
+      const [call] = errorLog.mock.calls
+      expect(call).toHaveLength(2)
+      expect(call[0]).toBe('Unhandled /api error after the response started:')
+      expect(call[1]).toMatch(logged)
+    },
+  )
 
   it('a value that is not an Error logs its typeof only', async () => {
     const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
