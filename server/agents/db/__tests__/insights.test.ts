@@ -112,6 +112,19 @@ describe('insertInsight', () => {
     expect(read).toStrictEqual(stored)
   })
 
+  // The insights agent stamps every draft with the ISO week it covers
+  // (buildDrafts in server/agents/insights/prompt.ts), so that label must
+  // store; a month label must too, for a draft that covers a month.
+  it.each([
+    ['an ISO week', '2026-W43'],
+    ['a month', '2026-10'],
+  ])('stores %s period label unchanged', async (_, period) => {
+    const id = await inserted(insight({ period }))
+
+    expect((await getInsight(id))?.period).toBe(period)
+    expect((await storedRows())[0].period).toBe(period)
+  })
+
   const HOSTILE: [name: string, input: unknown, reason: string, marker: string][] = [
     ['a data URL', spec({ data: { url: 'https://example.invalid/rows.json' } }), 'forbidden_key', 'example.invalid'],
     ['an unknown mark', spec({ mark: 'rect' }), 'bad_mark', 'rect'],
@@ -198,6 +211,8 @@ describe('insertInsight', () => {
     ['title 201 spaces', { title: ' '.repeat(201) }, /^title must not be blank$/],
     ['title 201 U+200B', { title: '\u200b'.repeat(201) }, /^title must not be blank$/],
     ['body_md 20,001 spaces', { body_md: ' '.repeat(20_001) }, /^body_md must not be blank$/],
+    ['period 33 spaces', { period: ' '.repeat(33) }, /^period must not be blank$/],
+    ['period 33 U+0001', { period: '\u0001'.repeat(33) }, /^period must not be blank$/],
     ['title 42', { title: 42 as unknown as string }, /^title must not be blank$/],
   ]
 
@@ -206,14 +221,15 @@ describe('insertInsight', () => {
     expect(await storedRows()).toEqual([])
   })
 
-  // The caps (#303) are counted in code points. Each field's cap is pinned
-  // here as a literal: the constants are not exported.
-  const CAPS: [field: 'title' | 'body_md', max: number][] = [
+  // The caps (#303; the period cap, #340) are counted in code points. Each
+  // field's cap is pinned here as a literal: the constants are not exported.
+  const CAPS: [field: 'title' | 'body_md' | 'period', max: number][] = [
     ['title', 200],
     ['body_md', 20_000],
+    ['period', 32],
   ]
-  const withText = (field: 'title' | 'body_md', text: string): NewInsight =>
-    field === 'title' ? insight({ title: text }) : insight({ body_md: text })
+  const withText = (field: 'title' | 'body_md' | 'period', text: string): NewInsight =>
+    insight({ [field]: text })
 
   it.each(CAPS)('accepts a %s of exactly %i code points, and stores it whole', async (field, max) => {
     const text = 'a'.repeat(max)
@@ -295,6 +311,9 @@ describe('insertInsight', () => {
     ['body_md', 'Most\u200b of the week went to **Fixture Bakery**.'],
     ['period', '2026-W43\u3164'],
     ['title', '\u200bx\u200b'],
+    ['title', 'Fixture\u0001 Bakery'],
+    ['period', '2026-W43\u0090'],
+    ['body_md', 'Line one\n\nFixture\u0001 Bakery\tpaid'],
   ]
 
   it.each(KEPT)('stores a %s with visible text among invisible characters, unchanged', async (field, text) => {
@@ -303,6 +322,43 @@ describe('insertInsight', () => {
 
     const [stored] = await storedRows()
     expect(stored[field]).toBe(text)
+  })
+})
+
+// A period past its cap is refused (#340). The blank check runs first, then
+// the cap, and nothing is written.
+describe('insertInsight refuses a period past its cap (#340)', () => {
+  it('refuses a period of 10,000 characters with the field and the cap, and writes nothing', async () => {
+    const period = '2026-W43'.padEnd(10_000, 'x')
+    expect(period).toHaveLength(10_000)
+
+    await expect(insertInsight(insight({ period }), NOW)).rejects.toThrow(
+      /^period must be at most 32 characters$/,
+    )
+    expect(await storedRows()).toEqual([])
+  })
+})
+
+// A control character is invisible to the blank check (#342): a title,
+// body_md or period made only of control characters, whitespace and tabs is
+// refused, and nothing is written. Nothing is stripped, so a value with
+// visible text among its controls is stored as given (see KEPT above).
+describe('insertInsight refuses a title, body_md or period made only of control characters (#342)', () => {
+  const CONTROL: [field: 'title' | 'body_md' | 'period', name: string, text: string][] = (
+    ['title', 'body_md', 'period'] as const
+  ).flatMap((field): [typeof field, string, string][] => [
+    [field, 'U+0001', '\u0001'],
+    [field, 'U+0085', '\u0085'],
+    [field, 'U+0090', '\u0090'],
+    [field, 'DEL', '\u007f'],
+    [field, 'U+0001, space, U+0085 and tab', '\u0001 \u0085\t'],
+  ])
+
+  it.each(CONTROL)('refuses a %s made only of %s, and writes nothing', async (field, _, text) => {
+    await expect(insertInsight(insight({ [field]: text }), NOW)).rejects.toThrow(
+      new RegExp(`^${field} must not be blank$`),
+    )
+    expect(await storedRows()).toEqual([])
   })
 })
 
