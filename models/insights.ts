@@ -260,7 +260,7 @@ function snapshot(input: unknown): Plain {
       }
       if (typeof value === 'number') {
         if (!Number.isFinite(value)) reject('bad_number', path)
-        grow(12, path)
+        grow(String(value).length, path)
         assign(frame, value)
         continue
       }

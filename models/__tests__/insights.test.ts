@@ -587,6 +587,22 @@ describe('size and nesting caps', () => {
     expect(rejection(validateChartSpec(spec)).reason).toBe('too_large')
   })
 
+  it('accepts numeric-heavy rows whose exact JSON is under maxChars', () => {
+    // Each number is charged its JSON length (one or two characters here),
+    // not a flat estimate, so 200 rows of one long label and seven
+    // single-digit numbers are not refused as too large.
+    const spec = base()
+    const row = (i: number): Loose => ({
+      label: 'S'.repeat(CHART_LIMITS.maxStringChars - 1),
+      ...Object.fromEntries(Array.from({ length: 7 }, (_, j) => [`n${j}`, (i + j) % 10])),
+    })
+    spec.data.values = Array.from({ length: CHART_LIMITS.maxRows }, (_, i) => row(i))
+    spec.encoding.x = { field: 'label', type: 'nominal' }
+    spec.encoding.y = { field: 'n0', type: 'quantitative' }
+    expect(JSON.stringify(spec).length).toBeLessThan(CHART_LIMITS.maxChars)
+    expect(validateChartSpec(spec).ok).toBe(true)
+  })
+
   it('accepts a spec whose JSON is exactly maxChars characters', () => {
     const spec = specOfChars(CHART_LIMITS.maxChars)
     expect(JSON.stringify(spec).length).toBe(CHART_LIMITS.maxChars)
