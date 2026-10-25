@@ -13,8 +13,8 @@
 // ignored, and a read row has no `mermaid` key.
 //
 // A refused input throws an error naming the field, never its value, and a
-// refused write throws SQLite's words without the row (`scrubbed`, in
-// ./scrubbed.ts).
+// title or body_md past its length cap is a refused input. A refused write
+// throws SQLite's words without the row (`scrubbed`, in ./scrubbed.ts).
 import {
   INSIGHT_KINDS,
   parseChartSpecJson,
@@ -29,6 +29,11 @@ import { scrubbed } from './scrubbed.ts'
 
 // A Record so that TypeScript refuses this file if `InsightScope` changes.
 const SCOPES: Record<InsightScope, true> = { personal: true, strawb: true }
+
+// Length caps, counted in code points, not UTF-16 units: a non-BMP character
+// is one code point and two units.
+const TITLE_MAX_LENGTH = 200
+const BODY_MD_MAX_LENGTH = 20_000
 
 export interface NewInsight {
   kind: InsightKind
@@ -52,6 +57,12 @@ function notBlank(value: unknown, field: string): void {
   }
 }
 
+function atMostLength(value: string, field: string, max: number): void {
+  if (Array.from(value).length > max) {
+    throw new Error(`${field} must be at most ${max} characters`)
+  }
+}
+
 /**
  * Stores an insight. A chart spec the validator refuses returns its reason
  * and path and writes nothing.
@@ -68,7 +79,9 @@ export async function insertInsight(
     throw new Error('scope must be personal or strawb')
   }
   notBlank(insight.title, 'title')
+  atMostLength(insight.title, 'title', TITLE_MAX_LENGTH)
   notBlank(insight.body_md, 'body_md')
+  atMostLength(insight.body_md, 'body_md', BODY_MD_MAX_LENGTH)
   notBlank(insight.period, 'period')
 
   let chartSpecJson: string | null = null

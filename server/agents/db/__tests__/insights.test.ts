@@ -194,6 +194,69 @@ describe('insertInsight', () => {
     await expect(insertInsight(insight({ chart_spec: spec(), ...fields }), NOW)).rejects.toThrow(message)
     expect(await storedRows()).toEqual([])
   })
+
+  // The caps (#303) are counted in code points. Each field's cap is pinned
+  // here as a literal: the constants are not exported.
+  const CAPS: [field: 'title' | 'body_md', max: number][] = [
+    ['title', 200],
+    ['body_md', 20_000],
+  ]
+  const withText = (field: 'title' | 'body_md', text: string): NewInsight =>
+    field === 'title' ? insight({ title: text }) : insight({ body_md: text })
+
+  it.each(CAPS)('accepts a %s of exactly %i code points, and stores it whole', async (field, max) => {
+    const text = 'a'.repeat(max)
+    expect(Array.from(text)).toHaveLength(max)
+
+    const result = await insertInsight(withText(field, text), NOW)
+    expect(result).toStrictEqual({ ok: true, id: expect.any(Number) })
+
+    const [stored] = await storedRows()
+    expect(Object.keys(stored).sort()).toEqual(INSIGHT_KEYS)
+    expect(stored[field]).toBe(text)
+  })
+
+  // Non-BMP characters are two UTF-16 units each, so this string is over the
+  // cap by `.length` and exactly at it by code points. A cap counted in
+  // `.length` refuses it; the code-point cap must accept it.
+  it.each(CAPS)('counts a %s in code points, not UTF-16 units: non-BMP text at the cap is accepted', async (field, max) => {
+    const text = '\u{20000}'.repeat(max)
+    expect(Array.from(text)).toHaveLength(max)
+    expect(text.length).toBeGreaterThan(max)
+
+    const result = await insertInsight(withText(field, text), NOW)
+    expect(result).toStrictEqual({ ok: true, id: expect.any(Number) })
+
+    const [stored] = await storedRows()
+    expect(stored[field]).toBe(text)
+  })
+
+  it.each(CAPS)('refuses a %s one code point over the cap, and writes nothing', async (field, max) => {
+    const result = await insertInsight(withText(field, 'a'.repeat(max + 1)), NOW).catch((e: unknown) => e)
+    expect(result).toBeInstanceOf(Error)
+    expect(await storedRows()).toEqual([])
+  })
+
+  it.each(CAPS)('refuses non-BMP %s text one code point over the cap, and writes nothing', async (field, max) => {
+    await expect(insertInsight(withText(field, '\u{20000}'.repeat(max + 1)), NOW)).rejects.toThrow(
+      new RegExp(`^${field} must be at most ${max} characters$`),
+    )
+    expect(await storedRows()).toEqual([])
+  })
+
+  // The message names the field and the cap. An exact match also proves it
+  // carries none of the refused value, which here holds a sentinel.
+  it.each(CAPS)('names the %s and its cap in the refusal, never the value', async (field, max) => {
+    const sentinel = 'Fixture Merchant 4419'
+    const text = sentinel.padEnd(max + 1, 'x')
+    const error = await insertInsight(withText(field, text), NOW).then(
+      () => new Error('expected a refusal'),
+      (e: unknown) => e,
+    )
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toBe(`${field} must be at most ${max} characters`)
+    expect((error as Error).message).not.toContain(sentinel)
+  })
 })
 
 describe('reading re-validates the stored chart (Ruling 8)', () => {
