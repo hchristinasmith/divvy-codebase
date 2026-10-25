@@ -9,6 +9,7 @@ Steps marked **UNVERIFIED (flyctl -h only)** were written from `fly … -h` outp
 - The database is `/data/divvy.sqlite3` on the `divvy_data` volume (`DATABASE_PATH`, set in the image and in `fly.toml`).
 - `scripts/start.sh` finds `/app/litestream.yml` in the image and runs `litestream replicate -config /app/litestream.yml -exec "npm start"`. The app runs as Litestream's child; Litestream ships every change to the replica about once a second.
 - On a boot that finds **no file** at `/data/divvy.sqlite3` (a lost or new volume), Litestream restores the latest backup before it starts the app (`restore-if-db-not-exists`). If any file is there, it never touches it.
+- Only the database file counts. A `divvy.sqlite3-wal` left on the volume without its database is replayed on top of the restored copy when the app opens it, and that mix replicates as the newest state (EXECUTED in the #24 review against Litestream 0.5.17 with made-up data). Never delete `divvy.sqlite3` alone: delete it, its `-wal` and its `-shm` together.
 - On `fly machine stop` or a deploy, Fly sends SIGTERM and waits `kill_timeout` (30s). Litestream passes the signal to the app, waits for it, then does a final sync. A write in the last moments before a hard kill can still be lost.
 - What is in the replica is a full off-box copy of the bank data: every account, balance and transaction. Treat the bucket and its credential like the Akahu token.
 - Where the replica lives is not decided yet (no provider is named in this repo, which is public). Whatever it is, it is an S3-compatible bucket, and the credential you make for Litestream should be limited to **one bucket prefix** with list, get, put and delete on it, and nothing else.
@@ -36,7 +37,7 @@ fly secrets set LITESTREAM_REPLICA_URL=<replica url> LITESTREAM_ACCESS_KEY_ID=<k
 ## 2. Rules
 
 - **Only the machine replicates to the production URL.** Never run `litestream replicate` (or the app under it) against that URL from a laptop. Litestream does not support two writers to one replica, and the second one's history would mix into the first's (REASONED, not tried).
-- **A restore always goes into a side directory, never in place.** `scripts/restore.sh` refuses the live database's own directory, refuses any directory that already holds a Divvy database or its `-wal`, `-shm` or `-journal`, and never overwrites. Never add `-force` to a hand-run `litestream restore`.
+- **A restore always goes into a side directory, never in place.** `scripts/restore.sh` refuses the live database's own directory, refuses any directory that already holds a file whose name starts `divvy.sqlite3` or `.divvy.sqlite3` (the database, its `-wal`, `-shm` or `-journal`, a half-finished restore), and never overwrites. Never add `-force` to a hand-run `litestream restore`.
 - **A boot that hangs or fails before the app starts is the replica.** On a fresh volume Litestream must reach the replica before the app can start. If it cannot, the app is deliberately not started (section 8).
 
 ## 3. The local drill
@@ -81,7 +82,7 @@ This is the w4 check that the backup holds what the app shows. Do it right after
      scripts/restore.sh <empty directory>
    ```
 
-   It prints `restored: <empty directory>/divvy.sqlite3` and exits 0. Exit 1 means Litestream or its integrity check failed and nothing was written; exit 2 means it refused (the message says why) and nothing was written. Start the line with a space to keep the key out of history.
+   It prints `restored: <empty directory>/divvy.sqlite3` and exits 0. The file is readable by you only (mode 0600). Exit 1 means Litestream or its integrity check failed and nothing was written; exit 2 means it refused (the message says why) and nothing was written. Start the line with a space to keep the key out of history.
 
 2. Row counts and integer-cent totals, read without writing:
 
@@ -153,7 +154,7 @@ fly volumes destroy <restore_drill volume id> -a divvy-strawb
 4. Deploy: `fly deploy --ha=false --no-public-ips -a divvy-strawb`.
 5. On boot `fly logs` should show, before `Listening on 127.0.0.1:3005`, Litestream's `attempting restore before replication` and `restore completed`. Then run section 4 to compare.
 
-If the logs show `no matching backup files available` instead, the replica was empty: the app started with a new, empty database. Stop the machine at once (section 7).
+If the logs show `no backup found, starting fresh` instead, the replica was empty at that URL (often a wrong path in `LITESTREAM_REPLICA_URL`): the app started with a new, empty database. Stop the machine at once (section 7).
 
 ## 6. Point in time
 
@@ -161,7 +162,7 @@ To restore the state as it was before something went wrong, list the transaction
 
 ```sh
 LITESTREAM_REPLICA_URL=<replica url> LITESTREAM_ACCESS_KEY_ID=<key id> LITESTREAM_SECRET_ACCESS_KEY=<secret key> \
-  litestream ltx -level all "$LITESTREAM_REPLICA_URL"
+  litestream ltx -level all <replica url>
 ```
 
 Each line has a `max_txid` (16 hex digits) and a `created` time. Then restore to one of them with either variable, never both:
@@ -187,7 +188,8 @@ If the machine came up on an empty volume and the replica was empty or unreachab
 ## 8. Troubleshooting
 
 - **Boot hangs: no `Listening on` line, Litestream's `attempting restore before replication` is the last thing in `fly logs`.** The volume has no database and Litestream cannot reach the replica (wrong endpoint, network, provider down). It retries rather than starting the app on an empty database. Check the URL and credentials (section 1); the app starts once the replica answers.
-- **`no matching backup files available`.** The replica has no backup at that URL. From `restore.sh` (exit 1) this means the URL or path is wrong, or nothing has replicated yet. At boot it means the machine started a new, empty database (section 7).
+- **`no matching backup files available`** (from `restore.sh`, exit 1, or a hand-run `litestream restore`). The replica has no backup at that URL: the URL or path is wrong, or nothing has replicated yet.
+- **`no backup found, starting fresh`** (at boot). The same thing on the machine, and worse: it started a new, empty database and is replicating it (section 7).
 - **`cannot restore, output path already exists`.** A hand-run `litestream restore` found a file at `-o`. Pick an empty path. Do not add `-force`.
 - **`restore.sh: ERROR: … already exists`.** The target holds a database or one of its files. Use an empty directory.
 - **`restore.sh: ERROR: litestream restore failed; nothing was written`.** Litestream's own error is on the line before. `invalid ltx file` means the replica's files are damaged; an integrity-check failure means the restored database failed `PRAGMA quick_check`. Either way no database was left behind.

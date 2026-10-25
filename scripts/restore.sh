@@ -7,8 +7,9 @@
 # Writes <target-dir>/divvy.sqlite3 and nothing else. It never overwrites: it
 # refuses, before Litestream runs and having written nothing, when the target
 # is missing (it never creates directories), when anything Divvy's database or
-# Litestream would leave is already there (the database, its -wal, -shm or
-# -journal, a half-finished restore, Litestream's state directory), or when
+# Litestream would leave is already there (any name starting divvy.sqlite3 or
+# .divvy.sqlite3: the database, its -wal, -shm or -journal, a half-finished
+# restore and its sidecars, Litestream's state directory), or when
 # the target is the live database's own directory. A restore lands in a
 # temporary name and is moved into place only after Litestream's integrity
 # check passes, so a failure leaves the directory as it found it.
@@ -25,6 +26,8 @@
 # docs/restore.md. Never `set -x` here: the environment holds the credentials.
 set -eu
 unset CDPATH
+# The restored file is bank data: readable by its owner only, from creation.
+umask 077
 
 log() { echo "restore.sh: $*" >&2; }
 die() { echo "restore.sh: ERROR: $*" >&2; exit 2; }
@@ -56,7 +59,12 @@ fi
 
 db="$target/divvy.sqlite3"
 part="$db-restoring"
-for existing in "$db" "$db-wal" "$db-shm" "$db-journal" "$part" "$target/.divvy.sqlite3-litestream"; do
+# Every name the database, SQLite or Litestream leaves starts with
+# divvy.sqlite3 or .divvy.sqlite3, including what Litestream makes beside the
+# temporary name: it writes through a symlink at its -restoring.tmp, and its
+# integrity check replays a stale -restoring-wal into the restored copy. An
+# unmatched pattern stays literal and does not exist.
+for existing in "$target"/divvy.sqlite3* "$target"/.divvy.sqlite3*; do
   if [ -e "$existing" ] || [ -L "$existing" ]; then
     die "$existing already exists. Refusing: restore.sh never overwrites a database. Restore into an empty directory"
   fi

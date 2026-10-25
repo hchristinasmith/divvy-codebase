@@ -17,7 +17,9 @@
 #   (a lost or new volume), restore the latest backup before starting the app.
 #   Without it the app would create a new, empty database and Litestream would
 #   replicate that as the newest state. A file already at the path is never
-#   touched. If the replica cannot be reached the boot waits on it and the app
+#   touched. Only that file counts: a -wal left without it is replayed onto
+#   the restored copy, so never delete the database alone (docs/restore.md).
+#   If the replica cannot be reached the boot waits on it and the app
 #   does not start (docs/restore.md, "Boot hangs").
 # - The replica URL and its credentials come only from Fly secrets:
 #   LITESTREAM_REPLICA_URL here, and LITESTREAM_ACCESS_KEY_ID and

@@ -343,7 +343,9 @@ function runRestore(
   for (const [key, value] of Object.entries(merged)) {
     if (value !== undefined) childEnv[key] = value
   }
-  const result = spawnSync('/bin/sh', [restoreScript, ...args], {
+  // Under a laptop's usual umask, so the mode test below means something.
+  const command = ['-c', 'umask 022 && exec /bin/sh "$@"', 'sh', restoreScript, ...args]
+  const result = spawnSync('/bin/sh', command, {
     env: childEnv,
     cwd,
     encoding: 'utf8',
@@ -435,6 +437,25 @@ describe('scripts/restore.sh, run', { timeout: RUN_TIMEOUT_MS * 3 }, () => {
       'a half-finished restore in the target',
       existing('divvy.sqlite3-restoring'),
       'divvy.sqlite3-restoring already exists',
+    ],
+    // Litestream's integrity check opens the restored copy with SQLite, which
+    // replays a stale -wal beside it into the result (seen in review on
+    // Litestream 0.5.17: the "restored" file held the stale WAL's rows).
+    [
+      'a stale -wal beside the temporary name',
+      existing('divvy.sqlite3-restoring-wal'),
+      'divvy.sqlite3-restoring-wal already exists',
+    ],
+    // Litestream writes its -o path plus .tmp with a create-and-truncate that
+    // follows a symlink, so a link there would overwrite the file it points at.
+    [
+      "a symlink at Litestream's own temporary file",
+      () => {
+        writeFileSync(join(area, 'elsewhere.sqlite3'), 'ELSEWHERE')
+        symlinkSync(join(area, 'elsewhere.sqlite3'), join(target, 'divvy.sqlite3-restoring.tmp'))
+        return { args: [target] }
+      },
+      'divvy.sqlite3-restoring.tmp already exists',
     ],
     [
       'a dangling symlink at the database name',
@@ -530,6 +551,14 @@ describe('scripts/restore.sh, run', { timeout: RUN_TIMEOUT_MS * 3 }, () => {
     expect(readFileSync(join(live, 'divvy.sqlite3'), 'utf8')).toBe('LIVE')
   })
 
+  // A restored file is the bank data; runRestore runs under umask 022.
+  it('leaves the restored database readable by its owner only', () => {
+    const run = runRestore([target])
+
+    expect(run.status).toBe(0)
+    expect(statSync(join(target, 'divvy.sqlite3')).mode & 0o777).toBe(0o600)
+  })
+
   it('takes a target relative to where it is run', () => {
     const run = runRestore(['restored'], { cwd: area })
 
@@ -622,6 +651,18 @@ describe('docs/restore.md', () => {
     expect(set).toHaveLength(1)
     for (const name of SECRETS) expect(set[0]).toContain(` ${name}=`)
     expect(set[0]).toContain('-a divvy-strawb')
+  })
+
+  // The listing is run with the URL set as a prefix on the same line, and the
+  // shell expands an argument before that prefix applies, so "$VAR" there is
+  // empty and Litestream fails ("database path or replica URL required").
+  it('gives litestream ltx the replica URL literally, not as a variable', () => {
+    const ltx = blocks
+      .flatMap((block) => block.split('\n'))
+      .filter((line) => line.includes('litestream ltx '))
+
+    expect(ltx.length).toBeGreaterThan(0)
+    for (const line of ltx) expect(line).not.toContain('$')
   })
 
   it('gives the operator scripts/restore.sh to run', () => {
