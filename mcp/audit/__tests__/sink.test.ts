@@ -13,13 +13,35 @@
 //   - a database that is not an audit file is written to, or an audit file
 //     is left without the sink's application_id;
 //   - a failed record leaves the write lock held;
+//   - a loop of calls can grow the file past its size ceiling, a record over
+//     the ceiling returns data or leaves a row, the refusal is lifted while
+//     the file is still over it, or the default ceiling is not 50 MiB;
+//   - a stalled write holds its call past its deadline, holds up the record
+//     behind it, or lands after its call has already failed; the queue
+//     stalls once the cause is gone, or the default deadline is not 10 s;
+//   - a size ceiling or deadline that is not a positive whole number is
+//     accepted;
 //   - the file is left in WAL mode, or cannot be read with a read-only open;
 //   - the sink imports anything beyond node:fs, node:path, sqlite3 and the
 //     contract, or `index.ts` exports more than `createAuditSink`.
 //
 // Every test works in its own mkdtemp directory, removed afterwards.
 
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  closeSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  truncateSync,
+  writeFileSync,
+  writeSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -749,5 +771,335 @@ describe('the audit file keeps a rollback journal', () => {
       chmodSync(dir, 0o755)
       chmodSync(path, 0o644)
     }
+  })
+})
+
+// ---- The file's size ceiling and each record's deadline (#113) ----
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+// The dispatcher reports each failed record on stderr; these tests make many.
+const quietStderr = () => vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+function rowCount(path: string): Promise<number> {
+  return query<{ n: number }>(path, 'SELECT count(*) AS n FROM advisor_audit').then(([row]) => row.n)
+}
+
+describe('the bounds are checked when the sink is made', () => {
+  it.each([
+    ['0', 0],
+    ['-1', -1],
+    ['1.5', 1.5],
+    ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY],
+    ['2^53', Number.MAX_SAFE_INTEGER + 1],
+    ["the string '1024'", '1024'],
+  ])('refuses maxFileBytes %s', (_label, maxFileBytes) => {
+    const path = join(scratch(), 'audit.sqlite3')
+    expect(() => createAuditSink({ path, maxFileBytes } as { path: string })).toThrow(
+      new TypeError('the audit size ceiling must be a positive whole number of bytes'),
+    )
+    expect(existsSync(path)).toBe(false)
+  })
+
+  // 2^31 ms is one past what setTimeout honours; Node fires it after 1 ms.
+  it.each([
+    ['0', 0],
+    ['-1', -1],
+    ['1.5', 1.5],
+    ['NaN', Number.NaN],
+    ['2^31', 2 ** 31],
+    ["the string '10'", '10'],
+  ])('refuses deadlineMs %s', (_label, deadlineMs) => {
+    const path = join(scratch(), 'audit.sqlite3')
+    expect(() => createAuditSink({ path, deadlineMs } as { path: string })).toThrow(
+      new TypeError('the audit deadline must be a positive whole number of milliseconds that setTimeout can wait'),
+    )
+    expect(existsSync(path)).toBe(false)
+  })
+})
+
+describe('the audit file has a size ceiling and fails closed at it', () => {
+  // Small enough to reach in a few dozen rows; a fresh audit file is a few
+  // 4 KiB pages before its first row.
+  const CEILING = 32 * 1024
+  // The longest raw arguments the dispatcher keeps for a rejected call:
+  // `{"scope":"…"}` is 12 characters plus the value.
+  const rejectedArgs = { scope: 'x'.repeat(MAX_REJECTED_PARAMS_LENGTH - 12) }
+
+  let stderr: ReturnType<typeof quietStderr>
+  beforeEach(() => {
+    stderr = quietStderr()
+  })
+  afterEach(() => {
+    stderr.mockRestore()
+  })
+
+  it('a loop of rejected calls stops at the ceiling: audit_unavailable, no data, no row, the file no larger', async () => {
+    expect(JSON.stringify(rejectedArgs)).toHaveLength(MAX_REJECTED_PARAMS_LENGTH)
+    const dir = scratch()
+    const path = join(dir, 'audit.sqlite3')
+    const sink = createAuditSink({ path, maxFileBytes: CEILING })
+
+    // Without a ceiling this loop runs to the end and the file passes 200 KB.
+    let landed = 0
+    let refused: CallToolResult | undefined
+    for (let i = 0; i < 200 && refused === undefined; i++) {
+      const result = await call(sink, 'fake_ok', rejectedArgs)
+      if (errorCode(result) === 'invalid_arguments') landed++
+      else refused = result
+    }
+    // Bytes on disk, not the sink's own arithmetic: the refused row's pages
+    // were rolled back, so the file never passed the ceiling.
+    const size = statSync(path).size
+    expect(size).toBeLessThanOrEqual(CEILING)
+    expect(refused).toBeDefined()
+    expect(errorCode(refused as CallToolResult)).toBe('audit_unavailable')
+    expect(Object.keys(refused as CallToolResult).sort()).toEqual(['content', 'isError'])
+    expect(JSON.stringify(refused)).not.toContain(SENTINEL)
+    expect(landed).toBeGreaterThan(0)
+    expect(await rowCount(path)).toBe(landed)
+    expect(readdirSync(dir)).toEqual(['audit.sqlite3'])
+
+    // Not lifted while the cause remains: the next call of the same size,
+    // and a direct record of it, are refused as well, and the file does not
+    // move. (A row small enough to fit the pages already there may land: it
+    // does not grow the file. A file already over refuses even that, below.)
+    expect(errorCode(await call(sink, 'fake_ok', rejectedArgs))).toBe('audit_unavailable')
+    await expect(sink.record(validRecord({ params: rejectedArgs }))).rejects.toThrow(
+      new Error('the audit file is at its size ceiling'),
+    )
+    expect(statSync(path).size).toBe(size)
+    expect(await rowCount(path)).toBe(landed)
+  })
+
+  it('a sink with a higher ceiling writes to the same file again', async () => {
+    const path = join(scratch(), 'audit.sqlite3')
+    const sink = createAuditSink({ path, maxFileBytes: CEILING })
+    let landed = 0
+    for (let i = 0; i < 200; i++) {
+      const ok = await sink.record(validRecord({ params: rejectedArgs })).then(() => true, () => false)
+      if (!ok) break
+      landed++
+    }
+    expect(await rowCount(path)).toBe(landed)
+
+    await createAuditSink({ path, maxFileBytes: 4 * CEILING }).record(validRecord({ tool: 'after_raise' }))
+    const rows = await readRows(path)
+    expect(rows).toHaveLength(landed + 1)
+    expect(rows[landed].tool).toBe('after_raise')
+  })
+
+  // An audit file grown to exactly `bytes` without writing them: the file is
+  // extended sparsely, and its header's page count is marked stale, as a
+  // pre-3.7.0 writer leaves it, so SQLite takes the size from the file.
+  async function auditFileOfSize(bytes: number): Promise<string> {
+    const path = join(scratch(), 'audit.sqlite3')
+    await createAuditSink({ path }).record(validRecord({ tool: 'first' }))
+    truncateSync(path, bytes)
+    const fd = openSync(path, 'r+')
+    try {
+      writeSync(fd, Buffer.from([0xff, 0xff, 0xff, 0xff]), 0, 4, 92) // version-valid-for
+    } finally {
+      closeSync(fd)
+    }
+    return path
+  }
+
+  it('defaults to 50 MiB: a file of exactly that takes a row, one page more refuses it', async () => {
+    const DEFAULT_CEILING = 50 * 1024 * 1024
+    const atCeiling = await auditFileOfSize(DEFAULT_CEILING)
+    await createAuditSink({ path: atCeiling }).record(validRecord({ tool: 'at_ceiling' }))
+    expect((await readRows(atCeiling)).map((row) => row.tool)).toEqual(['first', 'at_ceiling'])
+    expect(statSync(atCeiling).size).toBe(DEFAULT_CEILING)
+
+    const overCeiling = await auditFileOfSize(DEFAULT_CEILING + 4096)
+    await expect(createAuditSink({ path: overCeiling }).record(validRecord({ tool: 'over' }))).rejects.toThrow(
+      new Error('the audit file is at its size ceiling'),
+    )
+    expect((await readRows(overCeiling)).map((row) => row.tool)).toEqual(['first'])
+  })
+})
+
+describe('a record has a deadline', () => {
+  // Another connection holds the write lock for HOLD_MS. The sink's busy
+  // timeout would outwait it, so only the deadline can end the wait early.
+  const DEADLINE_MS = 300
+  const SLACK_MS = 200
+  const HOLD_MS = 800
+  const DEADLINE_MESSAGE = 'the audit record did not settle within its deadline'
+
+  let stderr: ReturnType<typeof quietStderr>
+  beforeEach(() => {
+    stderr = quietStderr()
+  })
+  afterEach(() => {
+    stderr.mockRestore()
+  })
+
+  it('a stalled write fails its call at the deadline, does not hold up the next, and never lands', async () => {
+    const path = join(scratch(), 'audit.sqlite3')
+    const sink = createAuditSink({ path, deadlineMs: DEADLINE_MS })
+    await sink.record(validRecord({ tool: 'first' }))
+
+    const holder = await createDatabase(path)
+    await exec(holder, 'BEGIN IMMEDIATE')
+    const started = Date.now()
+    const stalled = sink.record(validRecord({ tool: 'stalled' })).then(
+      () => ({ status: 'fulfilled', ms: Date.now() - started, message: '' }),
+      (error: unknown) => ({ status: 'rejected', ms: Date.now() - started, message: (error as Error).message }),
+    )
+    // Called at the same moment, so queued behind the stalled record. Its
+    // deadline runs from its own call, not from when its turn came.
+    const behind = call(sink, 'fake_ok', { scope: 'personal' }).then((result) => ({ result, ms: Date.now() - started }))
+
+    await sleep(HOLD_MS)
+    await exec(holder, 'COMMIT')
+    await close(holder)
+
+    const a = await stalled
+    expect(a.status).toBe('rejected')
+    expect(a.message).toBe(DEADLINE_MESSAGE)
+    expect(a.ms).toBeLessThan(DEADLINE_MS + SLACK_MS)
+    const b = await behind
+    expect(errorCode(b.result)).toBe('audit_unavailable')
+    expect(JSON.stringify(b.result)).not.toContain(SENTINEL)
+    expect(b.ms).toBeLessThan(DEADLINE_MS + SLACK_MS)
+
+    // The lock is free: the abandoned writes now reach their commit, see
+    // the deadline passed, and roll back. The queue was never wedged, so a
+    // fresh record lands at once and in order.
+    await sink.record(validRecord({ tool: 'fresh' }))
+    // Long enough for SQLite's busy handler, which retries at most every
+    // 100 ms, to hand the lock to each abandoned write in turn.
+    await sleep(500)
+    const rows = await readRows(path)
+    expect(rows.map((row) => row.tool)).toEqual(['first', 'fresh'])
+    expect(Object.keys(rows[1]).sort()).toEqual(COLUMNS)
+  })
+
+  // A hung filesystem call cannot be made on demand, so this one stands in
+  // for it: the stalled record's BEGIN IMMEDIATE reaches SQLite only when the
+  // test releases it. Unlike the lock above, it stalls that record alone, so
+  // the record behind it can land, which it does only if the queue moved on
+  // at the deadline rather than waiting for the hung write to come back.
+  it('a hung write does not wedge the queue: the record behind it lands, the hung one never does', async () => {
+    const path = join(scratch(), 'audit.sqlite3')
+    const sink = createAuditSink({ path, deadlineMs: DEADLINE_MS })
+    await sink.record(validRecord({ tool: 'first' }))
+
+    const realExec = sqlite3.Database.prototype.exec
+    let release: () => void = () => undefined
+    const released = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let hung = false
+    const spy = vi.spyOn(sqlite3.Database.prototype, 'exec').mockImplementation(function (
+      this: sqlite3.Database,
+      sql: string,
+      callback?: (this: sqlite3.Statement, err: Error | null) => void,
+    ) {
+      if (sql === 'BEGIN IMMEDIATE' && !hung) {
+        hung = true
+        void released.then(() => realExec.call(this, sql, callback))
+        return this
+      }
+      return realExec.call(this, sql, callback)
+    })
+    try {
+      // The hung write comes back at HOLD_MS whatever happens, so a sink
+      // that waits for it is slow rather than stuck.
+      let isReleased = false
+      const releasing = sleep(HOLD_MS).then(() => {
+        isReleased = true
+        release()
+      })
+      const stalled = sink.record(validRecord({ tool: 'hung' })).catch((error: unknown) => (error as Error).message)
+      // Called halfway through the hung record's deadline, so it is queued
+      // behind it with time to spare once its turn comes.
+      await sleep(DEADLINE_MS / 2)
+      const started = Date.now()
+      const behind = call(sink, 'fake_ok', { scope: 'personal' }).then((result) => ({
+        result,
+        ms: Date.now() - started,
+        whileHung: !isReleased,
+      }))
+
+      const b = await behind
+      expect(b.result.isError).toBeUndefined()
+      expect(JSON.stringify(b.result)).toContain(SENTINEL)
+      expect(b.whileHung).toBe(true)
+      expect(b.ms).toBeLessThan(DEADLINE_MS + SLACK_MS)
+      expect(await stalled).toBe(DEADLINE_MESSAGE)
+      expect(hung).toBe(true)
+
+      // Once released, the hung write reaches its commit after the record
+      // behind it has landed, sees its deadline passed, and rolls back.
+      await releasing
+      await sleep(200)
+      await sink.record(validRecord({ tool: 'fresh' }))
+    } finally {
+      release()
+      spy.mockRestore()
+    }
+    expect((await readRows(path)).map((row) => row.tool)).toEqual(['first', 'fake_ok', 'fresh'])
+  })
+
+  it('defaults to 10 s: a stalled record is pending just before and rejected at it', async () => {
+    const path = join(scratch(), 'audit.sqlite3')
+    await createAuditSink({ path }).record(validRecord({ tool: 'first' }))
+    const holder = await createDatabase(path)
+    await exec(holder, 'BEGIN IMMEDIATE')
+    // Only the sink's timer is faked. SQLite's busy wait runs in real time,
+    // and in real time the advances below take milliseconds.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      let outcome: string | undefined
+      const pending = createAuditSink({ path })
+        .record(validRecord({ tool: 'stalled' }))
+        .then(
+          () => {
+            outcome = 'fulfilled'
+          },
+          (error: unknown) => {
+            outcome = (error as Error).message
+          },
+        )
+      // Settling takes a few promise hops after the timer fires; flushed by
+      // hand rather than awaiting `pending`, which a sink without a deadline
+      // would hold for the whole busy timeout.
+      const flush = async () => {
+        for (let i = 0; i < 20; i++) await Promise.resolve()
+      }
+      await vi.advanceTimersByTimeAsync(9_999)
+      await flush()
+      expect(outcome).toBeUndefined()
+      await vi.advanceTimersByTimeAsync(1)
+      await flush()
+      expect(outcome).toBe(DEADLINE_MESSAGE)
+      await pending
+    } finally {
+      vi.useRealTimers()
+      await exec(holder, 'COMMIT')
+      await close(holder)
+    }
+    await createAuditSink({ path }).record(validRecord({ tool: 'fresh' }))
+    await sleep(300)
+    expect((await readRows(path)).map((row) => row.tool)).toEqual(['first', 'fresh'])
+  })
+
+  it('a record that lands leaves no deadline timer behind', async () => {
+    const path = join(scratch(), 'audit.sqlite3')
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const sink = createAuditSink({ path })
+      const pending = sink.record(validRecord())
+      expect(vi.getTimerCount()).toBe(1)
+      await pending
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+    expect(await rowCount(path)).toBe(1)
   })
 })
