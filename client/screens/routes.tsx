@@ -4,6 +4,7 @@ import type { ScreenKey } from '../components/Shell/icons.tsx'
 import Overview from './Overview/index.tsx'
 import Budgets from './Budgets/index.tsx'
 import Bills from './Bills/index.tsx'
+import Subscriptions from '../components/Subscriptions/index.tsx'
 import Goals from './Goals/index.tsx'
 import Habits from './Habits/index.tsx'
 import Advisor from './Advisor/index.tsx'
@@ -12,7 +13,9 @@ import Privacy from './Privacy/index.tsx'
 
 // The one route table for the handoff's screens. The sidebar, the phone tab
 // bar and App.tsx's routes all read it. A screen's issue replaces the default
-// export of ./<Name>/index.tsx and never edits this file or App.tsx.
+// export of its stub, ./<Name>/index.tsx, and leaves this file and App.tsx
+// alone. A screen with no stub (Subscriptions, issue 230, in
+// ../components/Subscriptions/) adds its one entry and import here.
 
 export interface ScreenRoute {
   key: ScreenKey
@@ -44,6 +47,12 @@ export const screens: readonly ScreenRoute[] = [
     tab: { label: 'Budgets', order: 2 },
   },
   { key: 'bills', path: '/bills', label: 'Bills', Component: Bills },
+  {
+    key: 'subscriptions',
+    path: '/subscriptions',
+    label: 'Subscriptions',
+    Component: Subscriptions,
+  },
   {
     key: 'goals',
     path: '/goals',
