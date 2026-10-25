@@ -1,0 +1,43 @@
+{
+  "success": true,
+  "items": [
+    {
+      "_account": "acc_fixture0001everyday",
+      "_connection": "conn_fixture0001",
+      "_user": "user_fixture0001",
+      "amount": -64.2,
+      "category": {
+        "_id": "nzfcc_fixture0004",
+        "name": "Fuel stations",
+        "groups": {
+          "personal_finance": {
+            "_id": "group_fixture0003",
+            "name": "Transport"
+          }
+        }
+      },
+      "date": "2026-10-24T09:30:00.000Z",
+      "description": "EXAMPLE FUEL STOP 4",
+      "merchant": {
+        "_id": "merchant_fixture0004",
+        "name": "Example Fuel",
+        "nzbn": "fixture-nzbn-0004",
+        "website": "https://example.com/fuel"
+      },
+      "meta": {
+        "code": "FIXTURE",
+        "logo": "https://example.com/fixture-fuel-logo.png",
+        "other_account": "XX-XXXX-XXXXXXX-XX",
+        "particulars": "Example",
+        "reference": "fixture-ref-pending"
+      },
+      "type": "EFTPOS",
+      "updated_at": "2026-10-24T09:31:00.000Z"
+    },
+    {
+      "_account": "acc_fixture0003credit",
+      "amount": -8.5,
+      "date": "2026-10-24T10:05:00.000Z"
+    }
+  ]
+}
