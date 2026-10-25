@@ -142,7 +142,7 @@ describe('insertInsight', () => {
     ],
     [
       'a bidi override in a label',
-      spec({ data: { values: [{ merchant: 'Fixture ‮yrekaB', total: 1 }] } }),
+      spec({ data: { values: [{ merchant: 'Fixture \u202EyrekaB', total: 1 }] } }),
       'bidi_in_string',
       'yrekaB',
     ],
