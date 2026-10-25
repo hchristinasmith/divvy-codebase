@@ -45,6 +45,33 @@ export interface CategoryProposal {
   created_at: IsoTimestamp
 }
 
+// ---- agent_runs (prd-04 Rulings 2, 5 and 7; #31) ----
+
+export const AGENT_KINDS = ['category', 'insights'] as const
+export type AgentKind = (typeof AGENT_KINDS)[number]
+
+export const AGENT_TRIGGERS = ['sync', 'weekly', 'manual'] as const
+export type AgentTrigger = (typeof AGENT_TRIGGERS)[number]
+
+export const AGENT_RUN_OUTCOMES = ['running', 'success', 'failed'] as const
+export type AgentRunOutcome = (typeof AGENT_RUN_OUTCOMES)[number]
+
+// A row of `agent_runs`.
+export interface AgentRun {
+  id: number
+  kind: AgentKind
+  trigger: AgentTrigger
+  started_at: IsoTimestamp
+  // Null exactly while `outcome` is `running`.
+  finished_at: IsoTimestamp | null
+  outcome: AgentRunOutcome
+  considered_count: number
+  written_count: number
+  // Set exactly when `trigger` is `sync`.
+  sync_run_id: number | null
+  cursor: string | null
+}
+
 // ---- Proposed categories (Ruling 6) ----
 
 /**

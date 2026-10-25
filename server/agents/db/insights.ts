@@ -13,7 +13,8 @@
 // ignored, and a read row has no `mermaid` key.
 //
 // A refused input throws an error naming the field, never its value, and a
-// refused write throws SQLite's words without the row (`scrubbed`).
+// refused write throws SQLite's words without the row (`scrubbed`, in
+// ./scrubbed.ts).
 import {
   INSIGHT_KINDS,
   parseChartSpecJson,
@@ -24,7 +25,7 @@ import {
   type InsightScope,
 } from '../../../models/insights.ts'
 import connection from '../../db/connection.ts'
-import { scrubbed } from './proposals.ts'
+import { scrubbed } from './scrubbed.ts'
 
 // A Record so that TypeScript refuses this file if `InsightScope` changes.
 const SCOPES: Record<InsightScope, true> = { personal: true, strawb: true }

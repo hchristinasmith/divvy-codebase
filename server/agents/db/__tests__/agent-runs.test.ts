@@ -6,12 +6,14 @@ import {
   AGENT_KINDS,
   AGENT_RUN_OUTCOMES,
   AGENT_TRIGGERS,
+  type AgentRun,
+} from '../../contracts.ts'
+import {
   finishRun,
   latestRun,
   listRuns,
   processedSyncRunIds,
   startRun,
-  type AgentRun,
   type FinishRun,
 } from '../agent-runs.ts'
 
