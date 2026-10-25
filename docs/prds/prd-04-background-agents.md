@@ -75,6 +75,14 @@ Items 1–6 and 8 are tests (the code does what is written). **Two criteria that
 
 **Only the quality check matters most:** a suggestion engine that is cheap and safe but wrong is something you stop opening.
 
+*Dated notes, 2026-10-25 (Ruling 7):*
+- 1: the accepted row carries `category_source` `rule`. `claude` does not occur.
+- 3: a rejection suppresses that (transaction, category) pair for good, and counts against the rule. There is no prompt, so "passed back as an example" is void.
+- 4: void; no model.
+- 6: void; no API calls and no token budget.
+- Cost: void; $0 by construction.
+- Quality: stands at 8 of 10. Rules propose less, so the review runs once 10 real proposals exist.
+
 ## Rulings
 
 ## Ruling 1 — Agents run on the server and call the Claude API; they never touch the MCP
@@ -94,6 +102,21 @@ Category proposals run after each sync completes, for new or changed rows (the a
 
 ## Ruling 6 — Proposals must be real Akahu categories
 A proposal is validated against the taxonomy in `data/cats.js` / `data/rawCategories.js` and discarded if it is not in it. Why: a free-text category would silently break every budget that matches on category.
+
+## Ruling 7 — No paid API: both agents are rules and fixed calculations (operator amendment, 2026-10-25; amends Rulings 1 and 4, Wave 0, and Wave 1's API-client bullet)
+
+Hannah ruled no Anthropic API spend (#23). Neither agent calls a model.
+
+- **Category agent:** proposes only from rules learned from `category_corrections`. When Hannah has moved the same merchant (or normalised description) to the same category at least N times (config, default 2), with no later correction away from it, the agent proposes that category for that merchant's uncorrected rows, origin `rule`.
+- **Insights agent:** deterministic code. Fixed, typed aggregate queries produce the numbers (top merchants, change against last week, unusual spends), a template writes the markdown, and code builds the chart spec.
+
+Why: $0 running cost, no key to hold, and no model a merchant string can instruct. The cost is accepted: a merchant Hannah has never corrected gets no proposal.
+
+Extends to: origin `claude` and any model call come back only by a further amendment. Ruling 4's field allow-list has no model to apply to now. It stays the rule for any future model path, and nothing is built for it until then.
+
+## Ruling 8 — Chart specs stay validated data, though code writes them (amends Ruling 3)
+
+Ruling 3 stands. Merchant names and descriptions still flow into chart labels and body text, so the spec is validated on write and on render, and the markdown renders without HTML.
 
 ## Sequencing
 
@@ -127,8 +150,8 @@ Unfiled work implied, described not numbered: auto-accept above a threshold if e
 
 ## Open questions that block this
 
-- Where does the suggestions pill live? Hannah asked for it on "the Transactions page", but the handoff has no Transactions screen and prd-02 retires the old one. This PRD plans for the Overview's recent-activity card; a Transactions screen would be a separate PRD. Open, not ruled.
-- Does the Anthropic API key exist, and is an API budget acceptable alongside the subscription? Open, not ruled.
+- Where does the suggestions pill live? Hannah asked for it on "the Transactions page", but the handoff has no Transactions screen and prd-02 retires the old one. This PRD plans for the Overview's recent-activity card; a Transactions screen would be a separate PRD. Open, not ruled. — ANSWERED (Hannah, 2026-10-25): on the Overview recent-activity card.
+- Does the Anthropic API key exist, and is an API budget acceptable alongside the subscription? Open, not ruled. — ANSWERED (Hannah, 2026-10-25): no API spend. See Ruling 7.
 
 **Not blocking, deliberately open:**
 - Whether insights are also emailed weekly (D5) or only shown in-app. Open, not ruled.
