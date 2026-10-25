@@ -176,6 +176,25 @@ describe('Dockerfile', () => {
       expect(copy).not.toMatch(/\.env|\.sqlite3/)
     }
   })
+
+  // One base image, named by its index digest in every stage (the Dockerfile's
+  // base-image comment says how to bump it). A FROM that loses its digest
+  // floats with the tag; one that takes another digest builds on another image.
+  it('names node:22-bookworm-slim by one index digest in each of the three stages', () => {
+    const froms = instructions.split('\n').filter((line) => /^FROM\s/.test(line))
+
+    expect(
+      froms.map((line) => line.replace(/@sha256:[0-9a-f]{64}/, '@DIGEST')),
+    ).toEqual([
+      'FROM node:22-bookworm-slim@DIGEST AS tools',
+      'FROM node:22-bookworm-slim@DIGEST AS build',
+      'FROM node:22-bookworm-slim@DIGEST',
+    ])
+    const digests = new Set(
+      froms.map((line) => line.match(/@sha256:([0-9a-f]{64})/)?.[1]),
+    )
+    expect(digests.size).toBe(1)
+  })
 })
 
 describe('scripts/start.sh and docs/deploy.md, as files', () => {
