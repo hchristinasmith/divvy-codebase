@@ -173,6 +173,23 @@ describe('GET /api/v1/sync/status', () => {
     expect(res.body.lastSuccessAt).toBe(iso(61))
   })
 
+  it.each(['not-a-timestamp', 'now'])(
+    'ranks a success whose started_at is %s below a valid one, as the claim step does (#188)',
+    async (badStart) => {
+      await insertRuns(success(0))
+      await insertRuns({
+        ...success(30),
+        started_at: badStart,
+      })
+
+      const res = await api.get('/api/v1/sync/status')
+
+      expect(res.status).toBe(200)
+      expect(res.body.lastRun).toMatchObject({ id: 1, startedAt: iso(0) })
+      expect(res.body.lastSuccessAt).toBe(iso(1))
+    },
+  )
+
   it('shows a leftover running row as running in the database, not in this process', async () => {
     await insertRuns(success(0), {
       started_at: iso(15),
