@@ -164,6 +164,19 @@ describe('addContribution', () => {
     expect(sent.amountCents).toBe(20000)
   })
 
+  it('escapes the id into one path segment', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch')
+
+    await expect(api.addContribution('1/../2', 5000)).rejects.toThrow(
+      new Error('id must be a positive integer'),
+    )
+
+    const [url] = spy.mock.calls[0]
+    expect(new URL(String(url)).pathname).toBe(
+      '/api/v1/goals/1%2F..%2F2/contributions',
+    )
+  })
+
   it('rejects a goal that does not exist with the server message', async () => {
     await expect(api.addContribution('999', 5000)).rejects.toThrow(
       new Error('Goal not found'),

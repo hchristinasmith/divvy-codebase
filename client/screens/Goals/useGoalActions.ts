@@ -82,9 +82,12 @@ export function useCreateGoal(): CreateGoal {
   })
   const { mutate, reset } = write
   return {
-    // Save is disabled from the click that sends, so no second goal is
-    // created (the double-click test in Goals.test.tsx).
-    run: (body, onDone) => mutate(body, { onSuccess: onDone }),
+    // The same guard as `contribute`: Save disables on the next render, so
+    // a second click in that gap would create a second goal.
+    run: (body, onDone) => {
+      if (client.isMutating({ mutationKey: GOAL_WRITES }) > 0) return
+      mutate(body, { onSuccess: onDone })
+    },
     isPending: write.isPending,
     error: write.error?.message ?? null,
     reset,

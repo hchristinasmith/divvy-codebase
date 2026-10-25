@@ -420,6 +420,26 @@ describe('creating a goal', () => {
     expect(text(card('Sample Car'), 'goal-target')).toBe('of $1,500.50')
   })
 
+  it('stays open, saving, until the list has been read again', async () => {
+    const created = goal({ id: '9', name: 'Sample Car' })
+    const { fx } = setup(goalsResponse(), {
+      create: () => ({ status: 201, body: created }),
+    })
+    await loaded()
+    fx.handlers.list = () => undefined
+
+    open()
+    type('Name', 'Sample Car')
+    type('Target ($)', '3000')
+    save()
+
+    await waitFor(() => expect(fx.callsTo('GET', LIST)).toHaveLength(2))
+    // Room for a write that did not wait for its refetch to close the form.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)))
+    expect(screen.queryByRole('form', { name: 'New goal' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Saving…' })).not.toBeNull()
+  })
+
   it('sends a null by-date when none is typed', async () => {
     const { fx } = setup(goalsResponse(), {
       create: () => ({ status: 201, body: RAINY_DAY }),
