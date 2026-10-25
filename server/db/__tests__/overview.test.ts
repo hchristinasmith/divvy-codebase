@@ -1660,6 +1660,21 @@ describe('readOverview: dataAsOf', () => {
       '2026-10-27T03:02:00.000Z',
     )
   })
+
+  it('ranks by start, not id or finish; a tie goes to the higher id (#206)', async () => {
+    // Run 9 started earliest but has the highest id and the latest finish,
+    // so ranking by id or by finish picks it. Runs 2 and 5 share the latest
+    // start, the lower id inserted first; the tie goes to run 5.
+    await connection('sync_runs').insert([
+      run(2, '2026-10-27T03:00:00.000Z', '2026-10-27T03:10:00.000Z', 'success'),
+      run(5, '2026-10-27T03:00:00.000Z', '2026-10-27T03:20:00.000Z', 'success'),
+      run(9, '2026-10-27T01:00:00.000Z', '2026-10-27T05:00:00.000Z', 'success'),
+    ])
+
+    expect((await readOverview('all', NOW, connection)).dataAsOf).toBe(
+      '2026-10-27T03:20:00.000Z',
+    )
+  })
 })
 
 describe('readOverview writes nothing', () => {
