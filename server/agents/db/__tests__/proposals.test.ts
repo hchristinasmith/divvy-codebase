@@ -192,6 +192,12 @@ describe('insertProposal', () => {
     ],
     ['reason empty', { reason: '' }, /^reason must not be blank$/],
     ['reason spaces', { reason: '   ' }, /^reason must not be blank$/],
+    ['reason U+3164 only', { reason: 'ㅤ' }, /^reason must not be blank$/],
+    ['reason U+200B only', { reason: '​' }, /^reason must not be blank$/],
+    ['reason U+3164 and spaces', { reason: 'ㅤ ㅤ' }, /^reason must not be blank$/],
+    ['reason tag characters (non-BMP)', { reason: '\u{E0041}\u{E0042}' }, /^reason must not be blank$/],
+    ['reason a variation selector', { reason: '️' }, /^reason must not be blank$/],
+    ['reason U+200B, space, U+3164 and tab', { reason: '​ ㅤ\t' }, /^reason must not be blank$/],
     [
       'origin claude',
       { origin: 'claude' as unknown as NewProposal['origin'] },
@@ -402,13 +408,12 @@ describe('insertProposal', () => {
     expect(await rows()).toEqual([])
   })
 
-  // #330 regression: pins old behaviour; the build replaces this. A reason made
-  // only of invisible characters passes the blank check and is stored.
+  // A reason with visible text keeps its invisible characters as given: the
+  // blank check refuses only a value with nothing visible, and never strips.
   it.each([
-    ['U+3164 only', '\u3164'],
-    ['U+200B only', '\u200b'],
-    ['U+3164 and spaces', '\u3164 \u3164'],
-  ])('stores a reason of %s', async (_, reason) => {
+    ['visible text and U+3164', 'Moved\u3164 twice'],
+    ['one visible character among U+200B', '\u200bx\u200b'],
+  ])('stores a reason of %s byte-for-byte unchanged', async (_, reason) => {
     const txId = await transaction('a')
 
     const result = await insertProposal(proposal(txId, { reason }), NOW)

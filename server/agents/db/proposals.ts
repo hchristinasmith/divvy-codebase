@@ -16,7 +16,8 @@
 // reason carries merchant text. So does a refused write: knex puts the SQL,
 // bound values and all, in its error message, and `scrubbed` rethrows it as
 // SQLite's own words alone. A reason past its length cap is a refused input
-// too, as a title or body_md is in insights.ts. current_category is capped at
+// too, as a title or body_md is in insights.ts, and so is a reason with
+// nothing visible in it. current_category is capped at
 // the column's 255 code points and kept raw, never trimmed or normalised,
 // because the accept route's stale check compares it with transactions.category
 // as stored.
@@ -48,6 +49,15 @@ export type InsertProposalResult =
 const REASON_MAX_LENGTH = 2_000
 const CURRENT_CATEGORY_MAX_LENGTH = 255
 
+// A private copy of insights.ts's notBlank, not an export: a lift is a
+// separate issue. Blank means nothing visible, so whitespace and default-
+// ignorable characters are removed before the test.
+function notBlank(value: unknown, field: string): void {
+  if (typeof value !== 'string' || value.replace(/[\s\p{DI}]/gu, '') === '') {
+    throw new Error(`${field} must not be blank`)
+  }
+}
+
 function atMostLength(value: string, field: string, max: number): void {
   if (Array.from(value).length > max) {
     throw new Error(`${field} must be at most ${max} characters`)
@@ -75,9 +85,7 @@ export async function insertProposal(
   if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
     throw new Error('confidence must be a number from 0 to 1')
   }
-  if (typeof proposal.reason !== 'string' || proposal.reason.trim() === '') {
-    throw new Error('reason must not be blank')
-  }
+  notBlank(proposal.reason, 'reason')
   atMostLength(proposal.reason, 'reason', REASON_MAX_LENGTH)
   if (!(PROPOSAL_ORIGINS as readonly unknown[]).includes(proposal.origin)) {
     throw new Error('origin is not a known proposal origin')

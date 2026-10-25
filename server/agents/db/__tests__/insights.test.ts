@@ -188,6 +188,12 @@ describe('insertInsight', () => {
     ['blank title', { title: '  ' }, /^title must not be blank$/],
     ['blank body_md', { body_md: '' }, /^body_md must not be blank$/],
     ['blank period', { period: '\t' }, /^period must not be blank$/],
+    ['title U+3164 only', { title: 'ㅤ' }, /^title must not be blank$/],
+    ['body_md U+200B only', { body_md: '​' }, /^body_md must not be blank$/],
+    ['period U+3164 and spaces', { period: 'ㅤ ㅤ' }, /^period must not be blank$/],
+    ['title tag characters (non-BMP)', { title: '\u{E0041}\u{E0042}' }, /^title must not be blank$/],
+    ['body_md a variation selector', { body_md: '️' }, /^body_md must not be blank$/],
+    ['period U+200B, space, U+3164 and tab', { period: '​ ㅤ\t' }, /^period must not be blank$/],
   ]
 
   it.each(BAD)('throws on a bad %s, and writes nothing', async (_, fields, message) => {
@@ -258,17 +264,35 @@ describe('insertInsight', () => {
     expect((error as Error).message).not.toContain(sentinel)
   })
 
-  // #330 regression: pins old behaviour; the build replaces this. A title,
-  // body_md or period made only of invisible characters passes the blank check
-  // and is stored.
-  const INVISIBLE_ONLY: [field: 'title' | 'body_md' | 'period', name: string, text: string][] = (
+  // The blank check counts visible characters only: a value made of default-
+  // ignorable characters and whitespace is refused like an empty one.
+  const BLANK_LIKE: [field: 'title' | 'body_md' | 'period', name: string, text: string][] = (
     ['title', 'body_md', 'period'] as const
   ).flatMap((field): [typeof field, string, string][] => [
     [field, 'U+3164', '\u3164'],
     [field, 'U+200B', '\u200b'],
+    [field, 'tag characters (non-BMP)', '\u{E0041}\u{E0042}'],
+    [field, 'a variation selector', '\ufe0f'],
+    [field, 'U+200B, space, U+3164 and tab', '\u200b \u3164\t'],
   ])
 
-  it.each(INVISIBLE_ONLY)('stores a %s made only of %s', async (field, _, text) => {
+  it.each(BLANK_LIKE)('refuses a %s made only of %s, and writes nothing', async (field, _, text) => {
+    await expect(insertInsight(insight({ [field]: text }), NOW)).rejects.toThrow(
+      new RegExp(`^${field} must not be blank$`),
+    )
+    expect(await storedRows()).toEqual([])
+  })
+
+  // Visible text keeps its invisible characters as given: only a value with
+  // nothing visible is refused, and nothing is stripped.
+  const KEPT: [field: 'title' | 'body_md' | 'period', text: string][] = [
+    ['title', 'Moved\u3164 twice'],
+    ['body_md', 'Most\u200b of the week went to **Fixture Bakery**.'],
+    ['period', '2026-W43\u3164'],
+    ['title', '\u200bx\u200b'],
+  ]
+
+  it.each(KEPT)('stores a %s with visible text among invisible characters, unchanged', async (field, text) => {
     const result = await insertInsight(insight({ [field]: text }), NOW)
     expect(result).toStrictEqual({ ok: true, id: expect.any(Number) })
 
