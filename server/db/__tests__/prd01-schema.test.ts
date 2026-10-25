@@ -721,6 +721,126 @@ describe('category_corrections (Done-when 4)', () => {
   })
 })
 
+// Every NOT NULL column of the prd-01 tables and of the prd-01
+// `transactions` columns, bar the `id` primary keys (a rowid alias, filled in
+// when omitted). The first test in 'NOT NULL columns' fails if these lists
+// and the schema disagree in either direction, or if a column moves between
+// them by gaining or losing a default.
+const REQUIRED_COLUMNS: [table: string, column: string][] = [
+  ['accounts', 'name'],
+  ['accounts', 'created_at'],
+  ['accounts', 'updated_at'],
+  ['sync_runs', 'started_at'],
+  ['category_corrections', 'transaction_id'],
+  ['category_corrections', 'to_category'],
+  ['category_corrections', 'corrected_at'],
+  ['category_corrections', 'source'],
+]
+const DEFAULTED_COLUMNS: [table: string, column: string, value: unknown][] = [
+  ['accounts', 'source', 'akahu'],
+  ['accounts', 'scope', 'personal'],
+  ['accounts', 'attributes', '[]'],
+  ['sync_runs', 'outcome', 'running'],
+  ['sync_runs', 'inserted_count', 0],
+  ['sync_runs', 'updated_count', 0],
+  ['sync_runs', 'pending_mirrored_count', 0],
+  ['transactions', 'status', 'settled'],
+  ['transactions', 'source', 'akahu'],
+]
+
+describe('NOT NULL columns (#166)', () => {
+  let settledId: number
+  let n = 0
+
+  beforeEach(async () => {
+    await db.migrate.latest()
+    settledId = (await db('transactions').where({ akahu_id: R2 }).first('id')).id
+  })
+
+  // One valid row per table, setting only the columns that have no default.
+  function validRow(table: string): Row {
+    const rows: Record<string, Row> = {
+      accounts: { akahu_id: `acc_not_null_${++n}`, name: 'Everyday', created_at: AT, updated_at: AT },
+      sync_runs: { started_at: AT },
+      category_corrections: {
+        transaction_id: settledId,
+        to_category: 'Bakeries',
+        corrected_at: AT,
+        source: 'user',
+      },
+      transactions: { akahu_id: `trans_not_null_${++n}`, amount_cents: 1 },
+    }
+    return rows[table]
+  }
+
+  async function count(table: string): Promise<number> {
+    return Number((await db(table).count('* as n').first())?.n)
+  }
+
+  it('lists every NOT NULL column the schema has, split by whether it has a default', async () => {
+    const scope: [table: string, only?: string[]][] = [
+      ['accounts'],
+      ['sync_runs'],
+      ['category_corrections'],
+      ['transactions', NEW_TRANSACTION_COLUMNS],
+    ]
+    const required: string[] = []
+    const defaulted: string[] = []
+    for (const [table, only] of scope) {
+      const info: { name: string; notnull: number; dflt_value: string | null }[] = await db.raw(
+        'PRAGMA table_info(??)',
+        [table],
+      )
+      for (const c of info) {
+        if (!c.notnull || c.name === 'id' || (only && !only.includes(c.name))) continue
+        ;(c.dflt_value === null ? required : defaulted).push(`${table}.${c.name}`)
+      }
+    }
+
+    expect(REQUIRED_COLUMNS.map(([t, c]) => `${t}.${c}`).sort(), 'no default').toEqual(
+      required.sort(),
+    )
+    expect(DEFAULTED_COLUMNS.map(([t, c]) => `${t}.${c}`).sort(), 'with a default').toEqual(
+      defaulted.sort(),
+    )
+  })
+
+  // The refusals come first, so the valid insert after them cannot collide
+  // with one that should have been refused (sync_runs allows one running
+  // row at a time).
+  it.each(REQUIRED_COLUMNS)(
+    '%s.%s refuses NULL, and refuses being left out (no default)',
+    async (table, column) => {
+      const row = validRow(table)
+      const refusal = new RegExp(`NOT NULL constraint failed: ${table}\\.${column}$`)
+      const stored = await count(table)
+
+      await expect(db(table).insert({ ...row, [column]: null }), 'set to null').rejects.toThrow(
+        refusal,
+      )
+      await expect(db(table).insert(omit(row, column)), 'left out').rejects.toThrow(refusal)
+      expect(await count(table)).toBe(stored)
+
+      await expect(db(table).insert(row), 'the valid row').resolves.toBeDefined()
+      expect(await count(table)).toBe(stored + 1)
+    },
+  )
+
+  it.each(DEFAULTED_COLUMNS)(
+    '%s.%s refuses NULL, and takes its default (%j) when left out',
+    async (table, column, value) => {
+      const row = validRow(table)
+
+      await expect(db(table).insert({ ...row, [column]: null }), 'set to null').rejects.toThrow(
+        new RegExp(`NOT NULL constraint failed: ${table}\\.${column}$`),
+      )
+      const [id] = await db(table).insert(omit(row, column))
+
+      expect((await db(table).where({ id }).first())[column]).toBe(value)
+    },
+  )
+})
+
 describe('rollback (Done-when 8)', () => {
   it('removes every new table, index and column without rebuilding transactions', async () => {
     await db.migrate.latest()
