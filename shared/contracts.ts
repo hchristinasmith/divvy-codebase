@@ -137,13 +137,25 @@ export interface SafeToSpendResult {
   /** Seven days after `lastPayday`. */
   nextPayday: IsoDate
   liquidCents: Cents
+  /**
+   * The unpaid bills subtracted from liquid: in-scope bills not paid and due
+   * on or before `nextPayday`, less `strawbBillsBufferCents`, the part the
+   * Strawb tax pot pays (prd-02 Ruling 12).
+   */
   unpaidBillsCents: Cents
   remainingBudgetCents: Cents
   /** `taxRate × profit`, rounded up, before netting the Strawb tax pot. */
   strawbTaxOwedCents: Cents
   /** Balance of the Strawb-scope `tax_pot` accounts. */
   strawbTaxPotCents: Cents
-  /** `max(0, strawbTaxOwedCents − strawbTaxPotCents)`. */
+  /**
+   * The part of the Strawb tax pot set aside for Strawb's unpaid bills:
+   * `max(0, min(strawbTaxPotCents, Strawb unpaid bills))` (prd-02 Ruling 12).
+   * It is not counted as tax set aside, and those bills are not subtracted
+   * from liquid again. 0 when Strawb is not in view.
+   */
+  strawbBillsBufferCents: Cents
+  /** `max(0, strawbTaxOwedCents − (strawbTaxPotCents − strawbBillsBufferCents))`. */
   strawbTaxHoldCents: Cents
   /** The `personal_tax_owed_cents` setting, before netting the personal pot. */
   personalTaxOwedCents: Cents

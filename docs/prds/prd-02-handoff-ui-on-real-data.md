@@ -119,6 +119,11 @@ There is a tax pot per scope, marked by role `tax pot` on an account of that sco
 - Personal scope uses the personal hold; Strawb scope the Strawb hold; All the sum of both.
 Why: Hannah owes substantial personal income tax and is setting a personal account aside for it (2026-10-25); Ruling 2's "0 in Personal" would show that money as owed nowhere. Strawb's whole business account is its tax pot for now, which is a role setting (#30), not a rule. Extends to: the settings panel (#46) gains the owed amount; prd-05's Xero profit feeds only the Strawb hold.
 
+> Amended 2026-10-25 by Ruling 12.
+
+## Ruling 12 — Strawb's bills are paid from the Strawb tax pot first, so that money never counts as tax set aside (operator amendment, 2026-10-25; amends Ruling 11)
+Strawb's business account is both its tax pot and where its bills are paid from. So the Strawb pot is split, automatically, every time safe-to-spend runs: `strawb bills buffer = min(Strawb pot, Strawb unpaid bills)`; the pot counted against tax is `Strawb pot − buffer`, so `Strawb hold = max(0, taxRate × profit − (Strawb pot − buffer))`; and only the part of Strawb's unpaid bills the pot cannot cover, `Strawb unpaid bills − buffer`, is subtracted from liquid. No setting: the buffer follows the bills as they change, are added or are marked paid. Why: Hannah chose the automatic buffer over a fixed amount (2026-10-25); a fixed amount drifts out of date when a bill changes, and counting bill money as tax set aside understates the hold. Extends to: the Strawb and All views; the personal pot and personal bills are unchanged. Total money subtracted is the same as before whenever the pot covers the bills; only which line it sits on moves.
+
 ## Sequencing
 
 Waves are **layers**: issues in a wave are fenced apart and built in parallel; one PR per wave. Where a screen and its route are in the same wave they are built against the typed contract from wave 1 (`shared/contracts.ts`), not against each other. `server/server.ts` is a shared mount point that prd-01 and prd-03 also touch; wave 1 turns it into a route barrel so later edits are one-line and merge trivially.
