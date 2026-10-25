@@ -329,18 +329,18 @@ const SENTINEL = 'not-a-real-secret-sentinel'
 // that. Only the run that expects it never to appear waits briefly.
 const SOCKET_WAIT_SECS = 15
 const NO_SOCKET_WAIT_SECS = 2
-// Above the wait, so a slow socket fails on start.sh's own message, not on
-// spawnSync killing it. A test that runs start.sh twice gets two of these.
-const RUN_TIMEOUT_MS = (SOCKET_WAIT_SECS + 15) * 1000
-// The boot runs get more. On 2026-10-26 the sidecars boot hit RUN_TIMEOUT_MS
-// under load and failed as `expected null to be +0` (#369): spawnSync killed
-// start.sh and returned no status. Measured the same day with the 1-minute
-// load at 130-210 (the suite was not run with extra load), boot runs took
-// 5.3-13.2s, but the failing run took longer than RUN_TIMEOUT_MS, and how
-// much longer is unknown; this doubles the limit it ran past. vitest arms a
-// test's timeout only after a synchronous test returns, so it never ends a
-// spawnSync: this limit is the one that ends a hang.
-const BOOT_RUN_TIMEOUT_MS = 2 * RUN_TIMEOUT_MS
+// How long spawnSync lets one start.sh run go before it kills it, for every
+// runStart call that expects a status (#374). It is derived from the socket
+// wait, so it stays above it: a slow socket fails on start.sh's own message,
+// not on spawnSync killing it. On 2026-10-26 a boot run hit the old limit,
+// (SOCKET_WAIT_SECS + 15) s, under load and failed as `expected null to be +0`
+// (#369): spawnSync killed start.sh and returned no status. That day, boot
+// runs at load 130-210 took 5.3-13.2 s, but the failing run's length is
+// unknown, so this limit doubles the one it ran past. vitest arms a test's
+// timeout only after a synchronous test returns, so it never ends a
+// spawnSync: this limit is the one that ends a hang. The describe block's
+// timeout is still sized for a test that runs start.sh twice.
+const RUN_TIMEOUT_MS = 2 * (SOCKET_WAIT_SECS + 15) * 1000
 const SERVE_OK = '|-- / proxy http://127.0.0.1:3005\n'
 
 // tailscaled is node so it can hold a real unix socket. It is wrapped in sh
@@ -895,7 +895,7 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
     mkdirSync(dirname(db))
     for (const suffix of files) writeFileSync(`${db}${suffix}`, '')
     writeFileSync(join(tmp, 'litestream.yml'), 'dbs: []\n')
-    const run = runStart({ timeoutMs: BOOT_RUN_TIMEOUT_MS })
+    const run = runStart()
 
     expect(run.status).toBe(0)
     expect(run.stderr).not.toContain('ERROR')
