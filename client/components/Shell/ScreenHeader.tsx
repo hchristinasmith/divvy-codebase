@@ -17,7 +17,7 @@ export default function ScreenHeader({
         <span className="font-display text-display-22 font-medium text-deep shell:hidden">
           Divvy
         </span>
-        <h1 className="m-0 font-display text-display-36 font-semibold leading-none tracking-title">
+        <h1 className="m-0 font-display text-display-36 font-semibold leading-none tracking-title text-deep">
           {title}
         </h1>
         {subtitle && (

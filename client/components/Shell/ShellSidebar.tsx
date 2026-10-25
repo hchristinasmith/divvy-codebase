@@ -9,13 +9,29 @@ export default function ShellSidebar() {
   const alertCount = useAlertCount()
   return (
     <aside className="sticky top-0 hidden h-screen w-56 flex-none flex-col gap-7 border-r border-line px-4 py-7 shell:flex">
-      <div className="flex flex-col gap-px px-2">
-        <span className="font-display text-display-22 font-semibold leading-none tracking-wordmark">
-          DIVVY
-        </span>
-        <span className="text-[10px] font-semibold uppercase tracking-tagline text-deep">
-          Hold the reins
-        </span>
+      {/* The update 2 wordmark (prd-02 Ruling 13): two lines spread to the
+          same 104px, letter by letter and word by word. Spread like that a
+          screen reader would spell it out, so it is one image named in
+          words. */}
+      <div className="flex items-center px-2">
+        <div
+          role="img"
+          aria-label="Divvy, hold the reins"
+          className="flex w-[104px] flex-col gap-0.5 text-deep"
+        >
+          <span className="flex justify-between font-display text-display-22 font-semibold leading-none">
+            <span>D</span>
+            <span>I</span>
+            <span>V</span>
+            <span>V</span>
+            <span>Y</span>
+          </span>
+          <span className="flex justify-between whitespace-nowrap text-[10px] font-semibold uppercase tracking-tagline">
+            <span>Hold</span>
+            <span>the</span>
+            <span>reins</span>
+          </span>
+        </div>
       </div>
       <nav aria-label="Primary" className="flex flex-col gap-0.5">
         {sidebarItems.map((item) => (
@@ -28,7 +44,7 @@ export default function ShellSidebar() {
           />
         ))}
       </nav>
-      <div className="mt-auto flex flex-col gap-1.5 rounded-tile bg-blush p-3.5">
+      <div className="mt-auto flex flex-col gap-1.5 rounded-tile bg-blush p-3.5 shadow-tile">
         <div className="flex items-center gap-2 text-body-12 font-semibold text-rose">
           <span className="h-2 w-2 rounded-full bg-ok" />
           Self-hosted

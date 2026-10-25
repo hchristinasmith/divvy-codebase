@@ -23,7 +23,7 @@ export default function NavItem({
       to={to}
       className={({ isActive }) =>
         clsx(
-          'flex items-center gap-2.5 rounded-button px-2.5 py-2 text-left text-body-14 font-medium hover:bg-blush',
+          'flex items-center gap-2.5 rounded-nav px-2.5 py-2 text-left text-body-14 font-medium hover:bg-blush',
           isActive ? 'bg-surface text-deep' : 'text-ink',
         )
       }

@@ -69,6 +69,13 @@ describe('the desktop sidebar', () => {
     expect(current).toEqual(['Budgets'])
   })
 
+  it('rounds every nav row at the 12px nav radius (update 2)', () => {
+    renderWithProviders(<ShellSidebar />)
+    for (const link of links()) {
+      expect(link.classList.contains('rounded-nav')).toBe(true)
+    }
+  })
+
   it('shows the open-alert count beside Overview', () => {
     alerts.count = 3
     renderWithProviders(<ShellSidebar />)
@@ -89,6 +96,55 @@ describe('the desktop sidebar', () => {
     // The handoff's "Nothing leaves it." is untrue once the advisor reads
     // data through Claude (D3).
     expect(screen.queryByText(/Nothing leaves it/)).toBeNull()
+  })
+
+  it('sits the Self-hosted card on an offset, with no border (update 2)', () => {
+    renderWithProviders(<ShellSidebar />)
+    const card = screen.getByText('Self-hosted').parentElement
+    expect(card?.classList.contains('shadow-tile')).toBe(true)
+    expect(card?.classList.contains('rounded-tile')).toBe(true)
+    expect(
+      [...(card?.classList ?? [])].filter((c) => c.startsWith('border')),
+    ).toEqual([])
+  })
+
+  it('shows the two-line wordmark, named in words rather than letters', () => {
+    renderWithProviders(<ShellSidebar />)
+    const mark = screen.getByRole('img', { name: 'Divvy, hold the reins' })
+    expect(mark.children).toHaveLength(2)
+    const [letters, tagline] = [...mark.children]
+    expect([...letters.children].map((c) => c.textContent)).toEqual([
+      'D',
+      'I',
+      'V',
+      'V',
+      'Y',
+    ])
+    expect([...tagline.children].map((c) => c.textContent)).toEqual([
+      'Hold',
+      'the',
+      'reins',
+    ])
+    // Both lines spread across the same 104px block, in --dv-deep.
+    for (const cls of ['w-[104px]', 'text-deep']) {
+      expect(mark.classList.contains(cls)).toBe(true)
+    }
+    for (const line of [letters, tagline]) {
+      expect(line.classList.contains('flex')).toBe(true)
+      expect(line.classList.contains('justify-between')).toBe(true)
+    }
+    for (const cls of ['font-display', 'text-display-22', 'font-semibold']) {
+      expect(letters.classList.contains(cls)).toBe(true)
+    }
+    for (const cls of [
+      'text-[10px]',
+      'font-semibold',
+      'uppercase',
+      'tracking-tagline',
+      'whitespace-nowrap',
+    ]) {
+      expect(tagline.classList.contains(cls)).toBe(true)
+    }
   })
 
   it('is hidden under 720px', () => {

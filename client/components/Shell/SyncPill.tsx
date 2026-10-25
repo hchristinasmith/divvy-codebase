@@ -10,7 +10,7 @@ export default function SyncPill() {
   return (
     <span
       data-sync-state={state}
-      className="flex items-center gap-2 rounded-pill border border-line bg-surface px-3.5 py-2 text-body-13 text-ink"
+      className="flex items-center gap-2 rounded-pill bg-surface px-3.5 py-2 text-body-13 text-ink shadow-pill"
     >
       <span
         className={clsx(

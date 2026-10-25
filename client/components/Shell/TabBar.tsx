@@ -18,7 +18,7 @@ export default function TabBar() {
           to={item.path}
           className={({ isActive }) =>
             clsx(
-              'flex min-h-[44px] flex-1 flex-col items-center gap-1 rounded-button px-1 py-1.5 text-body-11 font-semibold',
+              'flex min-h-[44px] flex-1 flex-col items-center gap-1 rounded-nav px-1 py-1.5 text-body-11 font-semibold',
               isActive ? 'text-deep' : 'text-ink',
             )
           }

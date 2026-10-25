@@ -172,6 +172,16 @@ describe('the sync pill', () => {
     }
   })
 
+  it('is a 6px pill on an offset, with no border (update 2)', () => {
+    stubFetch(pendingFetch)
+    renderWithProviders(<SyncPill />)
+    expect(pill().classList.contains('rounded-pill')).toBe(true)
+    expect(pill().classList.contains('shadow-pill')).toBe(true)
+    expect([...pill().classList].filter((c) => c.startsWith('border'))).toEqual(
+      [],
+    )
+  })
+
   it('is a status, not a way to reach Sync (#33 is open)', () => {
     stubFetch(pendingFetch)
     renderWithProviders(<SyncPill />)
