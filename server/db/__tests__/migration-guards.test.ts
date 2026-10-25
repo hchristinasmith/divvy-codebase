@@ -33,6 +33,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import knex, { Knex } from 'knex'
 import config from '../knexfile.js'
 import { migrateThrough, migrateToJustBefore } from './migrateToJustBefore.ts'
+import { sequence } from './schemaInfo.ts'
 
 const AT = '2026-10-25T03:00:00.000Z'
 
@@ -215,11 +216,10 @@ async function survivors(db: Knex, guard: Guard, parentId: number): Promise<Surv
       children[child.table] = await db(child.table).orderBy('id')
     }
   }
-  const seq = await db('sqlite_sequence').where({ name: guard.parent }).first('seq')
   return {
     children,
     parentIds: await db(guard.parent).where({ id: parentId }).pluck('id'),
-    parentSequence: seq?.seq,
+    parentSequence: await sequence(db, guard.parent),
   }
 }
 

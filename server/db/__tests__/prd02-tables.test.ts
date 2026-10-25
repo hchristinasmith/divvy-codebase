@@ -7,6 +7,7 @@ import knex, { Knex } from 'knex'
 import config from '../knexfile.js'
 import { migrateToJustBefore } from './migrateToJustBefore.ts'
 import { omit } from './omit.ts'
+import { columns, count, notNullColumns, sequence } from './schemaInfo.ts'
 import type { AccountRole } from '../../../shared/contracts.ts'
 import type { AccountScope } from '../../../models/sync.ts'
 import type {
@@ -128,11 +129,6 @@ type Row = Record<string, unknown>
 
 let db: Knex
 
-async function columns(table: string): Promise<string[]> {
-  const info: { name: string }[] = await db.raw('PRAGMA table_info(??)', [table])
-  return info.map((c) => c.name)
-}
-
 async function columnTypes(table: string): Promise<Record<string, string>> {
   const info: { name: string; type: string; notnull: number }[] = await db.raw(
     'PRAGMA table_info(??)',
@@ -143,32 +139,13 @@ async function columnTypes(table: string): Promise<Record<string, string>> {
   )
 }
 
-// `table.column` for every NOT NULL column SQLite reports, bar the `id`
-// primary keys (a rowid alias, filled in when omitted).
-async function notNullColumns(table: string): Promise<string[]> {
-  const info: { name: string; notnull: number }[] = await db.raw('PRAGMA table_info(??)', [
-    table,
-  ])
-  return info.filter((c) => c.notnull && c.name !== 'id').map((c) => `${table}.${c.name}`)
-}
-
 async function tables(): Promise<string[]> {
   return db('sqlite_master').where({ type: 'table' }).orderBy('name').pluck('name')
-}
-
-async function sequence(table: string): Promise<number | undefined> {
-  const row = await db('sqlite_sequence').where({ name: table }).first('seq')
-  return row?.seq
 }
 
 async function applied(): Promise<string[]> {
   const [completed] = (await db.migrate.list()) as [{ name: string }[], unknown]
   return completed.map((m) => m.name)
-}
-
-async function count(table: string): Promise<number> {
-  const row = await db(table).count('* as n').first()
-  return Number(row?.n)
 }
 
 // What SQLite says `targets` is, as PRAGMA output rather than raw SQL, which
@@ -342,10 +319,10 @@ beforeEach(async () => {
 
   tablesBefore = await tables()
   targetsBefore = await targetsShape()
-  targetsSequenceBefore = await sequence('targets')
+  targetsSequenceBefore = await sequence(db, 'targets')
   correctionsBefore = await db('category_corrections').orderBy('id')
   transactionsBefore = await db('transactions').orderBy('id')
-  transactionsSequenceBefore = await sequence('transactions')
+  transactionsSequenceBefore = await sequence(db, 'transactions')
 
   await db.migrate.latest()
 })
@@ -366,7 +343,7 @@ describe('schema (Done-when 1, 4)', () => {
   })
 
   it.each(TABLE_KEYS)("%s has exactly its row type's columns", async (table, keys) => {
-    expect((await columns(table)).sort()).toEqual(Object.keys(keys).sort())
+    expect((await columns(db, table)).sort()).toEqual(Object.keys(keys).sort())
   })
 
   it('makes every *_cents column INTEGER, and no new column decimal, float, real or numeric', async () => {
@@ -384,14 +361,16 @@ describe('schema (Done-when 1, 4)', () => {
   })
 
   it('gives goals no stored saved or balance column', async () => {
-    expect((await columns('goals')).filter((c) => /saved|balance/.test(c))).toEqual([])
+    expect((await columns(db, 'goals')).filter((c) => /saved|balance/.test(c))).toEqual([])
   })
 })
 
 describe('NOT NULL columns', () => {
   it('lists every NOT NULL column the schema has, and no other', async () => {
     const actual: string[] = []
-    for (const table of NEW_TABLES) actual.push(...(await notNullColumns(table)))
+    for (const table of NEW_TABLES) {
+      actual.push(...(await notNullColumns(db, table)).map((c) => `${table}.${c.name}`))
+    }
 
     expect(NOT_NULL_COLUMNS.map(([table, column]) => `${table}.${column}`).sort()).toEqual(
       actual.sort(),
@@ -405,13 +384,13 @@ describe('NOT NULL columns', () => {
       const refusal = new RegExp(`NOT NULL constraint failed: ${table}\\.${column}$`)
 
       await expect(db(table).insert(row), 'the valid row').resolves.toBeDefined()
-      const stored = await count(table)
+      const stored = await count(db, table)
 
       await expect(db(table).insert({ ...row, [column]: null }), 'set to null').rejects.toThrow(
         refusal,
       )
       await expect(db(table).insert(omit(row, column)), 'left out').rejects.toThrow(refusal)
-      expect(await count(table)).toBe(stored)
+      expect(await count(db, table)).toBe(stored)
     },
   )
 })
@@ -476,7 +455,7 @@ describe('budgets (Rulings 6, 9)', () => {
     await db('budgets').insert(budget({ scope: 'personal' }))
     await db('budgets').insert(budget({ scope: 'strawb' }))
 
-    expect(await count('budgets')).toBe(2)
+    expect(await count(db, 'budgets')).toBe(2)
   })
 
   it('stores no note as NULL, whether null or left out', async () => {
@@ -524,7 +503,7 @@ describe('bills (#35 option C)', () => {
         /NOT NULL constraint failed: bills.repeat/,
       )
     }
-    expect(await count('bills')).toBe(0)
+    expect(await count(db, 'bills')).toBe(0)
   })
 
   it('refuses a zero, negative or fractional amount', async () => {
@@ -696,7 +675,7 @@ describe('bill_payments (#35 option C, Done-when 4)', () => {
     await expect(
       db('bill_payments').insert(payment({ bill_id: billId, paid_at: null })),
     ).rejects.toThrow(/NOT NULL constraint failed: bill_payments.paid_at/)
-    expect(await count('bill_payments')).toBe(0)
+    expect(await count(db, 'bill_payments')).toBe(0)
   })
 })
 
@@ -739,7 +718,7 @@ describe('goals and goal_contributions (Ruling 5, Done-when 4)', () => {
         String(target_date),
       ).rejects.toThrow(/CHECK constraint failed: goals_target_date_is_date/)
     }
-    expect(await count('goals')).toBe(0)
+    expect(await count(db, 'goals')).toBe(0)
   })
 
   it('records a contribution above zero, with a time, and refuses anything less', async () => {
@@ -869,7 +848,7 @@ describe('account_settings (Rulings 2, 10, 11)', () => {
     await expect(db('account_settings').insert(setting({}))).rejects.toThrow(
       /NOT NULL constraint failed: account_settings.account_id/,
     )
-    expect(await count('account_settings')).toBe(0)
+    expect(await count(db, 'account_settings')).toBe(0)
   })
 
   it('refuses a role for an account that does not exist', async () => {
@@ -952,8 +931,8 @@ describe('targets and rollback (Ruling 6, Done-when 2)', () => {
         .orWhere({ name: 'targets_user_id_category_period_unique' })
         .pluck('name'),
     ).toEqual([])
-    expect(await sequence('targets')).toBeUndefined()
-    expect(await count('budgets')).toBe(0)
+    expect(await sequence(db, 'targets')).toBeUndefined()
+    expect(await count(db, 'budgets')).toBe(0)
   })
 
   it('leaves category corrections and transactions, and their sequence, untouched', async () => {
@@ -961,7 +940,7 @@ describe('targets and rollback (Ruling 6, Done-when 2)', () => {
 
     expect(await db('category_corrections').orderBy('id')).toStrictEqual(correctionsBefore)
     expect(await db('transactions').orderBy('id')).toStrictEqual(transactionsBefore)
-    expect(await sequence('transactions')).toBe(transactionsSequenceBefore)
+    expect(await sequence(db, 'transactions')).toBe(transactionsSequenceBefore)
   })
 
   it('rolls back with every new table populated, and restores targets exactly, empty and usable', async () => {
@@ -973,7 +952,7 @@ describe('targets and rollback (Ruling 6, Done-when 2)', () => {
     await db('goal_contributions').insert(contribution({ goal_id: goalId }))
     await db('account_settings').insert({ account_id: accountId, role: 'current', updated_at: AT })
     await db('alert_dismissals').insert({ alert_id: 'over_budget:1', dismissed_at: AT })
-    for (const table of NEW_TABLES) expect(await count(table), table).toBe(1)
+    for (const table of NEW_TABLES) expect(await count(db, table), table).toBe(1)
 
     while ((await applied()).includes(OURS)) await db.migrate.down()
 
@@ -987,7 +966,7 @@ describe('targets and rollback (Ruling 6, Done-when 2)', () => {
     expect(await tables()).toEqual(tablesBefore)
 
     expect(await targetsShape()).toStrictEqual(targetsBefore)
-    expect(await count('targets')).toBe(0)
+    expect(await count(db, 'targets')).toBe(0)
     await db('targets').insert({
       user_id: 1,
       category: 'Food',

@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import express from 'express'
+import type { NextFunction, Request, Response } from 'express'
 import * as Path from 'node:path'
 import * as URL from 'node:url'
 import 'dotenv/config'
@@ -36,5 +37,32 @@ server.get('*', (req, res, next) => {
     if (err && !res.headersSent) next()
   })
 })
+
+// An error on an /api path is fixed-text JSON (#177). express.json() throws
+// on a malformed body before any router runs, and Express's default handler
+// answers with an HTML page carrying the stack and absolute paths outside
+// production. The response never carries the error's message, stack or
+// fields; a body-parser error holds the raw request text in `err.body`, so
+// only the stack of a 500 is logged, never the error object. Other paths
+// keep Express's default handling.
+server.use(
+  '/api',
+  (err: unknown, req: Request, res: Response, next: NextFunction) => {
+    if (res.headersSent) return next(err)
+    const type =
+      typeof err === 'object' && err !== null && 'type' in err
+        ? err.type
+        : undefined
+    if (type === 'entity.parse.failed') {
+      res.status(400).json({ error: 'Bad request' })
+      return
+    }
+    console.error(
+      'Unhandled /api error:',
+      err instanceof Error ? err.stack : typeof err,
+    )
+    res.status(500).json({ error: 'Internal server error' })
+  },
+)
 
 export default server
