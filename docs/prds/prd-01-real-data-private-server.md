@@ -80,6 +80,8 @@ Items 1–4 and 7 are proven by tests (the code does what is written). Items 5�
 ## Ruling 1 — Settled transactions are keyed by Akahu's own id, pending ones are a replaced mirror
 Settled rows upsert on `transactions.akahu_id` (`ON CONFLICT ... DO UPDATE`). Pending rows carry `status='pending'` and are deleted-and-reinserted per account inside the same database transaction that upserts settled rows. Why: a pending item has no stable settled identity until it settles, so inventing a key for it is how duplicates and phantom rows appear; replacing the mirror makes cancelled items vanish with no special case. Extends to: nothing else may delete settled rows. Whether Akahu's pending items carry any id is **unverified from memory** and is the first thing wave 1 checks against Akahu's docs and a real response.
 
+*Implementation note 2026-10-25 (#21):* the pending replace is one `DELETE` of every `status='pending' AND source='akahu'` row, then an insert of the fetched list, rather than a delete per account. Akahu returns pending items for all accounts in one list, so the result is the same set, and pending rows of an account Akahu no longer lists are cleared too. It is the only delete in `server/sync/`, and it cannot reach a settled row.
+
 ## Ruling 2 — Sync re-reads an overlap window, not "since last run"
 Each run fetches back a fixed window (30 days) and upserts, rather than a cursor from the last run's end. Why: settled transactions can be amended or appear late, and a cursor silently misses them; idempotency (Ruling 1) is what makes the overlap free. First run backfills as far back as Akahu allows.
 
@@ -96,6 +98,8 @@ Every Akahu transaction is stored in full. `akahu_category_*` (id, name, group i
 
 ## Ruling 6 — The scheduler lives in the web process, one machine, one run at a time
 `setInterval` plus a guard against overlap, backed by an "in progress" row in `sync_runs`; exactly one Fly machine is ever run. This closes audit decision 7 (job runner) for now. Why: one user, one machine, a separate worker is a second thing to deploy and monitor. Revisit if the sync ever blocks request handling.
+
+*Implementation note 2026-10-25 (#21):* `runSync` does its own claiming and recovery. A `running` row younger than 30 minutes makes the run return `skipped` having written nothing; an older one is closed as `failed` with a fixed message at claim time, on every run, not only at boot. Wave 3 does not need a boot-time cleanup step for stale rows.
 
 ## Ruling 7 — No public surface, ever, in this PRD
 `fly.toml` has no `[http_service]` or public ports and the app gets no public IP; Tailscale runs inside the machine and serves the app (and the TLS certificate web push will need later, D5). No server-side auth is added (D4); the tailnet ACL is the access control.
