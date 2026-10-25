@@ -270,6 +270,40 @@ describe('insertProposal', () => {
     expect((error as Error).message).not.toContain(SENTINEL)
     expect(await rows()).toEqual([])
   })
+
+  // The cap counts the reason as given: a space is a code point, so the reason
+  // is not trimmed before it is counted (#313).
+  it.each([
+    ['a trailing space', 'a'.repeat(2_000) + ' '],
+    ['a leading space', ' ' + 'a'.repeat(2_000)],
+  ])(
+    'refuses 2,000 non-space code points with %s, counting the space, and writes nothing',
+    async (_, reason) => {
+      const txId = await transaction('a')
+      expect(Array.from(reason)).toHaveLength(2_001)
+
+      const error = await insertProposal(proposal(txId, { reason }), NOW).then(
+        () => new Error('expected a refusal'),
+        (e: unknown) => e,
+      )
+      expect((error as Error).message).toBe('reason must be at most 2000 characters')
+      expect(await rows()).toEqual([])
+    },
+  )
+
+  // The cap counts the reason as given, in raw code points, not after NFKC, and
+  // the stored reason is not normalised either (#313). U+FDFA is one code point
+  // that NFKC expands to 18, so 200 of them are 200 raw and 3,600 after NFKC.
+  it('counts the cap on the raw code points as given, not after NFKC: 200 U+FDFA is accepted and stored unchanged', async () => {
+    const txId = await transaction('a')
+    const reason = 'ﷺ'.repeat(200)
+    expect(Array.from(reason)).toHaveLength(200)
+    expect(Array.from(reason.normalize('NFKC'))).toHaveLength(3_600)
+
+    const result = await insertProposal(proposal(txId, { reason }), NOW)
+    expect(result).toStrictEqual({ inserted: true, id: expect.any(Number) })
+    expect((await rows())[0].reason).toBe(reason)
+  })
 })
 
 describe('setStatus', () => {
