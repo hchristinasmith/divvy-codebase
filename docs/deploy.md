@@ -6,18 +6,37 @@ The operator runbook for the first deploy (prd-01 w4) and every one after it. Ev
 
 - One machine, Fly app `divvy-strawb`, region `syd` (D1; prd-01 Ruling 6).
 - The volume `divvy_data`, mounted at `/data`. It holds the database (`/data/divvy.sqlite3`) and Tailscale's state (`/data/tailscale`), so a restart keeps the same tailnet node.
-- No public IP and no Fly service (prd-01 Ruling 7; D4). The only way in is the tailnet.
-- The server binds `127.0.0.1:3005`. `tailscale serve`, in the same machine, proxies the tailnet to it. `fly proxy` and the rest of Fly's private network cannot reach the app, by design.
-- In userspace networking mode, `tailscaled` forwards a tailnet connection on *any* port to the same port on loopback. So the tailnet policy, not the bind address, is what keeps `http://divvy:3005` (plain HTTP, no TLS) closed: it must allow only port 443 (section 2, checked in section 8).
+- No public IP and no Fly service (prd-01 Ruling 7; D4), so Fly's proxy routes nothing from the internet to the machine.
+- The server binds `127.0.0.1:3005`, and `start.sh` refuses to boot with `HOST` set to anything else. That bind is what keeps `fly proxy` and the rest of Fly's private network from reaching the app. `tailscale serve`, in the same machine, proxies the tailnet to it.
+- In userspace networking mode, `tailscaled` forwards a tailnet connection on *any* port to the same port on loopback. So the bind does nothing against tailnet peers: the tailnet policy is what decides which devices reach the app and on which port. Without the section 2 policy, every device on the tailnet reaches `http://divvy:3005` (plain HTTP, no TLS) as well as 443 (checked in section 8).
 
-The image's CMD is `scripts/start.sh`. It refuses to start without `TS_AUTHKEY`, or with `HOST` set to anything but `127.0.0.1`, starts `tailscaled` in userspace networking mode, joins the tailnet, publishes the app with `tailscale serve`, checks that the serve config proxies to the app with Funnel off, and only then runs `npm start` (migrations, then the server). If any tailnet step fails, the app never starts.
+The image's CMD is `scripts/start.sh`. It refuses to start without `TS_AUTHKEY`, or with `HOST` set to anything but `127.0.0.1`, starts `tailscaled` in userspace networking mode with none of the app's environment (only `PATH`), joins the tailnet, publishes the app with `tailscale serve`, checks that the serve config proxies to the app with Funnel off, and only then runs `npm start` (migrations, then the server). If any tailnet step fails, the app never starts.
 
 ## 2. Prerequisites
 
 - The Fly app exists: `fly apps list` shows `divvy-strawb`.
 - The volume exists in `syd`: `fly volumes list -a divvy-strawb` shows `divvy_data`.
 - On the tailnet admin console's DNS page, **MagicDNS** is on and **HTTPS certificates** are enabled. `tailscale serve --https=443` needs both.
-- The tailnet policy file has a `tagOwners` entry for `tag:divvy`, and an access rule letting your own devices reach `tag:divvy:443`. That must be the only rule that reaches `tag:divvy`: the default allow-all rule (`"dst": ["*:*"]`) also opens `tag:divvy:3005` (section 1).
+- The tailnet policy file (admin console, Access controls) contains this, with the placeholders filled in. It is mandatory, not a suggestion: the loopback bind does not limit tailnet peers (section 1).
+
+  ```json
+  {
+    "tagOwners": {
+      "tag:divvy": ["<your login>"]
+    },
+    "acls": [
+      {
+        "action": "accept",
+        "src": ["<your login, or your own devices>"],
+        "dst": ["tag:divvy:443"]
+      }
+    ]
+  }
+  ```
+
+  - This rule **replaces** the default `{"action": "accept", "src": ["*"], "dst": ["*:*"]}` rule; delete that one. Left in, it opens every port on `tag:divvy` (`3005` included) to every device. If the file uses `grants` instead of `acls`, an allow-all grant (`"src": ["*"]`, `"dst": ["*"]`) does the same and must go too. Deleting it also ends open access between your other devices; if you rely on that, add a rule with your own login on both sides (`"dst": ["<your login>:*"]`), which does not reach `tag:divvy` because a tagged node belongs to no user.
+  - There must be no rule with `tag:divvy` in its `src`, so the node cannot dial out to the rest of the tailnet.
+  - There must be no `nodeAttrs` entry granting `funnel` to `tag:divvy`. (`start.sh` also refuses to start the app if `serve status` shows Funnel on.)
 
 ## 3. The auth key
 
@@ -27,8 +46,15 @@ Generate one key in the admin console (Settings, Keys) with these options:
 - **Reusable**, because a lost volume loses `/data/tailscale` and the machine must be able to register again.
 - **Not ephemeral**, because a restart or a deploy gap must not delete the node and its name.
 - **Pre-approved**, if device approval is on for the tailnet.
+- **The shortest expiry that fits.** Auth keys expire; the admin console allows up to 90 days. The key is needed only for the first registration, or again after a lost volume, so it does not need to outlive the deploy you are about to do by much.
 
-The key is a standing credential, held only as a Fly secret. Never paste it into a file, an issue or a chat. Do not revoke it until a `fly machine restart -a divvy-strawb` has been seen to bring the node back. Whether a revoked or expired reusable key still lets a machine reboot with its state intact is unverified; record what you see here.
+The key is a standing credential, held only as a Fly secret. Never paste it into a file, an issue or a chat. Short of a leak, do not revoke it until a `fly machine restart -a divvy-strawb` has been seen to bring the node back. Whether a revoked or expired reusable key still lets a machine reboot with its state intact is unverified; record what you see here.
+
+**If the secret leaks.** Whoever holds the key can register more `tag:divvy` nodes, because it is reusable and pre-approved. Under the section 2 policy those nodes reach nothing: `tag:divvy` is on the `src` side of no rule. Under the default allow-all policy they reach every device on the tailnet. On a suspected leak:
+
+1. Revoke the key in the admin console (Settings, Keys).
+2. Delete every `tag:divvy` node you did not register (Machines page). A tagged node has no key expiry, so revoking the key does not remove nodes already registered with it.
+3. Generate a new key with the options above, and set it again with `fly secrets set` (section 4).
 
 ## 4. Set the secret
 
@@ -81,6 +107,8 @@ fly ssh console -a divvy-strawb -C "tailscale --socket=/var/run/tailscale/tailsc
 
 Open `https://divvy.<tailnet>.ts.net` from the phone and the laptop, with `<tailnet>` taken from the admin console's DNS page. The first request is slow while the certificate is issued.
 
+Once the certificate is issued, the name `divvy.<tailnet>.ts.net` appears in public Certificate Transparency logs. The name is public from then on; the app behind it is not.
+
 If a stale node named `divvy` already exists on the tailnet (from an earlier attempt), delete it in the admin console first, or the new node registers as `divvy-1`.
 
 ## 8. Prove nothing else answers (prd-01 Done-when 5)
@@ -88,7 +116,8 @@ If a stale node named `divvy` already exists on the tailnet (from an earlier att
 - From a device off the tailnet (the phone on cellular with Tailscale switched off): `https://divvy-strawb.fly.dev` gets no answer.
 - `dig +short divvy-strawb.fly.dev` prints nothing.
 - From that same device, the `.ts.net` name does not load either.
-- From a device on the tailnet: `curl -m 5 http://divvy:3005/` fails to connect, because the policy allows only 443. If it answers, fix the policy (section 2).
+- From a device the section 2 policy allows: `https://divvy.<tailnet>.ts.net` loads.
+- From that same device: `curl -m 5 http://divvy:3005/` fails to connect, because the policy allows only 443. If it answers, fix the policy (section 2).
 
 ## 9. Facts to record for the prd-03 spike
 

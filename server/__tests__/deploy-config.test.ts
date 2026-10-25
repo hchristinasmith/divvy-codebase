@@ -179,23 +179,37 @@ describe('scripts/start.sh and docs/deploy.md, as files', () => {
 // ---- start.sh, run against fake binaries ----
 
 const SENTINEL = 'not-a-real-secret-sentinel'
+// How long start.sh waits for the tailscaled socket. The fake is node, which
+// took up to 1.7s to create it on a loaded machine (measured 2026-10-25; a 2s
+// wait flaked), so every run that expects the socket gets a wait far above
+// that. Only the run that expects it never to appear waits briefly.
+const SOCKET_WAIT_SECS = 15
+const NO_SOCKET_WAIT_SECS = 2
+// Above the wait, so a slow socket fails on start.sh's own message, not on
+// spawnSync killing it. A test that runs start.sh twice gets two of these.
+const RUN_TIMEOUT_MS = (SOCKET_WAIT_SECS + 15) * 1000
 const SERVE_OK = '|-- / proxy http://127.0.0.1:3005\n'
 
 // tailscaled is node so it can hold a real unix socket. It is wrapped in sh
 // that redirects its stdio before exec'ing node: start.sh backgrounds it, and a
 // child that kept start.sh's stdout/stderr pipes would make spawnSync wait
-// for it to exit. It logs before listening, so a test can see it ran even
-// when it then fails.
+// for it to exit. The wrapper, not node, records the call and the pid (exec
+// keeps it), so both exist as soon as start.sh has launched it: node can take
+// seconds to start on a loaded machine, and a test that gives up waiting must
+// still see that tailscaled ran, and still be able to kill it. start.sh runs
+// it under `env -i`, so it takes its directory from its own path and its
+// failure mode from a file in that directory, never from the environment; the
+// wrapper names node and the script by absolute path, so it needs nothing
+// from PATH either.
 const FAKE_TAILSCALED_JS = `
 const fs = require('node:fs')
 const net = require('node:net')
-const dir = process.env.FAKE_DIR
-fs.appendFileSync(dir + '/calls.log', ['tailscaled', ...process.argv.slice(2)].join(' ') + '\\n')
+const dir = __dirname
+const mode = (name) => fs.existsSync(dir + '/tailscaled.' + name)
 fs.writeFileSync(dir + '/tailscaled.env', Object.entries(process.env).map(([k, v]) => k + '=' + v).join('\\n'))
-fs.writeFileSync(dir + '/tailscaled.pid', String(process.pid))
-if (process.env.FAKE_TAILSCALED_FAIL === '1') process.exit(1)
+if (mode('fail')) process.exit(1)
 const socket = process.argv.find((a) => a.startsWith('--socket='))
-if (process.env.FAKE_TAILSCALED_NO_SOCKET !== '1' && socket) {
+if (!mode('no-socket') && socket) {
   net.createServer().listen(socket.slice('--socket='.length))
 }
 setTimeout(() => process.exit(0), 30000)
@@ -249,7 +263,13 @@ beforeEach(() => {
   writeFileSync(join(fakeDir, 'tailscaled.cjs'), FAKE_TAILSCALED_JS)
   writeExecutable(
     join(fakeDir, 'tailscaled'),
-    `#!/bin/sh\nexec "${process.execPath}" "$FAKE_DIR/tailscaled.cjs" "$@" >>"$FAKE_DIR/tailscaled.out" 2>&1 </dev/null\n`,
+    [
+      '#!/bin/sh',
+      `echo "tailscaled $*" >>"${fakeDir}/calls.log"`,
+      `echo "$$" >"${fakeDir}/tailscaled.pid"`,
+      `exec "${process.execPath}" "${fakeDir}/tailscaled.cjs" "$@" >>"${fakeDir}/tailscaled.out" 2>&1 </dev/null`,
+      '',
+    ].join('\n'),
   )
   writeExecutable(join(fakeDir, 'tailscale'), FAKE_TAILSCALE)
   writeExecutable(join(fakeDir, 'timeout'), FAKE_TIMEOUT)
@@ -282,6 +302,7 @@ interface RunOptions {
   authkey?: string | null
   env?: Record<string, string>
   serveStatus?: string
+  tailscaled?: 'fail' | 'no-socket'
 }
 
 // The environment is built from scratch so nothing from the developer's shell
@@ -290,22 +311,25 @@ function runStart({
   authkey = SENTINEL,
   env = {},
   serveStatus,
+  tailscaled,
 }: RunOptions = {}): Run {
   if (serveStatus !== undefined)
     writeFileSync(join(fakeDir, 'serve-status'), serveStatus)
+  if (tailscaled !== undefined)
+    writeFileSync(join(fakeDir, `tailscaled.${tailscaled}`), '')
   const base: Record<string, string> = {
     PATH: `${fakeDir}:${process.env.PATH ?? '/usr/bin:/bin'}`,
     FAKE_DIR: fakeDir,
     TS_STATE_DIR: join(tmp, 'state'),
     TS_SOCKET: join(tmp, 's', 'ts.sock'),
-    TS_WAIT_SECS: '2',
+    TS_WAIT_SECS: String(SOCKET_WAIT_SECS),
     LITESTREAM_CONFIG: join(tmp, 'litestream.yml'),
   }
   if (authkey !== null) base.TS_AUTHKEY = authkey
   const result = spawnSync('sh', [startScript], {
     env: { ...base, ...env },
     encoding: 'utf8',
-    timeout: 20000,
+    timeout: RUN_TIMEOUT_MS,
   })
   const log = join(fakeDir, 'calls.log')
   return {
@@ -326,7 +350,7 @@ const dump = (name: string): string => {
   return existsSync(path) ? readFileSync(path, 'utf8') : ''
 }
 
-describe('scripts/start.sh, run', { timeout: 20000 }, () => {
+describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () => {
   it.each([
     ['unset', null],
     ['empty', ''],
@@ -441,27 +465,30 @@ describe('scripts/start.sh, run', { timeout: 20000 }, () => {
     },
   )
 
-  it.each([
+  it.each<[string, RunOptions, string, string]>([
     [
       'tailscale up fails',
-      { FAKE_UP_EXIT: '1' },
+      { env: { FAKE_UP_EXIT: '1' } },
       'serve',
       'tailscale up failed',
     ],
     [
       'tailscaled exits at once',
-      { FAKE_TAILSCALED_FAIL: '1' },
+      { tailscaled: 'fail' },
       'up',
       'tailscaled exited',
     ],
     [
       'the tailscaled socket never appears',
-      { FAKE_TAILSCALED_NO_SOCKET: '1' },
+      {
+        tailscaled: 'no-socket',
+        env: { TS_WAIT_SECS: String(NO_SOCKET_WAIT_SECS) },
+      },
       'up',
       'did not appear',
     ],
-  ])('fails closed when %s', (_label, env, neverReached, reason) => {
-    const run = runStart({ env })
+  ])('fails closed when %s', (_label, options, neverReached, reason) => {
+    const run = runStart(options)
 
     expect(run.status).not.toBe(0)
     expect(run.stderr).toContain(reason)
@@ -495,5 +522,40 @@ describe('scripts/start.sh, run', { timeout: 20000 }, () => {
     for (const out of [plain, underLitestream]) {
       expect(out.stdout + out.stderr).not.toContain(SENTINEL)
     }
+  })
+
+  it('starts tailscaled with none of the app secrets, while npm still gets them', () => {
+    const appSecret = 'not-a-real-secret-sentinel-2'
+    const run = runStart({
+      env: { AKAHU_USER_TOKEN: appSecret, XERO_CLIENT_SECRET: appSecret },
+    })
+    const tailscaledEnv = dump('tailscaled')
+    const npmEnv = dump('npm')
+
+    expect(run.status).toBe(0)
+    expect(tailscaledEnv).not.toBe('')
+    expect(tailscaledEnv).not.toContain(appSecret)
+    expect(tailscaledEnv).not.toContain('AKAHU_USER_TOKEN')
+    expect(tailscaledEnv).not.toContain('XERO_CLIENT_SECRET')
+    // An allowlist, so a scrub that drops only the names above still fails:
+    // PATH from start.sh, what the fake's own sh wrapper sets, and the
+    // variable macOS adds to every process it starts.
+    const names = tailscaledEnv
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => line.slice(0, line.indexOf('=')))
+    expect(names).toContain('PATH')
+    for (const name of names) {
+      expect([
+        'PATH',
+        'PWD',
+        'OLDPWD',
+        'SHLVL',
+        '_',
+        '__CF_USER_TEXT_ENCODING',
+      ]).toContain(name)
+    }
+    expect(npmEnv).toMatch(new RegExp(`^AKAHU_USER_TOKEN=${appSecret}$`, 'm'))
+    expect(npmEnv).toMatch(new RegExp(`^XERO_CLIENT_SECRET=${appSecret}$`, 'm'))
   })
 })

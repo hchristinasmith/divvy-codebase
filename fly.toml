@@ -1,5 +1,5 @@
 # Divvy on Fly.io (D1, D4): one always-on machine in Sydney, SQLite on a
-# mounted volume, no public IP, reachable only over Tailscale.
+# mounted volume, no public IP, the app published only on the tailnet.
 #
 # Tailscale and the app both run inside the machine. `scripts/start.sh` (the
 # image's CMD) joins the tailnet, publishes the app there with
@@ -41,9 +41,10 @@ kill_timeout = "30s"
 # loopback.
 #
 # Tailscale needs no inbound service: the node dials out to the tailnet (UDP,
-# falling back to DERP over HTTPS). Because the app is on loopback,
-# `fly proxy 3005` and the rest of Fly's private network cannot reach it; the
-# tailnet is the only way in.
+# falling back to DERP over HTTPS). The loopback bind, which start.sh holds by
+# refusing any other HOST, keeps `fly proxy 3005` and the rest of Fly's
+# private network out. It does nothing against tailnet peers: the tailnet
+# policy in docs/deploy.md section 2 is what limits those.
 #
 # There is no `min_machines_running` key. It only means something inside
 # [http_service] or [[services]], which must not exist; at the top level Fly

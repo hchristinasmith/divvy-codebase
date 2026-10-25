@@ -34,7 +34,9 @@ chmod 700 "$state_dir"
 
 # 2. tailscaled: userspace networking (no /dev/net/tun, no iptables); state and
 #    TLS certs live on the volume so restarts keep identity and cert cache.
-tailscaled --tun=userspace-networking --statedir="$state_dir" --socket="$socket" &
+#    `env -i` keeps AKAHU_*, XERO_* and the Litestream credentials out of
+#    tailscaled's /proc/<pid>/environ; env execs, so $! is tailscaled itself.
+env -i PATH="$PATH" tailscaled --tun=userspace-networking --statedir="$state_dir" --socket="$socket" &
 tsd_pid=$!
 
 i=0
