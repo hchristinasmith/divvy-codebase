@@ -55,7 +55,9 @@ describe('getReceivableInvoices', () => {
     const invoices = await client.getReceivableInvoices()
 
     // 1150.00 + 800.50 (of a 2300.00 invoice) + 1234567.89 + 19.99
-    expect(sumAmountDueCents(invoices)).toBe(123653838)
+    const sum = sumAmountDueCents(invoices)
+    expect(sum.nzdCents).toBe(123653838)
+    expect(sum.otherCurrencies).toEqual({})
     expect(invoices).toHaveLength(4)
   })
 
@@ -170,7 +172,29 @@ describe('getPayableBills', () => {
       ['8d4e2a90-0000-4000-8000-000000000204', 21000],
       ['8d4e2a90-0000-4000-8000-000000000205', 800],
     ])
-    expect(sumAmountDueCents(bills)).toBe(30425)
+    const sum = sumAmountDueCents(bills)
+    expect(sum.nzdCents).toBe(30425)
+    expect(sum.otherCurrencies).toEqual({})
+  })
+
+  it('keeps a foreign-currency bill out of the NZD payables total', async () => {
+    // Bill 204 (210.00) becomes AUD; the other two stay NZD.
+    const page2 = fixture('invoices-accpay-page2.json').replace(
+      '"CurrencyCode": "NZD"',
+      '"CurrencyCode": "AUD"',
+    )
+    const { client } = clientWith([
+      fixture('invoices-accpay-page1.json'),
+      page2,
+    ])
+
+    const bills = await client.getPayableBills()
+    const sum = sumAmountDueCents(bills)
+
+    // 86.25 + 8.00 in NZD; 210.00 in AUD, never added in.
+    expect(sum.nzdCents).toBe(9425)
+    expect(sum.otherCurrencies).toEqual({ AUD: 21000 })
+    expect(Object.keys(sum.otherCurrencies)).toEqual(['AUD'])
   })
 
   it('carries the due date, and keeps an undated bill with dueDate null', async () => {
@@ -220,14 +244,76 @@ describe('getPayableBills', () => {
   })
 })
 
-describe('sumAmountDueCents', () => {
-  it('is 0 for no documents', () => {
-    expect(sumAmountDueCents([])).toBe(0)
+describe('sumAmountDueCents (prd-05 Ruling 7)', () => {
+  it('is 0 NZD and no other currency for no documents', () => {
+    const sum = sumAmountDueCents([])
+
+    expect(sum.nzdCents).toBe(0)
+    expect(sum.otherCurrencies).toEqual({})
   })
 
-  it('refuses a non-integer amount instead of drifting', () => {
-    expect(() => sumAmountDueCents([{ amountDueCents: 1.5 }])).toThrow(
-      /integer number of cents/,
-    )
+  it.each(['NZD', 'USD'])(
+    'refuses a non-integer %s amount instead of drifting',
+    (currency) => {
+      expect(() =>
+        sumAmountDueCents([{ amountDueCents: 1.5, currency }]),
+      ).toThrow(/integer number of cents/)
+    },
+  )
+
+  it('never adds a foreign currency into the NZD total', async () => {
+    const { client } = clientWith([
+      fixture('invoices-accrec-mixed-currency.json'),
+      fixture('invoices-empty.json'),
+    ])
+
+    const invoices = await client.getReceivableInvoices()
+    const sum = sumAmountDueCents(invoices)
+
+    // NZD 100.00; USD 250.50 + 49.50 stays USD. Added as one number it
+    // would be 40000.
+    expect(invoices).toHaveLength(3)
+    expect(sum.nzdCents).toBe(10000)
+    expect(sum.otherCurrencies).toEqual({ USD: 30000 })
+    expect(Object.keys(sum).sort()).toEqual(['nzdCents', 'otherCurrencies'])
+    expect(Object.keys(sum.otherCurrencies).sort()).toEqual(['USD'])
   })
+
+  it('keeps each non-NZD currency apart', () => {
+    const sum = sumAmountDueCents([
+      { amountDueCents: 1000, currency: 'USD' },
+      { amountDueCents: 250, currency: 'EUR' },
+      { amountDueCents: 75, currency: 'USD' },
+      { amountDueCents: 5000, currency: 'NZD' },
+    ])
+
+    expect(sum.nzdCents).toBe(5000)
+    expect(sum.otherCurrencies).toEqual({ USD: 1075, EUR: 250 })
+    expect(Object.keys(sum.otherCurrencies).sort()).toEqual(['EUR', 'USD'])
+  })
+
+  it('is 0 NZD when every document is in another currency', () => {
+    const sum = sumAmountDueCents([
+      { amountDueCents: 1200, currency: 'AUD' },
+      { amountDueCents: 300, currency: 'AUD' },
+    ])
+
+    expect(sum.nzdCents).toBe(0)
+    expect(sum.otherCurrencies).toEqual({ AUD: 1500 })
+    expect(Object.keys(sum.otherCurrencies)).toEqual(['AUD'])
+  })
+
+  it.each(['nzd', '', 'NZ', '__proto__'])(
+    'refuses a currency code that is not three capital letters (%j)',
+    (currency) => {
+      const sum = () =>
+        sumAmountDueCents([
+          { amountDueCents: 100, currency: 'NZD' },
+          { amountDueCents: 100, currency },
+        ])
+
+      expect(sum).toThrow(TypeError)
+      expect(sum).toThrow(/not a three-letter currency code/)
+    },
+  )
 })
