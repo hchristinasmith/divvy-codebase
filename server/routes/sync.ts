@@ -3,6 +3,7 @@ import type { Request } from 'express'
 
 import connection from '../db/connection.ts'
 import type { IsoTimestamp, SyncOutcome, SyncRun } from '../../models/sync.ts'
+import { rankByStartedAt } from '../sync/ranked-runs.ts'
 import { syncScheduler } from '../sync/scheduler.ts'
 
 // /api/v1/sync (prd-01 Ruling 6, issue #27): what the last sync did, when
@@ -93,25 +94,17 @@ const router = express.Router()
 
 // GET /api/v1/sync/status
 //
-// Both queries rank runs the way run.ts's claim step does (#188, #169): only
-// a started_at in the exact toISOString() form is ranked, by julianday(). As
-// text, 'not-a-timestamp' or 'now' would sort after every ISO time and show
-// as the latest run. The filter is a copy of the claim step's in
-// server/sync/run.ts; change both together.
+// Both queries rank runs as run.ts's claim step does, through
+// rankByStartedAt in server/sync/ranked-runs.ts (#188, #169, #206).
 router.get('/status', async (req, res) => {
   try {
-    const latest: SyncRun | undefined = await connection('sync_runs')
-      .whereRaw("strftime('%Y-%m-%dT%H:%M:%fZ', started_at) = started_at")
-      .orderByRaw('julianday(started_at) DESC')
-      .orderBy('id', 'desc')
-      .first()
+    const latest: SyncRun | undefined = await rankByStartedAt(
+      connection('sync_runs'),
+    ).first()
     const lastSuccess: Pick<SyncRun, 'finished_at'> | undefined =
-      await connection('sync_runs')
-        .where({ outcome: 'success' })
-        .whereRaw("strftime('%Y-%m-%dT%H:%M:%fZ', started_at) = started_at")
-        .orderByRaw('julianday(started_at) DESC')
-        .orderBy('id', 'desc')
-        .first('finished_at')
+      await rankByStartedAt(
+        connection('sync_runs').where({ outcome: 'success' }),
+      ).first('finished_at')
     const state = syncScheduler.getState()
     const body: SyncStatus = {
       running: state.running,
