@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { CARD_TITLE, ERROR, SECONDARY_BUTTON } from '../Overview/styles.ts'
 import Field from './Field.tsx'
@@ -17,12 +17,18 @@ import { useCreateGoal, useGoalWritePending } from './useGoalActions.ts'
 // advisor" is replaced). What is typed stays text until Save and becomes
 // cents only through ./fields.ts. A refusal shows the server's own message
 // and keeps what was typed. The form closes once the write and the refetch
-// after it have landed, so the new card is already on screen.
+// after it have landed, so the new card is already on screen. The form
+// opens with focus in Name, because the button that opened it is gone.
 export default function GoalForm({ onClose }: { onClose: () => void }) {
   const [draft, setDraft] = useState<Draft>(emptyDraft)
   const [errors, setErrors] = useState<DraftErrors>({})
   const write = useCreateGoal()
   const busy = useGoalWritePending()
+  const nameInput = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    nameInput.current?.focus()
+  }, [])
 
   function edit(fields: Partial<Draft>) {
     setDraft((current) => ({ ...current, ...fields }))
@@ -57,6 +63,7 @@ export default function GoalForm({ onClose }: { onClose: () => void }) {
           {(control) => (
             <input
               {...control}
+              ref={nameInput}
               type="text"
               className={TEXT_INPUT}
               value={draft.name}

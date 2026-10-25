@@ -84,8 +84,11 @@ function text(el: HTMLElement, testId: string): string | null {
   return within(el).queryByTestId(testId)?.textContent ?? null
 }
 
+/** A card's +$ button, found by its accessible name, which names the goal. */
 function step(name: string, label: '+$50' | '+$200'): HTMLButtonElement {
-  return within(card(name)).getByRole('button', { name: label }) as HTMLButtonElement
+  return within(card(name)).getByRole('button', {
+    name: `Record ${label.slice(1)} for ${name}`,
+  }) as HTMLButtonElement
 }
 
 /** Waits for a write's refetch to land, when the buttons are enabled again. */
@@ -183,6 +186,28 @@ describe('+$50 and +$200', () => {
       expect(fx.callsTo('GET', LIST)).toHaveLength(2)
     },
   )
+
+  it('names the goal in each button and still shows +$50 and +$200', async () => {
+    setup(goalsResponse([HOLIDAY, RAINY_DAY]))
+    await loaded()
+
+    expect(step('Sample Holiday', '+$50').textContent).toBe('+$50')
+    expect(step('Sample Holiday', '+$200').textContent).toBe('+$200')
+    expect(step('Sample Rainy Day', '+$50').textContent).toBe('+$50')
+    expect(step('Sample Rainy Day', '+$200').textContent).toBe('+$200')
+    expect(screen.queryAllByRole('button', { name: '+$50' })).toEqual([])
+    expect(screen.queryAllByRole('button', { name: '+$200' })).toEqual([])
+    expect(
+      screen
+        .getAllByRole('button', { name: /^Record / })
+        .map((b) => b.getAttribute('aria-label')),
+    ).toEqual([
+      'Record $50 for Sample Holiday',
+      'Record $200 for Sample Holiday',
+      'Record $50 for Sample Rainy Day',
+      'Record $200 for Sample Rainy Day',
+    ])
+  })
 
   it('posts to the goal whose button was pressed', async () => {
     const { fx } = setup(goalsResponse([HOLIDAY, RAINY_DAY]), {
@@ -385,6 +410,48 @@ describe('creating a goal', () => {
 
     const button = screen.getByRole('button', { name: /^New goal/ })
     expect(button.textContent).toBe('New goalSet a target and a by-date')
+  })
+
+  it('puts focus in Name on open, and leaves it alone before', async () => {
+    setup(goalsResponse())
+    await loaded()
+    expect(document.activeElement).toBe(document.body)
+
+    open()
+
+    expect(document.activeElement).toBe(screen.getByLabelText('Name'))
+  })
+
+  it('puts focus back on New goal after Cancel', async () => {
+    setup(goalsResponse())
+    await loaded()
+
+    open()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: /^New goal/ }),
+    )
+  })
+
+  it('puts focus back on New goal after a save lands', async () => {
+    const created = goal({ id: '9', name: 'Sample Car' })
+    const { fx } = setup(goalsResponse(), {
+      create: () => ({ status: 201, body: created }),
+    })
+    await loaded()
+    fx.handlers.list = serve(goalsResponse([HOLIDAY, created]))
+
+    open()
+    type('Name', 'Sample Car')
+    type('Target ($)', '3000')
+    save()
+
+    await screen.findByRole('article', { name: 'Sample Car' })
+    expect(screen.queryByRole('form', { name: 'New goal' })).toBeNull()
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: /^New goal/ }),
+    )
   })
 
   it('sends the typed goal as cents and shows its card once the list is read again', async () => {

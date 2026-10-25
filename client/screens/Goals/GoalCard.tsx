@@ -22,6 +22,9 @@ import { STEP_LARGE_CENTS, STEP_SMALL_CENTS } from './useGoalActions.ts'
 // One goal (docs/design/handoff.md Screen 4): its name and by-date, what is
 // saved of the target, a bar, the pace, and the two buttons that record a
 // contribution. Every figure is a route field formatted by `formatCents`.
+// Each button's accessible name says which goal it records for, since every
+// card shows the same "+$50" and "+$200"; "Record" because a contribution
+// is a record, not a transfer (prd-02 Ruling 5).
 export default function GoalCard({
   goal,
   busy,
@@ -72,6 +75,7 @@ export default function GoalCard({
         <button
           type="button"
           className={SMALL_STEP}
+          aria-label={`Record $50 for ${goal.name}`}
           disabled={busy}
           onClick={() => onContribute(goal.id, STEP_SMALL_CENTS)}
         >
@@ -80,6 +84,7 @@ export default function GoalCard({
         <button
           type="button"
           className={LARGE_STEP}
+          aria-label={`Record $200 for ${goal.name}`}
           disabled={busy}
           onClick={() => onContribute(goal.id, STEP_LARGE_CENTS)}
         >
