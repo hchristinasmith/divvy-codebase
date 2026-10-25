@@ -8,23 +8,24 @@ import type {
   Scope,
 } from '../../shared/contracts.ts'
 import { sumCents } from '../../shared/money.ts'
-import { daysInMonth, nextPayday } from '../../shared/safe-to-spend.ts'
-import connection from './connection.ts'
 import {
-  OverviewDataError,
+  MAX_UNPAID_OCCURRENCES,
   billOccurrencesThrough,
   nzCalendarDate,
-} from './overview.ts'
+} from '../../shared/nz-dates.ts'
+import { daysInMonth, nextPayday } from '../../shared/safe-to-spend.ts'
+import connection from './connection.ts'
 import { getSettings } from './settings.ts'
 
 // The bills route's data module (prd-02, issue #49): the Bills screen's list,
 // creating, editing and deleting a bill, and "Mark paid".
 //
 // Occurrences (#35 option C). Every occurrence is computed from the anchor
-// (`first_due_date`) by `billOccurrencesThrough` in ./overview.ts, the same
-// function the overview uses, so the two screens cannot disagree on which
-// dates a bill falls due. A paid occurrence is one with a `bill_payments`
-// row for its exact date, matched as overview's `loadInputs` matches it.
+// (`first_due_date`) by `billOccurrencesThrough` in shared/nz-dates.ts, the
+// same function the overview uses, so the two screens cannot disagree on
+// which dates a bill falls due. A paid occurrence is one with a
+// `bill_payments` row for its exact date, matched as overview's
+// `loadInputs` matches it.
 //
 // A bill's current occurrence is the earliest one with no payment, whatever
 // today is: a weekly bill two weeks behind shows the older week, and one
@@ -58,12 +59,6 @@ export class BillsDataError extends Error {
   }
 }
 
-// A copy of MAX_UNPAID_OCCURRENCES in ./overview.ts; change both together
-// (#233 moves both to shared/). A write that would leave a bill with more
-// unpaid occurrences than this through the next payday is refused, because
-// the overview would answer 500 for it.
-const MAX_UNPAID_OCCURRENCES = 1000
-
 // What a bill may be: the most is $10,000,000.00.
 const MAX_BILL_CENTS = 1_000_000_000
 const MAX_NAME_LENGTH = 255
@@ -77,19 +72,14 @@ type Db = typeof connection
 
 /**
  * Runs a call into shared date or money code, turning its RangeError or
- * TypeError (whose messages name values), or an `OverviewDataError` from a
- * function borrowed from ./overview.ts, into the fixed text. A copy of
+ * TypeError (whose messages name values) into the fixed text. A copy of
  * `guard` in ./overview.ts, which is private there; change both together.
  */
 function guard<T>(fn: () => T): T {
   try {
     return fn()
   } catch (err) {
-    if (
-      err instanceof RangeError ||
-      err instanceof TypeError ||
-      err instanceof OverviewDataError
-    ) {
+    if (err instanceof RangeError || err instanceof TypeError) {
       throw new BillsDataError('bills input invalid')
     }
     throw err
@@ -541,7 +531,12 @@ async function checkAccount(
   return account.scope === scope ? null : 'account_scope_mismatch'
 }
 
-/** Whether a schedule leaves more unpaid occurrences than the overview takes. */
+/**
+ * Whether a schedule leaves more unpaid occurrences than the overview takes.
+ * The limit is `MAX_UNPAID_OCCURRENCES` in shared/nz-dates.ts, the one the
+ * overview reads with; a write past it is refused, because the overview
+ * would answer 500 for the bill.
+ */
 function tooManyUnpaid(
   schedule: Pick<BillRow, 'repeat' | 'first_due_date'>,
   paid: PaidDates,
