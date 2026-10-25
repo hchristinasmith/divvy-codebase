@@ -11,32 +11,34 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-html,body{margin:0;padding:0;background:#FAF6F3;color:#2B2224;font-family:"DM Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+:root{--dv-bg:#FFF0F5;--dv-blush:#FFD3E2;--dv-blush2:#FFBFD5;--dv-pink:#FF5C9E;--dv-solid:#F0418A;--dv-shadow:#FF9CC4;--dv-deep:#E0297A;--dv-rose:#B81E63;--dv-border:#F7C9D8;--dv-divider:#FBDDE7;--dv-soliddiv:#F57AB0}
+html,body{margin:0;padding:0;background:var(--dv-bg);color:#2B2224;font-family:"DM Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
 *{box-sizing:border-box}
-a{color:#C2386A;text-decoration:none}a:hover{color:#A12A56;text-decoration:underline}
+a{color:var(--dv-deep);text-decoration:none}a:hover{color:var(--dv-rose);text-decoration:underline}
 button,input{font-family:inherit}
 @keyframes dvPulse{0%,80%,100%{opacity:.25;transform:translateY(0)}40%{opacity:1;transform:translateY(-2px)}}
 @keyframes dvSpin{to{transform:rotate(360deg)}}
 </style>
 </helmet>
-<div ref="{{ rootRef }}" style="display:flex;min-height:100vh;background:#FAF6F3;color:#2B2224">
+<div ref="{{ rootRef }}" style="display:flex;min-height:100vh;background:var(--dv-bg);color:#2B2224">
 
 <sc-if value="{{ isDesktop }}" hint-placeholder-val="{{ true }}">
-<aside style="width:224px;flex:none;padding:28px 16px;border-right:1px solid #F0E4E6;display:flex;flex-direction:column;gap:28px;position:sticky;top:0;height:100vh">
+<aside style="width:224px;flex:none;padding:28px 16px;border-right:1px solid var(--dv-border);display:flex;flex-direction:column;gap:28px;position:sticky;top:0;height:100vh">
   <div style="display:flex;align-items:center;gap:10px;padding:0 8px">
-    <div style="display:flex;flex-direction:column;gap:1px">
-      <span style="font-family:'Outfit',sans-serif;font-weight:600;font-size:22px;letter-spacing:.04em;line-height:1">DIVVY</span>
-      <span style="font-size:10px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:#C2386A">Hold the reins</span>
+    
+    <div style="display:flex;flex-direction:column;gap:2px;width:104px">
+      <span style="font-family:'Outfit',sans-serif;font-weight:600;font-size:22px;line-height:1;display:flex;justify-content:space-between;color:var(--dv-deep)"><span>D</span><span>I</span><span>V</span><span>V</span><span>Y</span></span>
+      <span style="font-size:10px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--dv-deep);white-space:nowrap;display:flex;justify-content:space-between"><span>Hold</span><span>the</span><span>reins</span></span>
     </div>
   </div>
   <nav style="display:flex;flex-direction:column;gap:2px">
     <sc-for list="{{ navItems }}" as="n" hint-placeholder-count="7">
-      <button onClick="{{ n.go }}" style="display:flex;align-items:center;gap:10px;text-align:left;border:0;cursor:pointer;padding:8px 10px;border-radius:12px;font-size:14px;font-weight:500;background:{{ n.bg }};color:{{ n.color }}" style-hover="background:#FBE4EA"><span style="width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:{{ n.iconBg }};color:{{ n.iconColor }}">{{ n.icon }}</span><span style="flex:1">{{ n.label }}</span><span style="font-family:'DM Mono',monospace;font-size:11px;color:#EC6A94">{{ n.badge }}</span></button>
+      <button onClick="{{ n.go }}" style="display:flex;align-items:center;gap:10px;text-align:left;border:0;cursor:pointer;padding:8px 10px;border-radius:12px;font-size:14px;font-weight:500;background:{{ n.bg }};color:{{ n.color }}" style-hover="background:var(--dv-blush)"><span style="width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:{{ n.iconBg }};color:{{ n.iconColor }}">{{ n.icon }}</span><span style="flex:1">{{ n.label }}</span><span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--dv-pink)">{{ n.badge }}</span></button>
     </sc-for>
   </nav>
-  <div style="margin-top:auto;padding:14px;border-radius:14px;background:#FBE4EA;display:flex;flex-direction:column;gap:6px">
-    <div style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:#A12A56"><span style="width:8px;height:8px;border-radius:50%;background:#3E9A6E"></span>Self-hosted</div>
-    <div style="font-size:12px;color:#A12A56;line-height:1.4">Running on your server. Nothing leaves it.</div>
+  <div style="margin-top:auto;padding:14px;border-radius:14px;background:var(--dv-blush);border:0;box-shadow:4px 4px 0 var(--dv-shadow);display:flex;flex-direction:column;gap:6px">
+    <div style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--dv-rose)"><span style="width:8px;height:8px;border-radius:50%;background:#3E9A6E"></span>Self-hosted</div>
+    <div style="font-size:12px;color:var(--dv-rose);line-height:1.4">Running on your server. Nothing leaves it.</div>
   </div>
 </aside>
 </sc-if>
@@ -45,203 +47,247 @@ button,input{font-family:inherit}
 
   <header style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap">
     <div style="display:flex;flex-direction:column;gap:4px">
-      <sc-if value="{{ isMobile }}" hint-placeholder-val="{{ false }}"><span style="font-family:'Outfit',sans-serif;font-weight:500;font-size:22px;color:#C2386A">Divvy</span></sc-if>
-      <h1 style="margin:0;font-family:'Outfit',sans-serif;font-weight:600;font-size:36px;letter-spacing:-.02em;line-height:1">{{ screenTitle }}</h1>
-      <span style="font-size:14px;color:#7A6A6F">{{ screenSub }}</span>
+      <sc-if value="{{ isMobile }}" hint-placeholder-val="{{ false }}"><div style="display:flex;align-items:center;gap:8px"><span style="font-family:'Outfit',sans-serif;font-weight:500;font-size:22px;color:var(--dv-deep)">Divvy</span></div></sc-if>
+      <h1 style="margin:0;font-family:'Outfit',sans-serif;font-weight:600;font-size:36px;letter-spacing:-.02em;line-height:1;color:var(--dv-deep)">{{ screenTitle }}</h1>
+      <span style="font-size:14px;color:#8A5A70">{{ screenSub }}</span>
     </div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <div style="display:flex;gap:4px;background:#FBE4EA;padding:4px;border-radius:999px">
+      <div style="display:flex;gap:4px;background:var(--dv-blush);border:0;box-shadow:3px 3px 0 var(--dv-shadow);padding:3px;border-radius:6px">
         <sc-for list="{{ scopes }}" as="sc" hint-placeholder-count="3">
-          <button onClick="{{ sc.go }}" style="border:0;cursor:pointer;border-radius:999px;padding:6px 14px;font-size:13px;font-weight:600;background:{{ sc.bg }};color:{{ sc.color }}">{{ sc.label }}</button>
+          <button onClick="{{ sc.go }}" style="border:0;cursor:pointer;border-radius:6px;padding:6px 14px;font-size:13px;font-weight:600;background:{{ sc.bg }};color:{{ sc.color }}">{{ sc.label }}</button>
         </sc-for>
       </div>
-      <button onClick="{{ goSync }}" style="display:flex;align-items:center;gap:8px;border:1px solid #F0E4E6;background:#FFFFFF;border-radius:999px;padding:8px 14px;font-size:13px;cursor:pointer;color:#2B2224" style-hover="border-color:#EC6A94"><span style="width:7px;height:7px;border-radius:50%;background:{{ syncDot }}"></span>{{ syncLabel }}</button>
-      <sc-if value="{{ isMobile }}" hint-placeholder-val="{{ false }}"><button onClick="{{ goPrivacy }}" style="border:1px solid #F0E4E6;background:#FFFFFF;border-radius:999px;padding:8px 14px;font-size:13px;cursor:pointer;color:#2B2224">Privacy</button></sc-if>
+      <button onClick="{{ goSync }}" style="display:flex;align-items:center;gap:8px;border:0;box-shadow:3px 3px 0 var(--dv-shadow);background:#FFFFFF;border-radius:6px;padding:8px 14px;font-size:13px;cursor:pointer;color:#2B2224" style-hover="border-color:var(--dv-pink)"><span style="width:7px;height:7px;border-radius:50%;background:{{ syncDot }}"></span>{{ syncLabel }}</button>
+      <sc-if value="{{ isMobile }}" hint-placeholder-val="{{ false }}"><button onClick="{{ goPrivacy }}" style="border:0;box-shadow:3px 3px 0 var(--dv-shadow);background:#FFFFFF;border-radius:6px;padding:8px 14px;font-size:13px;cursor:pointer;color:#2B2224">Privacy</button></sc-if>
     </div>
   </header>
 
   <sc-if value="{{ isOverview }}" hint-placeholder-val="{{ true }}">
   <section data-screen-label="Overview" style="display:flex;flex-direction:column;gap:20px">
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px">
-      <div style="grid-column:1/-1;background:#FFFFFF;border:1px solid #F0E4E6;border-radius:24px;padding:28px;display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px;align-items:center">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px">
+      <div style="grid-column:1/-1;background:#FFFFFF;border:0;box-shadow:5px 5px 0 var(--dv-shadow);border-radius:12px;padding:28px;display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px;align-items:center">
         <div style="display:flex;flex-direction:column;gap:6px">
-          <span style="font-size:12px;font-weight:600;color:#C2386A;text-transform:uppercase;letter-spacing:.1em">Safe to spend</span>
+          <span style="font-size:12px;font-weight:600;color:var(--dv-deep);text-transform:uppercase;letter-spacing:.1em">Safe to spend</span>
           <span style="font-family:'Outfit',sans-serif;font-weight:500;font-size:72px;line-height:1;letter-spacing:-.03em">{{ safeToSpend }}</span>
-          <span style="font-size:14px;color:#7A6A6F">until payday on 28 Nov · after tax, bills and budgets</span>
-          <div style="margin-top:8px;height:10px;border-radius:999px;background:#FBE4EA;overflow:hidden"><div style="height:100%;background:#EC6A94;border-radius:999px;width:{{ safePct }}"></div></div>
-          <span style="font-size:12px;color:#7A6A6F">{{ safePerDay }} a day for the next {{ daysLeft }} days</span>
+          <span style="font-size:14px;color:#8A5A70">until payday on 28 Nov · after tax, bills and budgets</span>
+          <div style="margin-top:8px;height:10px;border-radius:6px;background:var(--dv-blush);overflow:hidden"><div style="height:100%;background:var(--dv-pink);border-radius:6px;width:{{ safePct }}"></div></div>
+          <span style="font-size:12px;color:#8A5A70">{{ safePerDay }} a day for the next {{ daysLeft }} days</span>
         </div>
-        <div style="display:flex;flex-direction:column;font-family:'DM Mono',monospace;font-size:13px;background:#FAF6F3;border-radius:16px;padding:6px 16px">
-          <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid #F0E4E6"><span style="color:#7A6A6F;white-space:nowrap">Across accounts</span><span>{{ totalLiquid }}</span></div>
-          <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid #F0E4E6"><span style="color:#7A6A6F;white-space:nowrap">− Tax reserve</span><span>{{ taxReserve }}</span></div>
-          <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid #F0E4E6"><span style="color:#7A6A6F">− Bills due</span><span>{{ billsDue }}</span></div>
-          <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid #F0E4E6"><span style="color:#7A6A6F;white-space:nowrap">− Budgets left</span><span>{{ budgetsLeft }}</span></div>
-          <div style="display:flex;justify-content:space-between;padding:10px 0;font-weight:500"><span style="white-space:nowrap">= Safe to spend</span><span style="color:#C2386A">{{ safeToSpend }}</span></div>
+        <div style="display:flex;flex-direction:column;font-family:'DM Mono',monospace;font-size:13px;background:var(--dv-bg);border-radius:10px;padding:6px 16px">
+          <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--dv-border)"><span style="color:#8A5A70;white-space:nowrap">Across accounts</span><span>{{ totalLiquid }}</span></div>
+          <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--dv-border)"><span style="color:#8A5A70;white-space:nowrap">− Tax reserve</span><span>{{ taxReserve }}</span></div>
+          <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--dv-border)"><span style="color:#8A5A70">− Bills due</span><span>{{ billsDue }}</span></div>
+          <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--dv-border)"><span style="color:#8A5A70;white-space:nowrap">− Budgets left</span><span>{{ budgetsLeft }}</span></div>
+          <div style="display:flex;justify-content:space-between;padding:10px 0;font-weight:500"><span style="white-space:nowrap">= Safe to spend</span><span style="color:var(--dv-deep)">{{ safeToSpend }}</span></div>
         </div>
       </div>
 
       <sc-if value="{{ showPersonal }}" hint-placeholder-val="{{ true }}">
-      <div style="background:#FFFFFF;border:1px solid #F0E4E6;border-radius:24px;padding:24px;display:flex;flex-direction:column;gap:14px">
-        <div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-size:15px;font-weight:600">Personal</span><span style="font-family:'Outfit',sans-serif;font-weight:500;font-size:28px">{{ personalTotal }}</span></div>
-        <sc-for list="{{ personalAccounts }}" as="a" hint-placeholder-count="2">
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-top:1px solid #F6ECEE"><div style="display:flex;flex-direction:column"><span style="font-size:14px">{{ a.name }}</span><span style="font-size:12px;color:#7A6A6F">{{ a.kind }}</span></div><span style="font-family:'DM Mono',monospace;font-size:14px">{{ a.balance }}</span></div>
-        </sc-for>
+      <div style="background:#FFFFFF;border:0;box-shadow:5px 5px 0 var(--dv-shadow);border-radius:12px;padding:22px;display:flex;flex-direction:column;gap:16px">
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <span style="font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--dv-deep)">Personal</span>
+          <span style="font-family:'Outfit',sans-serif;font-weight:500;font-size:40px;line-height:1;letter-spacing:-.02em">{{ personalTotal }}</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px">
+          <sc-for list="{{ personalAccounts }}" as="a" hint-placeholder-count="2">
+            <div style="background:var(--dv-bg);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:6px;min-width:0">
+              <span style="font-size:11px;font-weight:600;color:#8A5A70;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ a.name }}</span>
+              <span style="font-family:'DM Mono',monospace;font-size:15px">{{ a.balance }}</span>
+              <span style="font-size:11px;color:#8A5A70">{{ a.kind }}</span>
+            </div>
+          </sc-for>
+        </div>
       </div>
       </sc-if>
 
       <sc-if value="{{ showStrawb }}" hint-placeholder-val="{{ true }}">
-      <div style="background:#D9507D;color:#FFFFFF;border-radius:24px;padding:24px;display:flex;flex-direction:column;gap:14px">
-        <div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-size:15px;font-weight:600">Strawb</span><span style="font-family:'Outfit',sans-serif;font-weight:500;font-size:28px">{{ businessTotal }}</span></div>
-        <sc-for list="{{ businessAccounts }}" as="a" hint-placeholder-count="3">
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-top:1px solid #E27A9B"><div style="display:flex;flex-direction:column"><span style="font-size:14px">{{ a.name }}</span><span style="font-size:12px;color:#FBE4EA">{{ a.kind }}</span></div><span style="font-family:'DM Mono',monospace;font-size:14px">{{ a.balance }}</span></div>
-        </sc-for>
+      <div style="background:var(--dv-blush);border:0;box-shadow:5px 5px 0 var(--dv-shadow);border-radius:12px;padding:22px;display:flex;flex-direction:column;gap:16px">
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <span style="font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--dv-rose)">Strawb</span>
+          <span style="font-family:'Outfit',sans-serif;font-weight:500;font-size:40px;line-height:1;letter-spacing:-.02em">{{ businessTotal }}</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px">
+          <sc-for list="{{ businessAccounts }}" as="a" hint-placeholder-count="2">
+            <div style="background:rgba(255,255,255,.7);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:6px;min-width:0">
+              <span style="font-size:11px;font-weight:600;color:var(--dv-rose);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ a.name }}</span>
+              <span style="font-family:'DM Mono',monospace;font-size:15px">{{ a.balance }}</span>
+              <span style="font-size:11px;color:var(--dv-rose)">{{ a.kind }}</span>
+            </div>
+          </sc-for>
+        </div>
       </div>
       </sc-if>
 
       <sc-if value="{{ showStrawb }}" hint-placeholder-val="{{ true }}">
-      <div style="background:#FBE4EA;border-radius:24px;padding:24px;display:flex;flex-direction:column;gap:12px">
-        <div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-size:15px;font-weight:600;color:#A12A56">Tax set-aside</span><span style="font-size:12px;color:#A12A56;font-weight:600">{{ taxRatePct }} of profit</span></div>
-        <div style="display:flex;align-items:baseline;gap:8px"><span style="font-family:'Outfit',sans-serif;font-weight:500;font-size:40px;line-height:1;color:#2B2224">{{ taxReserve }}</span><span style="font-size:13px;color:#A12A56">of {{ taxTarget }} owed so far</span></div>
-        <div style="height:10px;border-radius:999px;background:#FFFFFF;overflow:hidden"><div style="height:100%;background:#EC6A94;border-radius:999px;width:{{ taxPct }}"></div></div>
-        <div style="display:flex;justify-content:space-between;font-size:13px;color:#A12A56;gap:8px;flex-wrap:wrap"><span>Next payment 31 Jan</span><span>{{ taxShort }} short · auto top-up Friday</span></div>
+      <div style="background:var(--dv-blush);border:0;box-shadow:5px 5px 0 var(--dv-shadow);border-radius:12px;padding:24px;display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-size:15px;font-weight:600;color:var(--dv-rose)">Tax set-aside</span><span style="font-size:12px;color:var(--dv-rose);font-weight:600">{{ taxRatePct }} of profit</span></div>
+        <div style="display:flex;align-items:baseline;gap:8px"><span style="font-family:'Outfit',sans-serif;font-weight:500;font-size:40px;line-height:1;color:#2B2224">{{ taxReserve }}</span><span style="font-size:13px;color:var(--dv-rose)">of {{ taxTarget }} owed so far</span></div>
+        <div style="height:10px;border-radius:6px;background:#FFFFFF;overflow:hidden"><div style="height:100%;background:var(--dv-pink);border-radius:6px;width:{{ taxPct }}"></div></div>
+        <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--dv-rose);gap:8px;flex-wrap:wrap"><span>Next payment 31 Jan</span><span>{{ taxShort }} short · auto top-up Friday</span></div>
       </div>
       </sc-if>
 
-      <div style="background:#FFFFFF;border:1px solid #F0E4E6;border-radius:24px;padding:24px;display:flex;flex-direction:column;gap:12px">
-        <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:15px;font-weight:600">Alerts</span><span style="font-size:12px;color:#7A6A6F">{{ alertCountLabel }}</span></div>
-        <sc-if value="{{ noAlerts }}" hint-placeholder-val="{{ false }}"><div style="font-size:14px;color:#7A6A6F;padding:12px 0">All clear. Nothing needs you right now.</div></sc-if>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px;align-items:start">
+      <div style="background:#FFFFFF;border:0;box-shadow:5px 5px 0 var(--dv-shadow);border-radius:12px;padding:24px;display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:15px;font-weight:600">Alerts</span><span style="font-size:12px;color:#8A5A70">{{ alertCountLabel }}</span></div>
+        <sc-if value="{{ noAlerts }}" hint-placeholder-val="{{ false }}"><div style="font-size:14px;color:#8A5A70;padding:12px 0">All clear. Nothing needs you right now.</div></sc-if>
         <sc-for list="{{ alerts }}" as="al" hint-placeholder-count="3">
-          <div style="display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-top:1px solid #F6ECEE">
+          <div style="display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-top:1px solid var(--dv-divider)">
             <span style="flex:none;margin-top:6px;width:8px;height:8px;border-radius:50%;background:{{ al.color }}"></span>
             <div style="flex:1;display:flex;flex-direction:column;gap:2px"><span style="font-size:14px;line-height:1.35">{{ al.text }}</span><a href="#" onClick="{{ al.go }}" style="font-size:12px;font-weight:600">{{ al.action }}</a></div>
-            <button onClick="{{ al.dismiss }}" title="Dismiss" style="border:0;background:transparent;cursor:pointer;color:#B3A3A8;font-size:16px;line-height:1;padding:2px 4px" style-hover="color:#2B2224">×</button>
+            <button onClick="{{ al.dismiss }}" title="Dismiss" style="border:0;background:transparent;cursor:pointer;color:#C9A0B3;font-size:16px;line-height:1;padding:2px 4px" style-hover="color:#2B2224">×</button>
           </div>
         </sc-for>
       </div>
-    </div>
 
-    <div style="background:#FFFFFF;border:1px solid #F0E4E6;border-radius:24px;padding:24px;display:flex;flex-direction:column;gap:14px">
+    <div style="background:#FFFFFF;border:0;box-shadow:5px 5px 0 var(--dv-shadow);border-radius:12px;padding:24px;display:flex;flex-direction:column;gap:14px">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
         <span style="font-size:15px;font-weight:600">Recent activity</span>
-        <div style="display:flex;gap:4px;background:#FBE4EA;padding:4px;border-radius:999px">
+        <div style="display:flex;gap:4px;background:var(--dv-blush);border:0;box-shadow:3px 3px 0 var(--dv-shadow);padding:3px;border-radius:6px">
           <sc-for list="{{ filters }}" as="f" hint-placeholder-count="3">
-            <button onClick="{{ f.go }}" style="border:0;cursor:pointer;border-radius:999px;padding:6px 14px;font-size:13px;font-weight:500;background:{{ f.bg }};color:{{ f.color }}">{{ f.label }}</button>
+            <button onClick="{{ f.go }}" style="border:0;cursor:pointer;border-radius:6px;padding:6px 14px;font-size:13px;font-weight:500;background:{{ f.bg }};color:{{ f.color }}">{{ f.label }}</button>
           </sc-for>
         </div>
       </div>
       <sc-for list="{{ transactions }}" as="t" hint-placeholder-count="6">
-        <div style="display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:center;padding:12px 0;border-top:1px solid #F6ECEE">
+        <div style="display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:center;padding:12px 0;border-top:1px solid var(--dv-divider)">
           <span style="width:36px;height:36px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;font-family:'DM Mono',monospace;background:{{ t.tagBg }};color:{{ t.tagColor }}">{{ t.tag }}</span>
-          <div style="display:flex;flex-direction:column;min-width:0"><span style="font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ t.name }}</span><span style="font-size:12px;color:#7A6A6F">{{ t.meta }}</span></div>
+          <div style="display:flex;flex-direction:column;min-width:0"><span style="font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ t.name }}</span><span style="font-size:12px;color:#8A5A70">{{ t.meta }}</span></div>
           <span style="font-family:'DM Mono',monospace;font-size:14px;color:{{ t.amtColor }}">{{ t.amount }}</span>
         </div>
       </sc-for>
+    </div>
     </div>
   </section>
   </sc-if>
 
   <sc-if value="{{ isBudgets }}" hint-placeholder-val="{{ false }}">
-  <section data-screen-label="Budgets" style="display:flex;flex-direction:column;gap:16px">
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px">
+  <section data-screen-label="Budgets" style="display:flex;flex-direction:column;gap:18px">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px">
       <sc-for list="{{ budgets }}" as="b" hint-placeholder-count="5">
-        <div style="background:#FFFFFF;border:1px solid #F0E4E6;border-radius:24px;padding:22px;display:flex;flex-direction:column;gap:12px">
+        <div style="background:#FFFFFF;border:0;box-shadow:5px 5px 0 var(--dv-shadow);border-radius:12px;padding:22px;display:flex;flex-direction:column;gap:12px">
           <div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-size:15px;font-weight:600">{{ b.name }}</span><span style="font-size:12px;font-weight:600;color:{{ b.statusColor }}">{{ b.status }}</span></div>
-          <div style="display:flex;align-items:baseline;gap:6px"><span style="font-family:'Outfit',sans-serif;font-weight:500;font-size:34px;line-height:1">{{ b.spentFmt }}</span><span style="font-size:13px;color:#7A6A6F">of {{ b.limitFmt }}</span></div>
-          <div style="height:10px;border-radius:999px;background:#FBE4EA;overflow:hidden"><div style="height:100%;border-radius:999px;background:{{ b.barColor }};width:{{ b.pct }}"></div></div>
-          <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:12px;color:#7A6A6F">{{ b.note }}</span><div style="display:flex;gap:6px"><button onClick="{{ b.dec }}" style="border:0;background:#FBE4EA;color:#A12A56;border-radius:8px;width:28px;height:28px;cursor:pointer;font-size:14px" style-hover="background:#F7D2DC">−</button><button onClick="{{ b.inc }}" style="border:0;background:#FBE4EA;color:#A12A56;border-radius:8px;width:28px;height:28px;cursor:pointer;font-size:14px" style-hover="background:#F7D2DC">+</button></div></div>
+          <div style="display:flex;align-items:baseline;gap:6px"><span style="font-family:'Outfit',sans-serif;font-weight:500;font-size:34px;line-height:1">{{ b.spentFmt }}</span><span style="font-size:13px;color:#8A5A70">of {{ b.limitFmt }}</span></div>
+          <div style="height:10px;border-radius:6px;background:var(--dv-blush);overflow:hidden"><div style="height:100%;border-radius:6px;background:{{ b.barColor }};width:{{ b.pct }}"></div></div>
+          <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:12px;color:#8A5A70">{{ b.note }}</span><div style="display:flex;gap:6px"><button onClick="{{ b.dec }}" style="border:0;box-shadow:3px 3px 0 var(--dv-shadow);background:var(--dv-blush);color:var(--dv-rose);border-radius:8px;width:28px;height:28px;cursor:pointer;font-size:14px" style-hover="background:var(--dv-blush2)">−</button><button onClick="{{ b.inc }}" style="border:0;box-shadow:3px 3px 0 var(--dv-shadow);background:var(--dv-blush);color:var(--dv-rose);border-radius:8px;width:28px;height:28px;cursor:pointer;font-size:14px" style-hover="background:var(--dv-blush2)">+</button></div></div>
         </div>
       </sc-for>
     </div>
-    <div style="background:#FBE4EA;border-radius:16px;padding:16px 20px;font-size:14px;color:#A12A56;line-height:1.45"><strong>Advisor:</strong> {{ budgetInsight }} <a href="#" onClick="{{ goAdvisor }}" style="font-weight:600">Ask why →</a></div>
+    <div style="background:var(--dv-blush);border:0;box-shadow:4px 4px 0 var(--dv-shadow);border-radius:10px;padding:16px 20px;font-size:14px;color:var(--dv-rose);line-height:1.45"><strong>Advisor:</strong> {{ budgetInsight }} <a href="#" onClick="{{ goAdvisor }}" style="font-weight:600">Ask why →</a></div>
   </section>
   </sc-if>
 
   <sc-if value="{{ isBills }}" hint-placeholder-val="{{ false }}">
-  <section data-screen-label="Bills" style="display:flex;flex-direction:column;gap:16px">
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px">
-      <div style="background:#FFFFFF;border:1px solid #F0E4E6;border-radius:18px;padding:20px;display:flex;flex-direction:column;gap:4px"><span style="font-size:12px;color:#7A6A6F">Due before payday</span><span style="font-family:'Outfit',sans-serif;font-weight:500;font-size:34px;line-height:1">{{ billsDue }}</span></div>
-      <div style="background:#FFFFFF;border:1px solid #F0E4E6;border-radius:18px;padding:20px;display:flex;flex-direction:column;gap:4px"><span style="font-size:12px;color:#7A6A6F">Next one</span><span style="font-family:'Outfit',sans-serif;font-weight:500;font-size:34px;line-height:1">{{ nextBill }}</span></div>
-      <div style="background:#FBE4EA;border-radius:18px;padding:20px;display:flex;flex-direction:column;gap:4px"><span style="font-size:12px;color:#A12A56">Paid this month</span><span style="font-family:'Outfit',sans-serif;font-weight:500;font-size:34px;line-height:1">{{ billsPaid }}</span></div>
+  <section data-screen-label="Bills" style="display:flex;flex-direction:column;gap:18px">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:18px">
+      <div style="background:#FFFFFF;border:0;box-shadow:4px 4px 0 var(--dv-shadow);border-radius:10px;padding:20px;display:flex;flex-direction:column;gap:4px"><span style="font-size:12px;color:#8A5A70">Due before payday</span><span style="font-family:'Outfit',sans-serif;font-weight:500;font-size:34px;line-height:1">{{ billsDue }}</span></div>
+      <div style="background:#FFFFFF;border:0;box-shadow:4px 4px 0 var(--dv-shadow);border-radius:10px;padding:20px;display:flex;flex-direction:column;gap:4px"><span style="font-size:12px;color:#8A5A70">Next one</span><span style="font-family:'Outfit',sans-serif;font-weight:500;font-size:34px;line-height:1">{{ nextBill }}</span></div>
+      <div style="background:var(--dv-blush);border:0;box-shadow:4px 4px 0 var(--dv-shadow);border-radius:10px;padding:20px;display:flex;flex-direction:column;gap:4px"><span style="font-size:12px;color:var(--dv-rose)">Paid this month</span><span style="font-family:'Outfit',sans-serif;font-weight:500;font-size:34px;line-height:1">{{ billsPaid }}</span></div>
     </div>
-    <div style="background:#FFFFFF;border:1px solid #F0E4E6;border-radius:24px;padding:8px 24px">
+    <div style="background:#FFFFFF;border:0;box-shadow:5px 5px 0 var(--dv-shadow);border-radius:12px;padding:8px 24px">
       <sc-for list="{{ bills }}" as="bl" hint-placeholder-count="6">
-        <div style="display:grid;grid-template-columns:56px 1fr auto auto;gap:16px;align-items:center;padding:14px 0;border-bottom:1px solid #F6ECEE;opacity:{{ bl.opacity }}">
+        <div style="display:grid;grid-template-columns:56px 1fr auto auto;gap:16px;align-items:center;padding:14px 0;border-bottom:1px solid var(--dv-divider);opacity:{{ bl.opacity }}">
           <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;width:56px;height:52px;border-radius:14px;background:{{ bl.dateBg }};color:{{ bl.dateColor }}"><span style="font-family:'Outfit',sans-serif;font-weight:500;font-size:22px;line-height:1">{{ bl.day }}</span><span style="font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase">{{ bl.month }}</span></div>
-          <div style="display:flex;flex-direction:column;gap:2px;min-width:0"><span style="font-size:15px;text-decoration:{{ bl.deco }}">{{ bl.name }}</span><span style="font-size:12px;color:#7A6A6F">{{ bl.meta }}</span></div>
+          <div style="display:flex;flex-direction:column;gap:2px;min-width:0"><span style="font-size:15px;text-decoration:{{ bl.deco }}">{{ bl.name }}</span><span style="font-size:12px;color:#8A5A70">{{ bl.meta }}</span></div>
           <span style="font-family:'DM Mono',monospace;font-size:15px">{{ bl.amount }}</span>
-          <button onClick="{{ bl.toggle }}" style="border:1px solid #F0E4E6;background:{{ bl.btnBg }};color:{{ bl.btnColor }};border-radius:999px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap" style-hover="border-color:#EC6A94">{{ bl.btnLabel }}</button>
+          <button onClick="{{ bl.toggle }}" style="border:0;box-shadow:3px 3px 0 var(--dv-shadow);background:{{ bl.btnBg }};color:{{ bl.btnColor }};border-radius:6px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap" style-hover="border-color:var(--dv-pink)">{{ bl.btnLabel }}</button>
         </div>
       </sc-for>
     </div>
+  </section>
+  </sc-if>
+
+  <sc-if value="{{ isSubs }}" hint-placeholder-val="{{ false }}">
+  <section data-screen-label="Subscriptions" style="display:flex;flex-direction:column;gap:16px">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px">
+      <div style="background:#FFFFFF;border:0;box-shadow:5px 5px 0 var(--dv-shadow);border-radius:10px;padding:20px;display:flex;flex-direction:column;gap:4px"><span style="font-size:12px;color:#8A5A70">Per month</span><span style="font-family:'Outfit',sans-serif;font-weight:500;font-size:34px;line-height:1">{{ subsMonthly }}</span></div>
+      <div style="background:#FFFFFF;border:0;box-shadow:5px 5px 0 var(--dv-shadow);border-radius:10px;padding:20px;display:flex;flex-direction:column;gap:4px"><span style="font-size:12px;color:#8A5A70">Per year</span><span style="font-family:'Outfit',sans-serif;font-weight:500;font-size:34px;line-height:1">{{ subsYearly }}</span></div>
+      <div style="background:var(--dv-blush);border:0;box-shadow:5px 5px 0 var(--dv-shadow);border-radius:10px;padding:20px;display:flex;flex-direction:column;gap:4px"><span style="font-size:12px;color:var(--dv-rose)">Barely used</span><span style="font-family:'Outfit',sans-serif;font-weight:500;font-size:34px;line-height:1">{{ subsWaste }}</span><span style="font-size:12px;color:var(--dv-rose)">a month you could get back</span></div>
+    </div>
+    <div style="background:#FFFFFF;border:0;box-shadow:5px 5px 0 var(--dv-shadow);border-radius:12px;padding:8px 24px">
+      <sc-for list="{{ subs }}" as="su" hint-placeholder-count="6">
+        <div style="display:grid;grid-template-columns:1fr auto auto;gap:16px;align-items:center;padding:14px 0;border-bottom:1px solid var(--dv-divider);opacity:{{ su.opacity }}">
+          <div style="display:flex;flex-direction:column;gap:3px;min-width:0">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span style="font-size:15px;font-weight:600;text-decoration:{{ su.deco }}">{{ su.name }}</span><span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:6px;background:{{ su.tagBg }};color:{{ su.tagColor }}">{{ su.tag }}</span><span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:6px;background:{{ su.useBg }};color:{{ su.useColor }}">{{ su.use }}</span></div>
+            <span style="font-size:12px;color:#8A5A70">{{ su.meta }}</span>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end"><span style="font-family:'DM Mono',monospace;font-size:15px">{{ su.amount }}</span><span style="font-size:11px;color:#8A5A70">{{ su.cycle }}</span></div>
+          <button onClick="{{ su.toggle }}" style="border:0;background:{{ su.btnBg }};color:{{ su.btnColor }};border-radius:6px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap" style-hover="background:var(--dv-blush2)">{{ su.btnLabel }}</button>
+        </div>
+      </sc-for>
+    </div>
+    <div style="background:var(--dv-blush);border-radius:10px;padding:16px 20px;font-size:14px;color:var(--dv-rose);line-height:1.45"><strong>Advisor:</strong> {{ subsInsight }} <a href="#" onClick="{{ goAdvisor }}" style="font-weight:600">Help me cancel →</a></div>
   </section>
   </sc-if>
 
   <sc-if value="{{ isGoals }}" hint-placeholder-val="{{ false }}">
-  <section data-screen-label="Goals" style="display:flex;flex-direction:column;gap:16px">
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px">
+  <section data-screen-label="Goals" style="display:flex;flex-direction:column;gap:18px">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px">
       <sc-for list="{{ goals }}" as="g" hint-placeholder-count="3">
-        <div style="background:#FFFFFF;border:1px solid #F0E4E6;border-radius:24px;padding:24px;display:flex;flex-direction:column;gap:14px">
-          <div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-size:15px;font-weight:600">{{ g.name }}</span><span style="font-size:12px;color:#7A6A6F">by {{ g.by }}</span></div>
-          <div style="display:flex;align-items:baseline;gap:8px"><span style="font-family:'Outfit',sans-serif;font-weight:500;font-size:40px;line-height:1">{{ g.savedFmt }}</span><span style="font-size:13px;color:#7A6A6F">of {{ g.targetFmt }}</span></div>
-          <div style="height:10px;border-radius:999px;background:#FBE4EA;overflow:hidden"><div style="height:100%;border-radius:999px;background:#EC6A94;width:{{ g.pct }}"></div></div>
-          <span style="font-size:13px;color:#7A6A6F">{{ g.pace }}</span>
+        <div style="background:#FFFFFF;border:0;box-shadow:5px 5px 0 var(--dv-shadow);border-radius:12px;padding:24px;display:flex;flex-direction:column;gap:14px">
+          <div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-size:15px;font-weight:600">{{ g.name }}</span><span style="font-size:12px;color:#8A5A70">by {{ g.by }}</span></div>
+          <div style="display:flex;align-items:baseline;gap:8px"><span style="font-family:'Outfit',sans-serif;font-weight:500;font-size:40px;line-height:1">{{ g.savedFmt }}</span><span style="font-size:13px;color:#8A5A70">of {{ g.targetFmt }}</span></div>
+          <div style="height:10px;border-radius:6px;background:var(--dv-blush);overflow:hidden"><div style="height:100%;border-radius:6px;background:var(--dv-pink);width:{{ g.pct }}"></div></div>
+          <span style="font-size:13px;color:#8A5A70">{{ g.pace }}</span>
           <div style="display:flex;gap:8px">
-            <button onClick="{{ g.add50 }}" style="flex:1;border:0;background:#FBE4EA;color:#A12A56;border-radius:12px;padding:10px;font-size:13px;font-weight:600;cursor:pointer" style-hover="background:#F7D2DC">+ {{ g.step1 }}</button>
-            <button onClick="{{ g.add200 }}" style="flex:1;border:0;background:#EC6A94;color:#FFFFFF;border-radius:12px;padding:10px;font-size:13px;font-weight:600;cursor:pointer" style-hover="background:#D9507D">+ {{ g.step2 }}</button>
+            <button onClick="{{ g.add50 }}" style="flex:1;border:0;box-shadow:3px 3px 0 var(--dv-shadow);background:var(--dv-blush);color:var(--dv-rose);border-radius:12px;padding:10px;font-size:13px;font-weight:600;cursor:pointer" style-hover="background:var(--dv-blush2)">+ {{ g.step1 }}</button>
+            <button onClick="{{ g.add200 }}" style="flex:1;border:0;box-shadow:3px 3px 0 var(--dv-shadow);background:var(--dv-pink);color:#FFFFFF;border-radius:12px;padding:10px;font-size:13px;font-weight:600;cursor:pointer" style-hover="background:var(--dv-solid)">+ {{ g.step2 }}</button>
           </div>
         </div>
       </sc-for>
-      <button onClick="{{ goAdvisor }}" style="border:1.5px dashed #F0C3D0;background:transparent;border-radius:24px;padding:24px;min-height:200px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;cursor:pointer;color:#7A6A6F" style-hover="border-color:#EC6A94;background:#FBE4EA"><span style="font-family:'Outfit',sans-serif;font-weight:500;font-size:28px;color:#2B2224">New goal</span><span style="font-size:13px">Set one with the advisor</span></button>
+      <button onClick="{{ goAdvisor }}" style="border:1.5px dashed var(--dv-shadow);background:transparent;border-radius:12px;padding:24px;min-height:200px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;cursor:pointer;color:#8A5A70" style-hover="border-color:var(--dv-pink);background:var(--dv-blush)"><span style="font-family:'Outfit',sans-serif;font-weight:500;font-size:28px;color:#2B2224">New goal</span><span style="font-size:13px">Set one with the advisor</span></button>
     </div>
-    <div style="background:#FFFFFF;border:1px solid #F0E4E6;border-radius:16px;padding:16px 20px;font-size:14px;line-height:1.45;color:#7A6A6F">Contributions come out of <strong style="color:#2B2224">Personal · Savings</strong> and never touch the tax reserve.</div>
+    <div style="background:#FFFFFF;border:0;box-shadow:4px 4px 0 var(--dv-shadow);border-radius:10px;padding:16px 20px;font-size:14px;line-height:1.45;color:#8A5A70">Contributions come out of <strong style="color:#2B2224">Personal · Savings</strong> and never touch the tax reserve.</div>
   </section>
   </sc-if>
 
   <sc-if value="{{ isHabits }}" hint-placeholder-val="{{ false }}">
-  <section data-screen-label="Habits" style="display:flex;flex-direction:column;gap:16px">
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px">
-      <div style="background:#FFFFFF;border:1px solid #F0E4E6;border-radius:24px;padding:24px;display:flex;flex-direction:column;gap:6px">
-        <span style="font-size:12px;font-weight:600;color:#C2386A;text-transform:uppercase;letter-spacing:.1em">Runway</span>
+  <section data-screen-label="Habits" style="display:flex;flex-direction:column;gap:18px">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px">
+      <div style="background:#FFFFFF;border:0;box-shadow:5px 5px 0 var(--dv-shadow);border-radius:12px;padding:24px;display:flex;flex-direction:column;gap:6px">
+        <span style="font-size:12px;font-weight:600;color:var(--dv-deep);text-transform:uppercase;letter-spacing:.1em">Runway</span>
         <span style="font-family:'Outfit',sans-serif;font-weight:500;font-size:48px;line-height:1;letter-spacing:-.03em">{{ runway }}</span>
-        <span style="font-size:14px;color:#7A6A6F;line-height:1.45">months you could live with zero income, at this month's spending.</span>
+        <span style="font-size:14px;color:#8A5A70;line-height:1.45">months you could live with zero income, at this month's spending.</span>
       </div>
-      <div style="background:#D9507D;color:#FFFFFF;border-radius:24px;padding:24px;display:flex;flex-direction:column;gap:6px">
-        <span style="font-size:12px;font-weight:600;color:#FBE4EA;text-transform:uppercase;letter-spacing:.1em">Freedom date</span>
+      <div style="background:var(--dv-solid);color:#FFFFFF;border:0;box-shadow:5px 5px 0 var(--dv-shadow);border-radius:12px;padding:24px;display:flex;flex-direction:column;gap:6px">
+        <span style="font-size:12px;font-weight:600;color:var(--dv-blush);text-transform:uppercase;letter-spacing:.1em">Freedom date</span>
         <span style="font-family:'Outfit',sans-serif;font-weight:500;font-size:48px;line-height:1;letter-spacing:-.03em">{{ freedomDate }}</span>
-        <span style="font-size:14px;color:#FBE4EA;line-height:1.45">{{ freedomNote }}</span>
+        <span style="font-size:14px;color:var(--dv-blush);line-height:1.45">{{ freedomNote }}</span>
       </div>
-      <div style="background:#FBE4EA;border-radius:24px;padding:24px;display:flex;flex-direction:column;gap:10px;color:#A12A56">
+      <div style="background:var(--dv-blush);border:0;box-shadow:5px 5px 0 var(--dv-shadow);border-radius:12px;padding:24px;display:flex;flex-direction:column;gap:10px;color:var(--dv-rose)">
         <span style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.1em">Streaks</span>
         <sc-for list="{{ streaks }}" as="st" hint-placeholder-count="3">
-          <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:6px 0;border-top:1px solid #F7D2DC"><span style="font-size:14px">{{ st.label }}</span><span style="font-family:'Outfit',sans-serif;font-weight:600;font-size:20px;color:#2B2224;white-space:nowrap">{{ st.value }}</span></div>
+          <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:6px 0;border-top:1px solid var(--dv-blush2)"><span style="font-size:14px">{{ st.label }}</span><span style="font-family:'Outfit',sans-serif;font-weight:600;font-size:20px;color:#2B2224;white-space:nowrap">{{ st.value }}</span></div>
         </sc-for>
       </div>
     </div>
 
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px">
-      <div style="background:#FFFFFF;border:1px solid #F0E4E6;border-radius:24px;padding:24px;display:flex;flex-direction:column;gap:10px">
-        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px"><span style="font-size:15px;font-weight:600">Worth it?</span><span style="font-size:12px;color:#7A6A6F">{{ regretSummary }}</span></div>
-        <span style="font-size:13px;color:#7A6A6F;line-height:1.45">Your own verdict on recent spending. The advisor uses this, not its opinion.</span>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px">
+      <div style="background:#FFFFFF;border:0;box-shadow:5px 5px 0 var(--dv-shadow);border-radius:12px;padding:24px;display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px"><span style="font-size:15px;font-weight:600">Worth it?</span><span style="font-size:12px;color:#8A5A70">{{ regretSummary }}</span></div>
+        <span style="font-size:13px;color:#8A5A70;line-height:1.45">Your own verdict on recent spending. The advisor uses this, not its opinion.</span>
         <sc-for list="{{ regrets }}" as="rg" hint-placeholder-count="4">
-          <div style="display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;padding:10px 0;border-top:1px solid #F6ECEE">
-            <div style="display:flex;flex-direction:column;min-width:0"><span style="font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ rg.name }}</span><span style="font-size:12px;color:#7A6A6F">{{ rg.meta }}</span></div>
+          <div style="display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;padding:10px 0;border-top:1px solid var(--dv-divider)">
+            <div style="display:flex;flex-direction:column;min-width:0"><span style="font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ rg.name }}</span><span style="font-size:12px;color:#8A5A70">{{ rg.meta }}</span></div>
             <div style="display:flex;gap:6px">
-              <button onClick="{{ rg.yes }}" style="border:0;cursor:pointer;border-radius:999px;padding:6px 12px;font-size:12px;font-weight:600;background:{{ rg.yesBg }};color:{{ rg.yesColor }}">Worth it</button>
-              <button onClick="{{ rg.no }}" style="border:0;cursor:pointer;border-radius:999px;padding:6px 12px;font-size:12px;font-weight:600;background:{{ rg.noBg }};color:{{ rg.noColor }}">Not really</button>
+              <button onClick="{{ rg.yes }}" style="border:0;cursor:pointer;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;background:{{ rg.yesBg }};color:{{ rg.yesColor }}">Worth it</button>
+              <button onClick="{{ rg.no }}" style="border:0;cursor:pointer;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;background:{{ rg.noBg }};color:{{ rg.noColor }}">Not really</button>
             </div>
           </div>
         </sc-for>
       </div>
 
-      <div style="display:flex;flex-direction:column;gap:16px">
-        <div style="background:#FFFFFF;border:1px solid #F0E4E6;border-radius:24px;padding:24px;display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;flex-direction:column;gap:18px">
+        <div style="background:#FFFFFF;border:0;box-shadow:5px 5px 0 var(--dv-shadow);border-radius:12px;padding:24px;display:flex;flex-direction:column;gap:10px">
           <span style="font-size:15px;font-weight:600">Patterns</span>
-          <span style="font-size:13px;color:#7A6A6F;line-height:1.45">Unflattering on purpose. Pulled from the last 90 days.</span>
+          <span style="font-size:13px;color:#8A5A70;line-height:1.45">Unflattering on purpose. Pulled from the last 90 days.</span>
           <sc-for list="{{ patterns }}" as="pt" hint-placeholder-count="3">
-            <div style="display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-top:1px solid #F6ECEE"><span style="flex:none;margin-top:6px;width:8px;height:8px;border-radius:50%;background:{{ pt.color }}"></span><span style="font-size:14px;line-height:1.4">{{ pt.text }}</span></div>
+            <div style="display:flex;gap:12px;align-items:flex-start;padding:10px 0;border-top:1px solid var(--dv-divider)"><span style="flex:none;margin-top:6px;width:8px;height:8px;border-radius:50%;background:{{ pt.color }}"></span><span style="font-size:14px;line-height:1.4">{{ pt.text }}</span></div>
           </sc-for>
         </div>
-        <button onClick="{{ askTruth }}" style="text-align:left;border:0;cursor:pointer;background:#FBE4EA;border-radius:24px;padding:22px 24px;display:flex;flex-direction:column;gap:6px;color:#A12A56" style-hover="background:#F7D2DC">
+        <button onClick="{{ askTruth }}" style="text-align:left;border:0;cursor:pointer;background:var(--dv-blush);border:0;box-shadow:5px 5px 0 var(--dv-shadow);border-radius:12px;padding:22px 24px;display:flex;flex-direction:column;gap:6px;color:var(--dv-rose)" style-hover="background:var(--dv-blush2)">
           <span style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.1em">Weekly truth report</span>
           <span style="font-family:'Outfit',sans-serif;font-weight:500;font-size:20px;color:#2B2224;line-height:1.2">Ask the advisor for this week's honest read →</span>
           <span style="font-size:13px;line-height:1.45">Every Monday. Must name at least one flaw, even in a good week.</span>
@@ -252,73 +298,73 @@ button,input{font-family:inherit}
   </sc-if>
 
   <sc-if value="{{ isAdvisor }}" hint-placeholder-val="{{ false }}">
-  <section data-screen-label="Advisor" style="display:flex;flex-direction:column;gap:12px;background:#FFFFFF;border:1px solid #F0E4E6;border-radius:24px;overflow:hidden;min-height:560px">
+  <section data-screen-label="Advisor" style="display:flex;flex-direction:column;gap:12px;background:#FFFFFF;border:0;box-shadow:5px 5px 0 var(--dv-shadow);border-radius:12px;overflow:hidden;min-height:560px">
     <div ref="{{ chatRef }}" style="flex:1;overflow-y:auto;padding:24px;display:flex;flex-direction:column;gap:14px;max-height:60vh">
       <sc-for list="{{ messages }}" as="m" hint-placeholder-count="3">
         <div style="display:flex;justify-content:{{ m.justify }}">
-          <div style="max-width:78%;padding:12px 16px;border-radius:18px;font-size:14.5px;line-height:1.5;white-space:pre-wrap;background:{{ m.bg }};color:{{ m.color }}">{{ m.text }}</div>
+          <div style="max-width:78%;padding:12px 16px;border-radius:10px;font-size:14.5px;line-height:1.5;white-space:pre-wrap;border:0;box-shadow:3px 3px 0 var(--dv-shadow);background:{{ m.bg }};color:{{ m.color }}">{{ m.text }}</div>
         </div>
       </sc-for>
       {{ typingIndicator }}
     </div>
     <div style="display:flex;gap:8px;padding:0 24px;flex-wrap:wrap">
       <sc-for list="{{ suggestions }}" as="s" hint-placeholder-count="3">
-        <button onClick="{{ s.go }}" style="border:0;background:#FBE4EA;border-radius:999px;padding:8px 14px;font-size:12.5px;cursor:pointer;color:#A12A56;font-weight:500" style-hover="background:#F7D2DC">{{ s.label }}</button>
+        <button onClick="{{ s.go }}" style="border:0;background:var(--dv-blush);border-radius:6px;padding:8px 14px;font-size:12.5px;cursor:pointer;color:var(--dv-rose);font-weight:500" style-hover="background:var(--dv-blush2)">{{ s.label }}</button>
       </sc-for>
     </div>
-    <div style="display:flex;gap:10px;padding:16px 24px 24px;border-top:1px solid #F6ECEE;margin-top:6px">
-      <input value="{{ draft }}" onChange="{{ onDraft }}" onKeyDown="{{ onKey }}" placeholder="Ask about your money…" style="flex:1;border:1px solid #F0E4E6;border-radius:14px;padding:12px 14px;font-size:14px;outline:none;background:#FAF6F3;color:#2B2224" style-focus="border-color:#EC6A94;background:#FFFFFF">
-      <button onClick="{{ send }}" style="border:0;background:#EC6A94;color:#FFFFFF;border-radius:14px;padding:0 18px;font-size:14px;font-weight:600;cursor:pointer" style-hover="background:#D9507D">Send</button>
+    <div style="display:flex;gap:10px;padding:16px 24px 24px;border-top:1px solid var(--dv-divider);margin-top:6px">
+      <input value="{{ draft }}" onChange="{{ onDraft }}" onKeyDown="{{ onKey }}" placeholder="Ask about your money…" style="flex:1;border:0;box-shadow:3px 3px 0 var(--dv-shadow);border-radius:14px;padding:12px 14px;font-size:14px;outline:none;background:var(--dv-bg);color:#2B2224" style-focus="border-color:var(--dv-pink);background:#FFFFFF">
+      <button onClick="{{ send }}" style="border:0;box-shadow:3px 3px 0 var(--dv-shadow);background:var(--dv-pink);color:#FFFFFF;border-radius:14px;padding:0 18px;font-size:14px;font-weight:600;cursor:pointer" style-hover="background:var(--dv-solid)">Send</button>
     </div>
-    <div style="padding:0 24px 16px;font-size:12px;color:#B3A3A8">Runs locally on your server. Your statements never leave it.</div>
+    <div style="padding:0 24px 16px;font-size:12px;color:#C9A0B3">Runs locally on your server. Your statements never leave it.</div>
   </section>
   </sc-if>
 
   <sc-if value="{{ isSync }}" hint-placeholder-val="{{ false }}">
-  <section data-screen-label="Sync" style="display:flex;flex-direction:column;gap:16px">
-    <div style="background:#FFFFFF;border:1px solid #F0E4E6;border-radius:24px;padding:8px 24px">
+  <section data-screen-label="Sync" style="display:flex;flex-direction:column;gap:18px">
+    <div style="background:#FFFFFF;border:0;box-shadow:5px 5px 0 var(--dv-shadow);border-radius:12px;padding:8px 24px">
       <sc-for list="{{ sources }}" as="src" hint-placeholder-count="3">
-        <div style="display:grid;grid-template-columns:1fr auto;gap:16px;align-items:center;padding:16px 0;border-bottom:1px solid #F6ECEE">
-          <div style="display:flex;flex-direction:column;gap:3px"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span style="width:8px;height:8px;border-radius:50%;background:{{ src.dot }}"></span><span style="font-size:15px;font-weight:600">{{ src.name }}</span><span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;background:{{ src.tagBg }};color:{{ src.tagColor }}">{{ src.tag }}</span></div><span style="font-size:13px;color:#7A6A6F">{{ src.detail }}</span></div>
-          <span style="font-family:'DM Mono',monospace;font-size:12px;color:#7A6A6F;text-align:right">{{ src.when }}</span>
+        <div style="display:grid;grid-template-columns:1fr auto;gap:16px;align-items:center;padding:16px 0;border-bottom:1px solid var(--dv-divider)">
+          <div style="display:flex;flex-direction:column;gap:3px"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span style="width:8px;height:8px;border-radius:50%;background:{{ src.dot }}"></span><span style="font-size:15px;font-weight:600">{{ src.name }}</span><span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:6px;background:{{ src.tagBg }};color:{{ src.tagColor }}">{{ src.tag }}</span></div><span style="font-size:13px;color:#8A5A70">{{ src.detail }}</span></div>
+          <span style="font-family:'DM Mono',monospace;font-size:12px;color:#8A5A70;text-align:right">{{ src.when }}</span>
         </div>
       </sc-for>
       <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 0;gap:12px;flex-wrap:wrap">
-        <span style="font-size:13px;color:#7A6A6F">Auto-sync every 15 min. Xero via OAuth, banks via read-only Open Banking.</span>
-        <button onClick="{{ syncNow }}" style="border:0;background:#EC6A94;color:#FFFFFF;border-radius:999px;padding:10px 18px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:8px" style-hover="background:#D9507D">{{ syncSpinner }}{{ syncBtnLabel }}</button>
+        <span style="font-size:13px;color:#8A5A70">Auto-sync every 15 min. Xero via OAuth, banks via read-only Open Banking.</span>
+        <button onClick="{{ syncNow }}" style="border:0;box-shadow:3px 3px 0 var(--dv-shadow);background:var(--dv-pink);color:#FFFFFF;border-radius:6px;padding:10px 18px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:8px" style-hover="background:var(--dv-solid)">{{ syncSpinner }}{{ syncBtnLabel }}</button>
       </div>
     </div>
-    <div style="background:#FFFFFF;border:1px solid #F0E4E6;border-radius:24px;padding:24px;display:flex;flex-direction:column;gap:10px">
+    <div style="background:#FFFFFF;border:0;box-shadow:5px 5px 0 var(--dv-shadow);border-radius:12px;padding:24px;display:flex;flex-direction:column;gap:10px">
       <span style="font-size:15px;font-weight:600">Pulled from Xero this week</span>
       <sc-for list="{{ xeroItems }}" as="x" hint-placeholder-count="3">
-        <div style="display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-top:1px solid #F6ECEE;font-size:14px"><span>{{ x.name }}</span><span style="font-family:'DM Mono',monospace;color:{{ x.color }}">{{ x.amount }}</span></div>
+        <div style="display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-top:1px solid var(--dv-divider);font-size:14px"><span>{{ x.name }}</span><span style="font-family:'DM Mono',monospace;color:{{ x.color }}">{{ x.amount }}</span></div>
       </sc-for>
     </div>
   </section>
   </sc-if>
 
   <sc-if value="{{ isPrivacy }}" hint-placeholder-val="{{ false }}">
-  <section data-screen-label="Privacy" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px">
-    <div style="grid-column:1/-1;background:#D9507D;color:#FFFFFF;border-radius:24px;padding:32px;display:flex;flex-direction:column;gap:12px">
+  <section data-screen-label="Privacy" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px">
+    <div style="grid-column:1/-1;background:var(--dv-solid);color:#FFFFFF;border:0;box-shadow:5px 5px 0 var(--dv-shadow);border-radius:12px;padding:32px;display:flex;flex-direction:column;gap:12px">
       <span style="font-family:'Outfit',sans-serif;font-weight:500;font-size:34px;line-height:1.1;max-width:560px;text-wrap:pretty">Your money data lives on one machine. Yours.</span>
-      <span style="font-size:15px;color:#FBE4EA;max-width:560px;line-height:1.5;text-wrap:pretty">Divvy runs on your own server. The bank feeds, the Xero sync, the advisor model — all of it stays inside that box. There is no Divvy cloud.</span>
+      <span style="font-size:15px;color:var(--dv-blush);max-width:560px;line-height:1.5;text-wrap:pretty">Divvy runs on your own server. The bank feeds, the Xero sync, the advisor model — all of it stays inside that box. There is no Divvy cloud.</span>
     </div>
-    <div style="background:#FFFFFF;border:1px solid #F0E4E6;border-radius:24px;padding:24px;display:flex;flex-direction:column;gap:6px"><span style="font-size:12px;font-weight:600;color:#C2386A;text-transform:uppercase;letter-spacing:.1em">Banks</span><span style="font-size:15px;font-weight:600">Read-only access</span><span style="font-size:14px;color:#7A6A6F;line-height:1.5">Open Banking tokens can see balances and transactions. They cannot move money. Re-consent every 90 days.</span></div>
-    <div style="background:#FFFFFF;border:1px solid #F0E4E6;border-radius:24px;padding:24px;display:flex;flex-direction:column;gap:6px"><span style="font-size:12px;font-weight:600;color:#C2386A;text-transform:uppercase;letter-spacing:.1em">Advisor</span><span style="font-size:15px;font-weight:600">Local model</span><span style="font-size:14px;color:#7A6A6F;line-height:1.5">Runs on the server's own hardware. Prompts and answers are never sent to a third-party API.</span></div>
-    <div style="background:#FFFFFF;border:1px solid #F0E4E6;border-radius:24px;padding:24px;display:flex;flex-direction:column;gap:6px"><span style="font-size:12px;font-weight:600;color:#C2386A;text-transform:uppercase;letter-spacing:.1em">Storage</span><span style="font-size:15px;font-weight:600">Encrypted at rest</span><span style="font-size:14px;color:#7A6A6F;line-height:1.5">Database and backups are encrypted. Nightly backup to a drive you control.</span></div>
-    <div style="background:#FBE4EA;border-radius:24px;padding:24px;display:flex;flex-direction:column;gap:10px;color:#A12A56">
+    <div style="background:#FFFFFF;border:0;box-shadow:5px 5px 0 var(--dv-shadow);border-radius:12px;padding:24px;display:flex;flex-direction:column;gap:6px"><span style="font-size:12px;font-weight:600;color:var(--dv-deep);text-transform:uppercase;letter-spacing:.1em">Banks</span><span style="font-size:15px;font-weight:600">Read-only access</span><span style="font-size:14px;color:#8A5A70;line-height:1.5">Open Banking tokens can see balances and transactions. They cannot move money. Re-consent every 90 days.</span></div>
+    <div style="background:#FFFFFF;border:0;box-shadow:5px 5px 0 var(--dv-shadow);border-radius:12px;padding:24px;display:flex;flex-direction:column;gap:6px"><span style="font-size:12px;font-weight:600;color:var(--dv-deep);text-transform:uppercase;letter-spacing:.1em">Advisor</span><span style="font-size:15px;font-weight:600">Local model</span><span style="font-size:14px;color:#8A5A70;line-height:1.5">Runs on the server's own hardware. Prompts and answers are never sent to a third-party API.</span></div>
+    <div style="background:#FFFFFF;border:0;box-shadow:5px 5px 0 var(--dv-shadow);border-radius:12px;padding:24px;display:flex;flex-direction:column;gap:6px"><span style="font-size:12px;font-weight:600;color:var(--dv-deep);text-transform:uppercase;letter-spacing:.1em">Storage</span><span style="font-size:15px;font-weight:600">Encrypted at rest</span><span style="font-size:14px;color:#8A5A70;line-height:1.5">Database and backups are encrypted. Nightly backup to a drive you control.</span></div>
+    <div style="background:var(--dv-blush);border:0;box-shadow:5px 5px 0 var(--dv-shadow);border-radius:12px;padding:24px;display:flex;flex-direction:column;gap:10px;color:var(--dv-rose)">
       <span style="font-size:15px;font-weight:600">Server</span>
-      <div style="display:flex;justify-content:space-between;font-size:14px;padding:8px 0;border-top:1px solid #F7D2DC"><span>Host</span><span style="font-family:'DM Mono',monospace;color:#2B2224">home-box · 192.168.1.20</span></div>
-      <div style="display:flex;justify-content:space-between;font-size:14px;padding:8px 0;border-top:1px solid #F7D2DC"><span>Uptime</span><span style="font-family:'DM Mono',monospace;color:#2B2224">41 days</span></div>
-      <div style="display:flex;justify-content:space-between;font-size:14px;padding:8px 0;border-top:1px solid #F7D2DC"><span>Last backup</span><span style="font-family:'DM Mono',monospace;color:#2B2224">02:00 today</span></div>
-      <div style="display:flex;justify-content:space-between;font-size:14px;padding:8px 0;border-top:1px solid #F7D2DC"><span>Outbound calls</span><span style="font-family:'DM Mono',monospace;color:#2B2224">banks, Xero only</span></div>
+      <div style="display:flex;justify-content:space-between;font-size:14px;padding:8px 0;border-top:1px solid var(--dv-blush2)"><span>Host</span><span style="font-family:'DM Mono',monospace;color:#2B2224">home-box · 192.168.1.20</span></div>
+      <div style="display:flex;justify-content:space-between;font-size:14px;padding:8px 0;border-top:1px solid var(--dv-blush2)"><span>Uptime</span><span style="font-family:'DM Mono',monospace;color:#2B2224">41 days</span></div>
+      <div style="display:flex;justify-content:space-between;font-size:14px;padding:8px 0;border-top:1px solid var(--dv-blush2)"><span>Last backup</span><span style="font-family:'DM Mono',monospace;color:#2B2224">02:00 today</span></div>
+      <div style="display:flex;justify-content:space-between;font-size:14px;padding:8px 0;border-top:1px solid var(--dv-blush2)"><span>Outbound calls</span><span style="font-family:'DM Mono',monospace;color:#2B2224">banks, Xero only</span></div>
     </div>
   </section>
   </sc-if>
 </main>
 
 <sc-if value="{{ isMobile }}" hint-placeholder-val="{{ false }}">
-<nav style="position:fixed;left:0;right:0;bottom:0;display:flex;background:#FFFFFF;border-top:1px solid #F0E4E6;padding:8px 8px calc(8px + env(safe-area-inset-bottom))">
+<nav style="position:fixed;left:0;right:0;bottom:0;display:flex;background:#FFFFFF;border-top:1px solid var(--dv-border);padding:8px 8px calc(8px + env(safe-area-inset-bottom))">
   <sc-for list="{{ tabItems }}" as="tb" hint-placeholder-count="5">
     <button onClick="{{ tb.go }}" style="flex:1;border:0;background:transparent;cursor:pointer;padding:6px 4px;border-radius:12px;font-size:11px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:4px;color:{{ tb.color }};min-height:44px"><span style="width:30px;height:22px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:{{ tb.iconBg }};color:{{ tb.iconColor }}">{{ tb.icon }}</span>{{ tb.label }}</button>
   </sc-for>
@@ -326,7 +372,7 @@ button,input{font-family:inherit}
 </sc-if>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props="{&quot;currency&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;$&quot;,&quot;NZ$&quot;,&quot;£&quot;],&quot;default&quot;:&quot;$&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Money&quot;},&quot;taxRate&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:10,&quot;max&quot;:45,&quot;step&quot;:1,&quot;unit&quot;:&quot;%&quot;,&quot;default&quot;:25,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Money&quot;}}">
+<script type="text/x-dc" data-dc-script data-props="{&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Candy&quot;,&quot;Hot pink&quot;,&quot;Ballet&quot;,&quot;Magenta&quot;,&quot;Mauve&quot;],&quot;default&quot;:&quot;Candy&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Look&quot;},&quot;bgPink&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#FFF0F5&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Pinks&quot;},&quot;blushPink&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#FFD3E2&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Pinks&quot;},&quot;blushHover&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#FFBFD5&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Pinks&quot;},&quot;accentPink&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#FF5C9E&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Pinks&quot;},&quot;solidPink&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#F0418A&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Pinks&quot;},&quot;shadowPink&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#FF9CC4&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Pinks&quot;},&quot;deepRose&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#E0297A&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Pinks&quot;},&quot;roseText&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#B81E63&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Pinks&quot;},&quot;borderPink&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#F7C9D8&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Pinks&quot;},&quot;dividerPink&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#FBDDE7&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Pinks&quot;},&quot;currency&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;$&quot;,&quot;NZ$&quot;,&quot;£&quot;],&quot;default&quot;:&quot;$&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Money&quot;},&quot;taxRate&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:10,&quot;max&quot;:45,&quot;step&quot;:1,&quot;unit&quot;:&quot;%&quot;,&quot;default&quot;:25,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Money&quot;}}">
 class Component extends DCLogic {
   state = {
     screen: 'overview', filter: 'all', scope: 'all', width: 1200,
@@ -345,6 +391,17 @@ class Component extends DCLogic {
       { id: 4, name: 'Phone', amt: 22, day: 8, month: 'Nov', meta: 'Personal · Monzo', paid: false, side: 'personal' },
       { id: 5, name: 'Insurance', amt: 46, day: 12, month: 'Nov', meta: 'Strawb · Starling', paid: false, side: 'strawb' },
       { id: 6, name: 'Adobe', amt: 55, day: 15, month: 'Nov', meta: 'Strawb · 3 of 6 apps unused', paid: false, side: 'strawb' },
+    ],
+    subs: [
+      { id: 1, name: 'Adobe Creative Cloud', amt: 55, cycle: 'monthly', side: 'strawb', use: 'low', meta: '3 of 6 apps unused since August · renews 15 Nov', cancelled: false },
+      { id: 2, name: 'Xero', amt: 33, cycle: 'monthly', side: 'strawb', use: 'high', meta: 'Books · renews 3 Nov', cancelled: false },
+      { id: 3, name: 'Figma', amt: 12, cycle: 'monthly', side: 'strawb', use: 'high', meta: 'Used 22 days this month', cancelled: false },
+      { id: 4, name: 'Hetzner', amt: 18, cycle: 'monthly', side: 'strawb', use: 'high', meta: 'Runs Divvy', cancelled: false },
+      { id: 5, name: 'Spotify', amt: 12, cycle: 'monthly', side: 'personal', use: 'high', meta: 'Daily', cancelled: false },
+      { id: 6, name: 'iCloud 2TB', amt: 10, cycle: 'monthly', side: 'personal', use: 'mid', meta: 'Overlaps with Google One', cancelled: false },
+      { id: 7, name: 'Google One', amt: 3, cycle: 'monthly', side: 'personal', use: 'low', meta: 'Overlaps with iCloud · last opened June', cancelled: false },
+      { id: 8, name: 'Gym', amt: 45, cycle: 'monthly', side: 'personal', use: 'low', meta: '2 visits in 30 days', cancelled: false },
+      { id: 9, name: 'Domain renewals', amt: 48, cycle: 'yearly', side: 'strawb', use: 'high', meta: 'strawb.design · renews Mar', cancelled: false },
     ],
     goals: [
       { id: 1, name: 'Emergency fund', saved: 8120, target: 12000, by: 'Jun 2027', monthly: 350 },
@@ -367,9 +424,24 @@ class Component extends DCLogic {
     const el = this.rootRef.current; if (!el) return;
     this.ro = new ResizeObserver(([e]) => this.setState({ width: e.contentRect.width }));
     this.ro.observe(el);
+    this.applyTheme();
+  }
+  applyTheme() {
+    const el = this.rootRef.current; if (!el) return;
+    const themes = {
+      'Candy': { bg:'#FFF0F5', blush:'#FFD3E2', blush2:'#FFBFD5', pink:'#FF5C9E', solid:'#F0418A', shadow:'#FF9CC4', deep:'#E0297A', rose:'#B81E63', border:'#F7C9D8', divider:'#FBDDE7', soliddiv:'#F57AB0' },
+      'Hot pink': { bg:'#FFE6F1', blush:'#FFB8D6', blush2:'#FF9FC8', pink:'#FF2D8A', solid:'#E80D6F', shadow:'#FF7DB8', deep:'#C9085C', rose:'#A3074B', border:'#FFA6CC', divider:'#FFD0E3', soliddiv:'#F563A5' },
+      'Ballet': { bg:'#FBF3F4', blush:'#F8DCE2', blush2:'#F3CBD4', pink:'#E99AB0', solid:'#D97B96', shadow:'#F1C3CF', deep:'#B85C78', rose:'#9A4A63', border:'#F0D5DC', divider:'#F6E6EA', soliddiv:'#E5A3B6' },
+      'Magenta': { bg:'#FDEFF8', blush:'#F9CDEA', blush2:'#F5B6E0', pink:'#E8359F', solid:'#C81E86', shadow:'#F08ACB', deep:'#A8146F', rose:'#8A0F5B', border:'#F2BCE0', divider:'#F8DCEF', soliddiv:'#DD63B3' },
+      'Mauve': { bg:'#F7F0F4', blush:'#E9D2E0', blush2:'#DEC0D3', pink:'#D4AECB', solid:'#B98AAE', shadow:'#D9BCD0', deep:'#8E5F82', rose:'#744B6A', border:'#E3CBDA', divider:'#EFE0E9', soliddiv:'#C9A3BE' },
+    };
+    const t = { ...(themes[this.props.theme] || themes['Candy']) };
+    const p = this.props, ov = { bg: p.bgPink, blush: p.blushPink, blush2: p.blushHover, pink: p.accentPink, solid: p.solidPink, shadow: p.shadowPink, deep: p.deepRose, rose: p.roseText, border: p.borderPink, divider: p.dividerPink };
+    for (const k in ov) if (ov[k]) t[k] = ov[k];
+    for (const k in t) el.style.setProperty('--dv-' + k, t[k]);
   }
   componentWillUnmount() { this.ro && this.ro.disconnect(); clearTimeout(this.t1); clearTimeout(this.t2); }
-  componentDidUpdate() { const c = this.chatRef.current; if (c) c.scrollTop = c.scrollHeight; }
+  componentDidUpdate() { this.applyTheme(); const c = this.chatRef.current; if (c) c.scrollTop = c.scrollHeight; }
   sym() { return this.props.currency ?? '$'; }
   fmt(n) { const neg = n < 0; n = Math.abs(n); return (neg ? '−' : '') + this.sym() + Math.round(n).toLocaleString('en-GB'); }
   runway() { return ((2140 + 10170 + 6820) / 2460).toFixed(1); }
@@ -379,6 +451,7 @@ class Component extends DCLogic {
       overview: ['M4 11.5 12 5l8 6.5', 'M6.5 10v9h11v-9', 'M10 19v-5h4v5'],
       budgets: ['M12 3a9 9 0 1 0 9 9h-9z', 'M15 3.5A9 9 0 0 1 20.5 9H15z'],
       bills: ['M7 3.5h10v17l-2.5-1.5L12 20.5 9.5 19 7 20.5z', 'M9.5 8.5h5', 'M9.5 12h5', 'M9.5 15.5h3'],
+      subs: ['M5 7h14', 'M5 12h14', 'M5 17h14', 'M18 15.5l1.5 1.5-1.5 1.5'],
       goals: ['M12 20s-7-4.4-7-9.6A3.9 3.9 0 0 1 12 8a3.9 3.9 0 0 1 7 2.4C19 15.6 12 20 12 20z'],
       advisor: ['M12 4v3', 'M12 17v3', 'M4 12h3', 'M17 12h3', 'M12 8.5 13.3 10.7 15.5 12 13.3 13.3 12 15.5 10.7 13.3 8.5 12 10.7 10.7z'],
       sync: ['M5 12a7 7 0 0 1 12-5l1.5 1.5', 'M18.5 5v3.5H15', 'M19 12a7 7 0 0 1-12 5L5.5 15.5', 'M5.5 19v-3.5H9'],
@@ -405,7 +478,7 @@ class Component extends DCLogic {
   renderVals() {
     const s = this.state, f = (n) => this.fmt(n), w = s.width;
     const isMobile = w < 720, isDesktop = !isMobile;
-    const P = '#EC6A94', DEEP = '#C2386A', ROSE = '#A12A56', BLUSH = '#FBE4EA', INK = '#2B2224', MUTED = '#7A6A6F', OK = '#3E9A6E', WARN = '#D9893A', RED = '#D23F5B';
+    const P = 'var(--dv-pink)', DEEP = 'var(--dv-deep)', ROSE = 'var(--dv-rose)', BLUSH = 'var(--dv-blush)', INK = '#2B2224', MUTED = '#8A5A70', OK = '#3E9A6E', WARN = '#D9893A', RED = '#D23F5B';
     const sc = s.scope, inScope = (side) => sc === 'all' || side === sc;
     const scopes = [['all', 'All'], ['personal', 'Personal'], ['strawb', 'Strawb']].map(([k, l]) => ({ label: l, go: () => this.setState({ scope: k, filter: k === 'all' ? 'all' : k }), bg: sc === k ? '#FFFFFF' : 'transparent', color: sc === k ? DEEP : ROSE }));
 
@@ -430,6 +503,7 @@ class Component extends DCLogic {
       overview: ['Good morning', 'Thursday 23 October'],
       budgets: ['Budgets', 'Resets on payday · 23 days left'],
       bills: ['Upcoming bills', f(billsDueN) + ' due before payday'],
+      subs: ['Subscriptions', 'Recurring charges, found automatically'],
       goals: ['Goals', 'Funded from Personal · Savings'],
       habits: ['Habits', 'An honest mirror · last 90 days'],
       advisor: ['Advisor', 'Private · runs on your server'],
@@ -437,7 +511,7 @@ class Component extends DCLogic {
       privacy: ['Privacy', 'How Divvy keeps your data yours'],
     };
     const navDef = [
-      ['overview', 'Overview', '◐'], ['budgets', 'Budgets', 'B'], ['bills', 'Bills', 'Bi'], ['goals', 'Goals', 'G'], ['habits', 'Habits', 'H'], ['advisor', 'Advisor', 'A'], ['sync', 'Sync', 'S'], ['privacy', 'Privacy', 'P'],
+      ['overview', 'Overview', '◐'], ['budgets', 'Budgets', 'B'], ['bills', 'Bills', 'Bi'], ['subs', 'Subscriptions', 'Su'], ['goals', 'Goals', 'G'], ['habits', 'Habits', 'H'], ['advisor', 'Advisor', 'A'], ['sync', 'Sync', 'S'], ['privacy', 'Privacy', 'P'],
     ];
     const alertsAll = [
       { id: 'a1', side: 'personal', color: RED, text: 'Eating out is ' + f(30) + ' over budget with 23 days to go.', action: 'See budget', to: 'budgets' },
@@ -468,7 +542,7 @@ class Component extends DCLogic {
     const transactions = txAll.filter(t => inScope(t.side) && (s.filter === 'all' || t.side === s.filter)).map(t => ({
       ...t, amount: (t.amt < 0 ? '−' : '+') + this.sym() + Math.abs(t.amt).toFixed(2),
       amtColor: t.amt > 0 ? OK : INK,
-      tagBg: t.tag === 'B' ? '#D9507D' : t.tag === 'T' ? BLUSH : '#FAF6F3',
+      tagBg: t.tag === 'B' ? 'var(--dv-solid)' : t.tag === 'T' ? BLUSH : 'var(--dv-bg)',
       tagColor: t.tag === 'B' ? '#FFFFFF' : t.tag === 'T' ? ROSE : MUTED,
     }));
     const filters = [['all', 'All'], ['personal', 'Personal'], ['strawb', 'Strawb']].filter(([k]) => sc === 'all' || k === sc).map(([k, l]) => ({
@@ -490,13 +564,29 @@ class Component extends DCLogic {
 
     const bills = s.bills.filter(b => inScope(b.side)).map(b => ({
       ...b, amount: f(b.amt), deco: b.paid ? 'line-through' : 'none', opacity: b.paid ? 0.55 : 1,
-      dateBg: b.paid ? '#FAF6F3' : b.id <= 2 ? P : BLUSH, dateColor: b.paid ? MUTED : b.id <= 2 ? '#FFFFFF' : ROSE,
+      dateBg: b.paid ? 'var(--dv-bg)' : b.id <= 2 ? P : BLUSH, dateColor: b.paid ? MUTED : b.id <= 2 ? '#FFFFFF' : ROSE,
       btnLabel: b.paid ? 'Paid' : 'Mark paid', btnBg: b.paid ? '#FFFFFF' : BLUSH, btnColor: b.paid ? MUTED : ROSE,
       toggle: () => this.setState(st => ({ bills: st.bills.map(x => x.id === b.id ? { ...x, paid: !x.paid } : x) })),
     }));
     const nextB = s.bills.find(b => !b.paid && inScope(b.side));
     const billsPaid = s.bills.filter(b => b.paid && inScope(b.side)).reduce((a, b) => a + b.amt, 0);
 
+    const subsIn = s.subs.filter(x => inScope(x.side));
+    const perMonth = (x) => x.cycle === 'yearly' ? x.amt / 12 : x.amt;
+    const live = subsIn.filter(x => !x.cancelled);
+    const subsMonthlyN = live.reduce((a, x) => a + perMonth(x), 0);
+    const subsWasteN = live.filter(x => x.use === 'low').reduce((a, x) => a + perMonth(x), 0);
+    const subs = subsIn.map(x => ({
+      ...x, amount: f(x.amt), cycle: x.cycle === 'yearly' ? 'per year' : 'per month',
+      tag: x.side === 'strawb' ? 'Strawb' : 'Personal', tagBg: x.side === 'strawb' ? 'var(--dv-blush)' : 'var(--dv-bg)', tagColor: x.side === 'strawb' ? ROSE : MUTED,
+      use: x.use === 'low' ? 'Barely used' : x.use === 'mid' ? 'Some use' : 'Used often',
+      useBg: x.use === 'low' ? '#FDE2E7' : x.use === 'mid' ? '#FFF1DC' : '#E3F3EA', useColor: x.use === 'low' ? RED : x.use === 'mid' ? WARN : OK,
+      deco: x.cancelled ? 'line-through' : 'none', opacity: x.cancelled ? 0.55 : 1,
+      btnLabel: x.cancelled ? 'Cancelled' : 'Cancel', btnBg: x.cancelled ? '#FFFFFF' : 'var(--dv-blush)', btnColor: x.cancelled ? MUTED : ROSE,
+      toggle: () => this.setState(st => ({ subs: st.subs.map(y => y.id === x.id ? { ...y, cancelled: !y.cancelled } : y) })),
+    }));
+    const lowLive = live.filter(x => x.use === 'low');
+    const subsInsight = lowLive.length ? lowLive.map(x => x.name).join(', ') + (lowLive.length > 1 ? ' are' : ' is') + ' barely used — ' + f(subsWasteN) + ' a month, ' + f(subsWasteN * 12) + ' a year.' : 'Nothing looks wasted. Every subscription is earning its keep.';
     const goals = s.goals.map(g => {
       const pct = Math.min(100, Math.round(g.saved / g.target * 100));
       const left = g.target - g.saved, months = left > 0 ? Math.ceil(left / g.monthly) : 0;
@@ -534,8 +624,8 @@ class Component extends DCLogic {
     const suggestions = ['Weekly truth report', 'What can I cut?', 'Am I on track for tax?', 'Set a goal', "Who owes me?"].map(l => ({ label: l, go: () => this.send(l) }));
 
     const sources = [
-      { name: 'Monzo', tag: 'Personal', tagBg: '#FAF6F3', tagColor: MUTED, dot: OK, detail: 'Open Banking · read-only · consent renews 14 Dec', when: s.synced ? 'just now' : '4 min ago' },
-      { name: 'Starling Business', tag: 'Strawb', tagBg: '#D9507D', tagColor: '#FFFFFF', dot: OK, detail: 'Open Banking · read-only · consent renews 2 Jan', when: s.synced ? 'just now' : '4 min ago' },
+      { name: 'Monzo', tag: 'Personal', tagBg: 'var(--dv-bg)', tagColor: MUTED, dot: OK, detail: 'Open Banking · read-only · consent renews 14 Dec', when: s.synced ? 'just now' : '4 min ago' },
+      { name: 'Starling Business', tag: 'Strawb', tagBg: 'var(--dv-solid)', tagColor: '#FFFFFF', dot: OK, detail: 'Open Banking · read-only · consent renews 2 Jan', when: s.synced ? 'just now' : '4 min ago' },
       { name: 'Xero', tag: 'Books', tagBg: BLUSH, tagColor: ROSE, dot: s.synced ? OK : WARN, detail: s.synced ? 'Invoices, bills and P&L up to date' : '1 invoice changed since last pull', when: s.synced ? 'just now' : '38 min ago' },
     ];
     const xeroItems = [
@@ -550,7 +640,7 @@ class Component extends DCLogic {
       rootRef: this.rootRef, chatRef: this.chatRef, isMobile, isDesktop,
       mainPad: isMobile ? '20px 16px' : '36px 40px',
       screenTitle: screens[s.screen][0], screenSub: screens[s.screen][1],
-      isOverview: s.screen === 'overview', isBudgets: s.screen === 'budgets', isBills: s.screen === 'bills', isGoals: s.screen === 'goals', isAdvisor: s.screen === 'advisor', isHabits: s.screen === 'habits', isSync: s.screen === 'sync', isPrivacy: s.screen === 'privacy',
+      isOverview: s.screen === 'overview', isBudgets: s.screen === 'budgets', isBills: s.screen === 'bills', isGoals: s.screen === 'goals', isAdvisor: s.screen === 'advisor', isHabits: s.screen === 'habits', isSubs: s.screen === 'subs', isSync: s.screen === 'sync', isPrivacy: s.screen === 'privacy',
       scopes, showPersonal: sc !== 'strawb', showStrawb: sc !== 'personal', navItems, tabItems, goSync: this.go('sync'), goPrivacy: this.go('privacy'), goAdvisor: (e) => { e && e.preventDefault && e.preventDefault(); this.setState({ screen: 'advisor' }); },
       syncDot: s.synced ? OK : WARN, syncLabel: s.synced ? 'Synced just now' : 'Synced 4 min ago',
       safeToSpend: f(safe), safePct: Math.round(safe / totalLiquid * 100) + '%', safePerDay: f(safe / daysLeft), daysLeft,
@@ -561,7 +651,7 @@ class Component extends DCLogic {
       alerts, noAlerts: alerts.length === 0, alertCountLabel: alerts.length ? alerts.length + ' open' : '',
       filters, transactions, budgets, budgetInsight,
       bills, nextBill: nextB ? f(nextB.amt) + ' · ' + nextB.day + ' ' + nextB.month : 'None', billsPaid: f(billsPaid),
-      goals,
+      goals, subs, subsMonthly: f(subsMonthlyN), subsYearly: f(subsMonthlyN * 12), subsWaste: f(subsWasteN), subsInsight,
       regrets, regretSummary, runway, freedomDate, freedomNote, streaks, patterns,
       askTruth: () => { this.setState({ screen: 'advisor' }); setTimeout(() => this.send('Weekly truth report'), 250); },
       messages, typingIndicator, suggestions, draft: s.draft,
