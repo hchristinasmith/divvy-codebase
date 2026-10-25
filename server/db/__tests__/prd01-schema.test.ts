@@ -116,6 +116,14 @@ const LATER = '2026-10-25T03:05:00.000Z'
 
 type Row = Record<string, unknown>
 
+// `row` without `column`, so the insert leaves it out. Not `{ column: undefined }`:
+// with `useNullAsDefault` knex binds that as NULL, which a column default
+// never sees, so it could not catch a default creeping in. The same helper is
+// in prd02-tables.test.ts.
+function omit(row: Row, column: string): Row {
+  return Object.fromEntries(Object.entries(row).filter(([key]) => key !== column))
+}
+
 let db: Knex
 
 async function columns(table: string): Promise<string[]> {
@@ -687,11 +695,17 @@ describe('category_corrections (Done-when 4)', () => {
         db('category_corrections').insert(correction({ transaction_id: settledId, source })),
       ).rejects.toThrow(/CHECK constraint failed: source/)
     }
+    const refusal = /NOT NULL constraint failed: category_corrections\.source$/
+    await expect(
+      db('category_corrections').insert(correction({ transaction_id: settledId, source: null })),
+      'set to null',
+    ).rejects.toThrow(refusal)
     await expect(
       db('category_corrections').insert(
-        correction({ transaction_id: settledId, source: undefined }),
+        omit(correction({ transaction_id: settledId }), 'source'),
       ),
-    ).rejects.toThrow(/NOT NULL constraint failed: category_corrections.source/)
+      'left out',
+    ).rejects.toThrow(refusal)
   })
 
   it('refuses a correction for a transaction that does not exist', async () => {
