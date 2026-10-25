@@ -23,6 +23,15 @@ describe('nzCalendarDate', () => {
     expect(run).toThrow(RangeError)
     expect(run).toThrow(/^date is not a valid instant$/)
   })
+
+  it('pads a year before 1000 to four digits', () => {
+    // Midday in NZ on 15 June in the year 50. Only the year is pinned: the
+    // formatter's calendar before 1582 is not one this module chose.
+    const at = new Date(0)
+    at.setUTCFullYear(50, 5, 15)
+    at.setUTCHours(1)
+    expect(nzCalendarDate(at)).toMatch(/^0050-\d{2}-\d{2}$/)
+  })
 })
 
 describe('billOccurrencesThrough', () => {
@@ -120,6 +129,24 @@ describe('billOccurrencesThrough', () => {
       billOccurrencesThrough(bill('weekly', '0050-12-28'), '0051-01-04'),
     ).toStrictEqual(['0050-12-28', '0051-01-04'])
   })
+
+  it('refuses a `through` that is not a calendar date, though the anchor is one', () => {
+    // A numeric `through`: one the loop's string comparison still ends on.
+    const run = () =>
+      billOccurrencesThrough(bill('weekly', '2026-10-07'), '2026-13-01')
+    expect(run).toThrow(RangeError)
+    expect(run).toThrow(/^a bill date is not a YYYY-MM-DD calendar date$/)
+  })
+
+  it('refuses a repeat it does not know rather than returning no occurrences', () => {
+    const run = () =>
+      billOccurrencesThrough(
+        { repeat: 'daily' as never, first_due_date: '2026-10-07' },
+        '2026-10-30',
+      )
+    expect(run).toThrow(RangeError)
+    expect(run).toThrow(/^a bill has an unknown repeat$/)
+  })
 })
 
 describe('addDaysIso', () => {
@@ -135,5 +162,28 @@ describe('addDaysIso', () => {
     const run = () => addDaysIso('2026-02-30', -1)
     expect(run).toThrow(RangeError)
     expect(run).toThrow(/^a bill date is not a YYYY-MM-DD calendar date$/)
+  })
+
+  it.each([
+    ['2026-10-00', 'day 0'],
+    ['2026-00-10', 'month 0'],
+    ['2026-13-01', 'month 13'],
+    ['2026-10-30x', 'text after the date'],
+    ['x2026-10-30', 'text before the date'],
+    ['2026-4-30', 'a one-digit month'],
+    ['', 'nothing'],
+  ])('refuses %s (%s), echoing no value', (value) => {
+    const run = () => addDaysIso(value, 0)
+    expect(run).toThrow(RangeError)
+    expect(run).toThrow(/^a bill date is not a YYYY-MM-DD calendar date$/)
+  })
+
+  it('refuses a move past 9999 or before 0000, echoing no value', () => {
+    const after = () => addDaysIso('9999-12-31', 1)
+    expect(after).toThrow(RangeError)
+    expect(after).toThrow(/^a bill date falls outside the years 0000 to 9999$/)
+    const before = () => addDaysIso('0000-01-01', -1)
+    expect(before).toThrow(RangeError)
+    expect(before).toThrow(/^a bill date falls outside the years 0000 to 9999$/)
   })
 })
