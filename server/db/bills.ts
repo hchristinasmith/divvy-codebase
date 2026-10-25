@@ -73,7 +73,8 @@ type Db = typeof connection
 /**
  * Runs a call into shared date or money code, turning its RangeError or
  * TypeError (whose messages name values) into the fixed text. A copy of
- * `guard` in ./overview.ts, which is private there; change both together.
+ * `guard` in ./overview.ts, which is private there, and copied again in
+ * ./goals.ts; change all together.
  */
 function guard<T>(fn: () => T): T {
   try {

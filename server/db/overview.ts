@@ -103,8 +103,10 @@ export class OverviewDataError extends Error {
 // Dates
 // ---------------------------------------------------------------------------
 
-// Stays exported for drawings, goals and subscriptions (and an open PR's
-// spending.ts) until #301 rewires them to shared/nz-dates.ts.
+// Stays exported because ./drawings.ts, ./goals.ts and ./subscriptions.ts
+// (and an open PR's spending.ts) import it from here, and ./goals.ts
+// catches its OverviewDataError. #301 moves ./drawings.ts to
+// shared/nz-dates.ts.
 /**
  * The calendar date `at` falls on in Pacific/Auckland (shared/nz-dates.ts),
  * with the shared module's RangeError for an invalid Date turned into the
@@ -139,6 +141,7 @@ type Db = typeof connection
 /**
  * Runs a call into shared date or money code, turning its RangeError or
  * TypeError (whose messages name ids and values) into the fixed text.
+ * Copied as `guard` in ./bills.ts and ./goals.ts; change all together.
  */
 function guard<T>(fn: () => T): T {
   try {
