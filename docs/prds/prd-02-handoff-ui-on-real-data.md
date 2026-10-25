@@ -155,6 +155,8 @@ A Subscriptions screen sits after Bills in the nav and follows the All / Persona
 - The advisor banner ("Help me cancel →") opens Claude desktop, like the Advisor placeholder; without usage tags it names no subscriptions.
 Ruling 8 still deletes the old Subscriptions page in wave 5; the new screen is a new component in the same nav slot. Why: Hannah added the screen to prd-02 on 2026-10-25 ("Add to prd-02 now"). Extends to: prd-03 may later read the same function; prd-04's detection row is superseded for subscriptions only.
 
+> Amended 2026-10-25 by Ruling 15: drawings are not charges.
+
 ## Ruling 15 — Drawings are transfers, not spending (operator amendment, 2026-10-25)
 A transfer out of a `strawb` account matched by the same amount arriving in a `personal` account (within a small date window the architect sets and states) is a **drawing**. Both halves show the category **Drawings** unless Hannah has set a different category on that row by hand, which always wins. Drawings are left out of Strawb spending, budgets and subscriptions, and the personal half is not counted as spending or as a budget credit. They still move balances. "Drawings" is added to the categories Hannah can pick, so an unmatched one can be tagged by hand. Why: counting a drawing as spending double-counts her own money and makes Strawb look like it spends what it pays her.
 

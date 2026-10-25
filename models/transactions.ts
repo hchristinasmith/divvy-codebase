@@ -45,8 +45,8 @@ export interface Transaction {
   merchant_website: string
   merchant_logo: string
 
-  // Effective category: an NZFCC category name from data/cats.js, or null
-  // when Akahu sent none and nobody has set one.
+  // Effective category: an NZFCC category name from data/cats.js, or Drawings
+  // (prd-02 Ruling 15), or null when Akahu sent none and nobody has set one.
   category: string | null
   category_source: CategorySource
 

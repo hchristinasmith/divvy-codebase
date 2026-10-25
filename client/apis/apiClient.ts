@@ -39,7 +39,7 @@ export async function grabCategories(): Promise<CategoriesResponse> {
 }
 
 // Sets the user's category on a transaction. `category` is a category name
-// from GET /categories (the same names as data/cats.js).
+// from GET /categories (data/cats.js plus Drawings).
 export async function updateTransactionCategory(
   transactionId: string | number,
   category: string,
