@@ -1330,8 +1330,12 @@ describe('logo and website URLs (#193)', () => {
   interface UrlField {
     /** The Akahu response body carrying `url` in this field. */
     body: (url: string) => string
-    /** The field as the client's parse returns it. */
-    read: (client: AkahuClient) => Promise<string | null>
+    /**
+     * The field as the client's parse returns it, or undefined when the
+     * object holding it is gone, so a refusal that drops the whole merchant
+     * or meta cannot pass as a null field.
+     */
+    read: (client: AkahuClient) => Promise<string | null | undefined>
   }
 
   // Each row is [label, field]: one URL-bearing field, named once, here.
@@ -1356,7 +1360,7 @@ describe('logo and website URLs (#193)', () => {
             ),
           ]),
         read: async (client) =>
-          (await client.listTransactions(WINDOW))[0].merchant?.logo ?? null,
+          (await client.listTransactions(WINDOW))[0].merchant?.logo,
       },
     ],
     [
@@ -1371,7 +1375,7 @@ describe('logo and website URLs (#193)', () => {
             ),
           ]),
         read: async (client) =>
-          (await client.listTransactions(WINDOW))[0].merchant?.website ?? null,
+          (await client.listTransactions(WINDOW))[0].merchant?.website,
       },
     ],
     [
@@ -1386,7 +1390,7 @@ describe('logo and website URLs (#193)', () => {
             ),
           ]),
         read: async (client) =>
-          (await client.listTransactions(WINDOW))[0].meta?.logo ?? null,
+          (await client.listTransactions(WINDOW))[0].meta?.logo,
       },
     ],
   ]
@@ -1395,19 +1399,109 @@ describe('logo and website URLs (#193)', () => {
   async function readBack(
     field: UrlField,
     url: string,
-  ): Promise<string | null> {
+  ): Promise<string | null | undefined> {
     const { client } = clientWith([field.body(url)])
     return field.read(client)
   }
 
-  it.each(FIELDS)(
-    'keeps a javascript: %s verbatim (behaviour before #193)',
-    async (_label, field) => {
-      expect(await readBack(field, 'javascript:alert(1)')).toBe(
-        'javascript:alert(1)',
+  /**
+   * Text a URL field must refuse: each comes back as null. Each row is
+   * [label, text]. Invisible characters are written as escapes.
+   */
+  const REFUSED: [string, string][] = [
+    ['a javascript: URL', 'javascript:alert(1)'],
+    ['a javascript: URL in mixed case', 'JaVaScRiPt:alert(1)'],
+    ['a javascript: URL behind a leading space', '\u0020javascript:alert(1)'],
+    ['an https URL behind a leading space', '\u0020https://example.com/x.png'],
+    ['a data: URL', 'data:text/html,<script>alert(1)</script>'],
+    ['a plain http URL', 'http://example.com/x.png'],
+    ['a protocol-relative URL', '//example.com/x.png'],
+    ['a relative path', '/x.png'],
+    ['an https: URL with no slashes', 'https:example.com/x.png'],
+    ['an https URL with a space in the host', 'https://exa mple.com/x.png'],
+    ['an https URL with no host', 'https://'],
+  ]
+
+  describe.each(FIELDS)('the %s', (_label, field) => {
+    it.each(REFUSED)('refuses %s', async (_what, url) => {
+      expect(await readBack(field, url)).toBeNull()
+    })
+
+    it('keeps an https URL verbatim', async () => {
+      expect(
+        await readBack(field, 'https://example.com/fixture-logo.png'),
+      ).toBe('https://example.com/fixture-logo.png')
+    })
+
+    it('keeps an upper-case HTTPS URL verbatim, exactly as sent', async () => {
+      expect(await readBack(field, 'HTTPS://example.com/x.png')).toBe(
+        'HTTPS://example.com/x.png',
       )
-    },
-  )
+    })
+  })
+
+  it("keeps a settled row whose logo is refused: its id, amount and the merchant's other fields survive", async () => {
+    const { client } = clientWith([
+      page([
+        settledItem(
+          'trans_fixture_url_refused',
+          '-12.34',
+          ',"merchant":{"_id":"merchant_fixture_url","name":"Example Store","website":"https://example.com/store","logo":"javascript:alert(1)"}',
+        ),
+      ]),
+    ])
+
+    const rows = await client.listTransactions(WINDOW)
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0].id).toBe('trans_fixture_url_refused')
+    expect(rows[0].amount_cents).toBe(-1234)
+    const expected = {
+      id: 'merchant_fixture_url',
+      name: 'Example Store',
+      nzbn: null,
+      website: 'https://example.com/store',
+      logo: null,
+    }
+    expect(rows[0].merchant).toEqual(expected)
+    expect(Object.keys(rows[0].merchant ?? {}).sort()).toEqual(
+      Object.keys(expected).sort(),
+    )
+  })
+
+  it('refuses a javascript: logo on a pending item too, since pending uses the same mappers', async () => {
+    const pendingItem = (extra: string) =>
+      `{"_account":"acc_fixture_inline","date":"2026-10-01T00:00:00.000Z","amount":-1.00,"description":"Example pending","type":"EFTPOS"${extra}}`
+    const { client } = clientWith([
+      page([
+        pendingItem(',"merchant":{"logo":"javascript:alert(1)"}'),
+        pendingItem(',"meta":{"logo":"javascript:alert(1)"}'),
+      ]),
+    ])
+
+    const [merchantRow, metaRow] = await client.listPendingTransactions()
+
+    expect(merchantRow.amount_cents).toBe(-100)
+    expect(merchantRow.merchant?.logo).toBeNull()
+    expect(metaRow.meta?.logo).toBeNull()
+  })
+
+  it('still refuses a URL field that is not text, with the message it had before', async () => {
+    const { client } = clientWith([
+      page([
+        settledItem(
+          'trans_fixture_url_flag',
+          '-1.00',
+          ',"merchant":{"logo":true}',
+        ),
+      ]),
+    ])
+
+    const error = await rejection(client.listTransactions(WINDOW))
+
+    expect(error.code).toBe('bad_response')
+    expect(error.message).toBe('transaction.merchant.logo is not text')
+  })
 })
 
 describe('pagination (prd-01 Ruling 2)', () => {
