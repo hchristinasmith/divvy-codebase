@@ -76,8 +76,8 @@ function errorClass(err: unknown): string {
 }
 
 // A copy of `parseId` in ./bills.ts; change both together (#236 tracks
-// folding the route helpers; its list predates this one). Digits only: Number() would also accept '1e3', '0x10' and
-// ' 7'.
+// folding the route helpers; its list predates this one). Digits only:
+// Number() would also accept '1e3', '0x10' and ' 7'.
 function parseId(raw: string): number | null {
   const id = Number(raw)
   return /^[1-9]\d*$/.test(raw) && Number.isSafeInteger(id) ? id : null

@@ -52,9 +52,9 @@ const STAMP = '2026-10-20T00:00:00.000Z'
 
 type Row = Record<string, unknown>
 
-// `account`, `seedAccounts`, `snapshotTables`, `BAD_IDS` and
-// `sortedKeys` are copies of the ones in ./overview.test.ts and
-// ./bills.test.ts.
+// `account`, `snapshotTables` and `sortedKeys` are copies of the ones in
+// ./overview.test.ts and ./bills.test.ts; `seedAccounts` and `BAD_IDS` are
+// copies of the ones in ./bills.test.ts.
 function account(fields: Row): Row {
   return {
     source: 'akahu',
@@ -320,7 +320,7 @@ describe('months to go', () => {
     // 11-29 is a day past a whole month from 10-28: two, 50000 each.
     ['a month and a day out', '2026-11-29', 2, 50000],
   ])(
-    'a target date %s is %i month(s)',
+    'a target date %s (%s) is %i month(s), pace %i',
     async (_why, targetDate, months, pace) => {
       const made = await created({ targetCents: 100000, targetDate })
 
