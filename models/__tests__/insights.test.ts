@@ -131,6 +131,33 @@ describe('accepted specs', () => {
     } satisfies Insight
     expect(parseChartSpecJson(row.chart_spec_json).ok).toBe(true)
   })
+
+  it('types an insights row without the optional mermaid field', () => {
+    const row = {
+      id: 2,
+      kind: 'report',
+      title: 'Example report',
+      body_md: 'Sample body',
+      chart_spec_json: null,
+      scope: 'strawb',
+      period: '2026-W43',
+      created_at: '2026-10-25T03:00:00.000Z',
+      dismissed_at: null,
+    } satisfies Insight
+    expect(Object.keys(row).sort()).toEqual([
+      'body_md',
+      'chart_spec_json',
+      'created_at',
+      'dismissed_at',
+      'id',
+      'kind',
+      'period',
+      'scope',
+      'title',
+    ])
+    expect('mermaid' in row).toBe(false)
+    expect(row.chart_spec_json).toBeNull()
+  })
 })
 
 describe('the returned spec is a fresh copy', () => {
@@ -260,6 +287,14 @@ const URL_TEXT: [string, string][] = [
   ['a NUL inside the scheme', `java\u0000script:${CANARY}`],
   ['a zero-width space inside the scheme', `java\u200bscript:${CANARY}`],
   ['a soft hyphen inside the scheme', `ja\u00advascript:${CANARY}`],
+  ['a BOM (U+FEFF) inside the scheme', `java\ufeffscript:${CANARY}`],
+  ['a word joiner (U+2060) inside the scheme', `java\u2060script:${CANARY}`],
+  ['a NEL (U+0085) inside the scheme', `java\u0085script:${CANARY}`],
+  ['a combining grapheme joiner (U+034F) inside the scheme', `java\u034fscript:${CANARY}`],
+  ['an Arabic letter mark (U+061C) inside the scheme', `java\u061cscript:${CANARY}`],
+  ['a Mongolian vowel separator (U+180E) inside the scheme', `java\u180escript:${CANARY}`],
+  ['an invisible plus (U+2064) inside the scheme', `java\u2064script:${CANARY}`],
+  ['a DEL (U+007F) inside the scheme', `java\u007Fscript:${CANARY}`],
   ['fullwidth letters', `\uff48\uff54\uff54\uff50\uff1a//${CANARY}`],
   ['a protocol-relative URL', `//${CANARY}.example`],
   ['a protocol-relative URL after spaces', `  //${CANARY}.example`],
@@ -328,6 +363,62 @@ describe('row key hygiene', () => {
   it('rejects an own __proto__ key at the root made by JSON.parse', () => {
     const text = `{"__proto__":{"mark":"${CANARY}"},${JSON.stringify(BASE).slice(1)}`
     expect(rejection(parseChartSpecJson(text))).toEqual({ reason: 'unknown_key', path: '$' })
+  })
+})
+
+describe('row shape and field names', () => {
+  it('rejects an empty row as bad_value at the row', () => {
+    const spec = base()
+    spec.data.values = [{}]
+    expect(rejection(validateChartSpec(spec))).toEqual({ reason: 'bad_value', path: '$.data.values[0]' })
+  })
+
+  it('accepts a 40-character field name and rejects a 41-character one', () => {
+    const name40 = `S${'a'.repeat(39)}`
+    const name41 = `S${'a'.repeat(40)}`
+    expect(name40.length).toBe(40)
+    expect(name41.length).toBe(41)
+
+    const spec = base()
+    spec.data.values[0][name40] = 2
+    spec.encoding.y = { field: name40, type: 'quantitative' }
+    expect(validateChartSpec(spec).ok).toBe(true)
+
+    const long = base()
+    long.data.values[0][name41] = 2
+    expect(rejection(validateChartSpec(long))).toEqual({ reason: 'unknown_key', path: '$.data.values[0]' })
+  })
+
+  it('rejects a field name that starts with a digit as unknown_key at the row', () => {
+    const spec = base()
+    spec.data.values[0]['1week'] = 1
+    expect(rejection(validateChartSpec(spec))).toEqual({ reason: 'unknown_key', path: '$.data.values[0]' })
+  })
+})
+
+describe('missing keys', () => {
+  it('reports a channel with only field as missing_key at the channel', () => {
+    const spec = base()
+    spec.encoding.x = { field: 'week' }
+    expect(rejection(validateChartSpec(spec))).toEqual({ reason: 'missing_key', path: '$.encoding.x' })
+  })
+
+  it('reports a channel with only type as missing_key at the channel', () => {
+    const spec = base()
+    spec.encoding.x = { type: 'nominal' }
+    expect(rejection(validateChartSpec(spec))).toEqual({ reason: 'missing_key', path: '$.encoding.x' })
+  })
+
+  it('reports a root without encoding as missing_key at $', () => {
+    const spec: Loose = base()
+    delete spec.encoding
+    expect(rejection(validateChartSpec(spec))).toEqual({ reason: 'missing_key', path: '$' })
+  })
+
+  it('reports a root without mark as missing_key at $', () => {
+    const spec: Loose = base()
+    delete spec.mark
+    expect(rejection(validateChartSpec(spec))).toEqual({ reason: 'missing_key', path: '$' })
   })
 })
 
@@ -415,6 +506,27 @@ function withNodes(total: number): Loose {
   return { a: inner }
 }
 
+// A valid spec whose JSON text is exactly `target` characters. Rows hold only
+// strings, so the phase 1 estimate (which skips commas) stays under the exact
+// length and the exact check is the one that decides. The rows and strings
+// sit under their own caps, so only the maxChars boundary is under test.
+function specOfChars(target: number): MutableSpec {
+  const spec = base()
+  spec.data.values = Array.from({ length: 150 }, (_, i) => ({ week: `Sample W${i}`, a: '', b: '', c: '' }))
+  spec.encoding.y = { field: 'a', type: 'nominal', title: 'Invented total' }
+  let extra = target - JSON.stringify(spec).length
+  for (const row of spec.data.values) {
+    for (const field of ['a', 'b', 'c']) {
+      if (extra <= 0) break
+      const take = Math.min(CHART_LIMITS.maxStringChars - 1, extra)
+      row[field] = 'S'.repeat(take)
+      extra -= take
+    }
+  }
+  if (extra !== 0) throw new Error(`cannot size a spec to ${target} characters`)
+  return spec
+}
+
 describe('size and nesting caps', () => {
   it('pins the caps', () => {
     expect(CHART_LIMITS).toStrictEqual({
@@ -473,6 +585,20 @@ describe('size and nesting caps', () => {
     spec.data.values = Array.from({ length: CHART_LIMITS.maxRows }, () => ({ ...row }))
     expect(JSON.stringify(spec).length).toBeGreaterThan(CHART_LIMITS.maxChars)
     expect(rejection(validateChartSpec(spec)).reason).toBe('too_large')
+  })
+
+  it('accepts a spec whose JSON is exactly maxChars characters', () => {
+    const spec = specOfChars(CHART_LIMITS.maxChars)
+    expect(JSON.stringify(spec).length).toBe(CHART_LIMITS.maxChars)
+    const result = validateChartSpec(spec)
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(JSON.stringify(result.spec).length).toBe(CHART_LIMITS.maxChars)
+  })
+
+  it('rejects a spec whose JSON is one character over maxChars as too_large at $', () => {
+    const spec = specOfChars(CHART_LIMITS.maxChars + 1)
+    expect(JSON.stringify(spec).length).toBe(CHART_LIMITS.maxChars + 1)
+    expect(rejection(validateChartSpec(spec))).toEqual({ reason: 'too_large', path: '$' })
   })
 
   it('rejects a spec on write whose stored text the render-side cap would refuse', () => {
@@ -537,6 +663,22 @@ describe('parseChartSpecJson', () => {
   it('rejects text over maxChars before parsing it', () => {
     const parse = vi.spyOn(JSON, 'parse')
     const text = JSON.stringify({ ...BASE, title: 'S'.repeat(CHART_LIMITS.maxChars) })
+    expect(rejection(parseChartSpecJson(text))).toEqual({ reason: 'too_large', path: '$' })
+    expect(parse).not.toHaveBeenCalled()
+  })
+
+  it('parses text of exactly maxChars characters', () => {
+    const parse = vi.spyOn(JSON, 'parse')
+    const text = JSON.stringify(specOfChars(CHART_LIMITS.maxChars))
+    expect(text.length).toBe(CHART_LIMITS.maxChars)
+    expect(parseChartSpecJson(text).ok).toBe(true)
+    expect(parse).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects text one character over maxChars before parsing it', () => {
+    const parse = vi.spyOn(JSON, 'parse')
+    const text = JSON.stringify(specOfChars(CHART_LIMITS.maxChars + 1))
+    expect(text.length).toBe(CHART_LIMITS.maxChars + 1)
     expect(rejection(parseChartSpecJson(text))).toEqual({ reason: 'too_large', path: '$' })
     expect(parse).not.toHaveBeenCalled()
   })
