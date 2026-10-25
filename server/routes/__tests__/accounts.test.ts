@@ -672,39 +672,71 @@ describe('the Akahu proxy is gone', () => {
   })
 
   const serverDir = fileURLToPath(new URL('../../', import.meta.url))
+  const repoDir = fileURLToPath(new URL('../../../', import.meta.url))
 
   it('server/routes/akahu.ts no longer exists', () => {
     expect(existsSync(join(serverDir, 'routes', 'akahu.ts'))).toBe(false)
   })
 
-  // prd-01 Done-when 8: only sync may spend the Akahu token. Built from parts
-  // so this file is not itself a hit for the issue's grep.
+  // prd-01 Done-when 8: only sync may spend Akahu's credentials. A hit is
+  // Akahu's API host, a named credential (`AKAHU_USER_TOKEN`,
+  // `AKAHU_APP_ID`, `AKAHU_APP_SECRET`), or any `AKAHU_*` read off an `env`
+  // object. A bare `AKAHU_` is not: a migration's `AKAHU_CATEGORY` constant
+  // and mcp/guard-env.ts's deny-list prefix name no credential. Built from
+  // parts so this file is not itself a hit for the issue's grep.
+  const AKAHU = 'AKAHU_'
   const AKAHU_SPEND = new RegExp(
-    `${['AKAHU', 'USER', 'TOKEN'].join('_')}|api\\.akahu\\.io`,
+    [
+      'api\\.akahu\\.io',
+      `\\b${AKAHU}(?:USER_TOKEN|APP_ID|APP_SECRET)\\b`,
+      `\\benv\\s*(?:\\.|\\[\\s*['"\`])\\s*${AKAHU}`,
+    ].join('|'),
   )
 
-  function tsFiles(dir: string): string[] {
+  function sourceFiles(dir: string): string[] {
     return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
       const path = join(dir, entry.name)
-      if (entry.isDirectory()) return tsFiles(path)
-      return entry.name.endsWith('.ts') ? [path] : []
+      if (entry.isDirectory()) {
+        return entry.name === 'node_modules' ? [] : sourceFiles(path)
+      }
+      return /\.(?:ts|js)$/.test(entry.name) ? [path] : []
     })
   }
 
-  it('no server file outside server/sync/ and tests names the token or Akahu’s API', () => {
-    const offenders = tsFiles(serverDir)
-      .map((path) => relative(serverDir, path))
-      .filter((path) => !path.startsWith(`sync${sep}`))
+  // server/ outside server/sync/, and mcp/ (prd-03), never their tests.
+  function guardedFiles(): string[] {
+    return ['server', 'mcp']
+      .flatMap((top) => sourceFiles(join(repoDir, top)))
+      .map((path) => relative(repoDir, path))
+      .filter((path) => !path.startsWith(`server${sep}sync${sep}`))
       .filter((path) => !path.split(sep).includes('__tests__'))
-      .filter((path) =>
-        AKAHU_SPEND.test(readFileSync(join(serverDir, path), 'utf8')),
-      )
+  }
 
-    expect(offenders).toStrictEqual([])
+  const spends = (path: string) =>
+    AKAHU_SPEND.test(readFileSync(join(repoDir, path), 'utf8'))
+
+  it('no server or mcp file outside server/sync/ and tests names Akahu’s credentials or API', () => {
+    const files = guardedFiles()
+
+    // The walk reached both trees, and .js as well as .ts.
+    expect(files.some((p) => p.startsWith(`server${sep}`))).toBe(true)
+    expect(files.some((p) => p.startsWith(`mcp${sep}`))).toBe(true)
+    expect(files.some((p) => p.endsWith('.js'))).toBe(true)
+    expect(files.filter(spends)).toStrictEqual([])
   })
 
-  it('the guard can see a hit (sync itself names Akahu’s API)', () => {
-    const syncFiles = tsFiles(join(serverDir, 'sync')).filter((path) =>
+  it.each([
+    ['the API host', 'https://api.akahu.io/v1/accounts'],
+    ['the token', `x = ${AKAHU}USER_TOKEN`],
+    ['the app id', `x = ${AKAHU}APP_ID`],
+    ['any AKAHU_ env read', `process.env.${AKAHU}ANYTHING`],
+    ['a bracketed env read', `env['${AKAHU}ANYTHING']`],
+  ])('the guard sees %s', (_why, text) => {
+    expect(AKAHU_SPEND.test(text)).toBe(true)
+  })
+
+  it('the guard can see a hit in a real file (sync itself spends the token)', () => {
+    const syncFiles = sourceFiles(join(serverDir, 'sync')).filter((path) =>
       AKAHU_SPEND.test(readFileSync(path, 'utf8')),
     )
 
