@@ -27,6 +27,17 @@ const BOUND_VALUE = 'BINDING_VALUE_42'
 // The fixed text of the one line a 4xx not raised by body-parser or the
 // router logs (#203).
 const UNKNOWN_4XX_LOG = '4xx /api error not raised by body-parser or the router:'
+// The message on a route Error carrying a SQLite-shaped `code` (#354).
+const CODED_SECRET = 'coded failure marker 3e8a'
+const SQLITE_CODE = 'SQLITE_CONSTRAINT'
+
+// The last coded Error a route raised, so a test can read the frames its
+// stack holds and pin the whole logged line, not a pattern (#354).
+// The Knex route keeps its error too, to pin that it does carry a `code`.
+const raised = vi.hoisted(() => ({
+  coded: undefined as Error | undefined,
+  knex: undefined as unknown,
+}))
 
 vi.mock('../routes/index.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../routes/index.ts')>()
@@ -198,11 +209,23 @@ vi.mock('../routes/index.ts', async (importOriginal) => {
   router.get('/__test/anonymous-class-404', (req, res, next) => {
     next(Object.assign(new (class {})(), { status: 404 }))
   })
+  // An Error with a SQLite-shaped `code`, as node-sqlite3 sets it, but raised
+  // in JavaScript so its stack has frames (#354).
+  router.get('/__test/coded-error', (req, res, next) => {
+    raised.coded = Object.assign(new Error(CODED_SECRET), { code: SQLITE_CODE })
+    next(raised.coded)
+  })
+  router.get('/__test/after-headers-coded', (req, res, next) => {
+    res.status(200).write('partial')
+    raised.coded = Object.assign(new Error(CODED_SECRET), { code: SQLITE_CODE })
+    next(raised.coded)
+  })
   router.get('/__test/knex-insert', async (req, res, next) => {
     try {
       await connection('nonexistent_table').insert({ a: BOUND_VALUE })
       res.status(204).end()
     } catch (err) {
+      raised.knex = err
       next(err)
     }
   })
@@ -215,6 +238,8 @@ let api: LoopbackApi['api']
 let app: Express
 
 beforeEach(async () => {
+  raised.coded = undefined
+  raised.knex = undefined
   app = await freshApp()
   served = await serveOnLoopback(app)
   api = served.api
@@ -256,6 +281,7 @@ function expectNoLogLeak(calls: unknown[][]): void {
     HEADER_SECRET,
     UPSTREAM_SECRET,
     BOUND_VALUE,
+    CODED_SECRET,
   ]) {
     expect(logged).not.toContain(secret)
   }
@@ -755,6 +781,87 @@ describe('#204: a 500 on /api logs the error name and stack frames, never the me
     expect(res.body).toStrictEqual({ error: 'Internal server error' })
     expect(Object.keys(res.body)).toEqual(['error'])
     expect(the500Log(errorLog.mock.calls)).toBe('object')
+    expectNoLogLeak(errorLog.mock.calls)
+  })
+})
+
+// The frame lines of the coded Error a route raised, read from its own stack:
+// its header is `Error: <message>` on one line, and at least one frame follows.
+function framesOfCoded(): string[] {
+  const err = raised.coded
+  if (err === undefined || typeof err.stack !== 'string') {
+    throw new Error('expected the route to have raised a coded Error')
+  }
+  const [header, ...frames] = err.stack.split('\n')
+  expect(header).toBe(`Error: ${CODED_SECRET}`)
+  expect(frames.length).toBeGreaterThan(0)
+  return frames
+}
+
+// #354, before the change: what a 500 carrying an `err.code` logs today. The
+// whole log is pinned, so a code appearing in it, or anything else changing,
+// turns these red. The coded tests are expected to flip once the handler logs
+// a constant-shaped `err.code`; the message must stay out either way.
+describe('#354 before the change: a 500 carrying err.code logs the name and frames only, not the code', () => {
+  it('a failing Knex insert carries code SQLITE_ERROR and logs exactly `Error`, no code and no bound value', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const res = await api
+      .get('/api/v1/__test/knex-insert')
+      .set('X-Divvy-Test', HEADER_SECRET)
+
+    expect(res.status).toBe(500)
+    expect(res.body).toStrictEqual({ error: 'Internal server error' })
+    // The premise #354 rests on: node-sqlite3 sets a constant-shaped code, and
+    // the message holds the bound value.
+    expect(raised.knex).toBeInstanceOf(Error)
+    expect((raised.knex as Error & { code?: unknown }).code).toBe('SQLITE_ERROR')
+    expect((raised.knex as Error).message).toContain(BOUND_VALUE)
+    expect(errorLog.mock.calls).toStrictEqual([['Unhandled /api error:', 'Error']])
+    expectNoLogLeak(errorLog.mock.calls)
+  })
+
+  it('today: a route Error with code SQLITE_CONSTRAINT logs `Error` and its frames, without the code', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const res = await api
+      .get('/api/v1/__test/coded-error')
+      .set('X-Divvy-Test', HEADER_SECRET)
+
+    expect(res.status).toBe(500)
+    expect(res.body).toStrictEqual({ error: 'Internal server error' })
+    expect(Object.keys(res.body)).toEqual(['error'])
+    expectNoLeak(res.text)
+    expect(errorLog.mock.calls).toStrictEqual([
+      ['Unhandled /api error:', ['Error', ...framesOfCoded()].join('\n')],
+    ])
+    expectNoLogLeak(errorLog.mock.calls)
+  })
+
+  // As in the #204 headers-sent tests above, the app runs as production so
+  // Express's default handler would log the stack if the error reached it.
+  it('today: the same coded Error after the response started logs `Error` and its frames, without the code', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const env: unknown = app.get('env')
+    app.set('env', 'production')
+    try {
+      await expect(
+        api
+          .get('/api/v1/__test/after-headers-coded')
+          .set('X-Divvy-Test', HEADER_SECRET),
+      ).rejects.toMatchObject({ code: 'ECONNRESET' })
+      // Express's default handler logs on the next turn.
+      await new Promise((resolve) => setImmediate(resolve))
+    } finally {
+      app.set('env', env)
+    }
+
+    expect(errorLog.mock.calls).toStrictEqual([
+      [
+        'Unhandled /api error after the response started:',
+        ['Error', ...framesOfCoded()].join('\n'),
+      ],
+    ])
     expectNoLogLeak(errorLog.mock.calls)
   })
 })
