@@ -306,6 +306,39 @@ describe('insertInsight', () => {
   })
 })
 
+// Today's behaviour, pinned so #342 can flip it: a control character is not
+// invisible to the blank check, and a period has no length cap, so each of
+// these is stored exactly as given. #342 turns them into refusals, and the
+// expectations here are what change.
+describe("insertInsight stores today's control characters and long period unchanged (pins #342)", () => {
+  it('stores a period of 10,000 characters unchanged', async () => {
+    const period = '2026-W43'.padEnd(10_000, 'x')
+    expect(period).toHaveLength(10_000)
+
+    const result = await insertInsight(insight({ period }), NOW)
+    expect(result).toStrictEqual({ ok: true, id: expect.any(Number) })
+
+    const [stored] = await storedRows()
+    expect(stored.period).toBe(period)
+  })
+
+  const CONTROL: [field: 'title' | 'body_md' | 'period', name: string, text: string][] = (
+    ['title', 'body_md', 'period'] as const
+  ).flatMap((field): [typeof field, string, string][] => [
+    [field, 'U+0001', '\u0001'],
+    [field, 'U+0085', '\u0085'],
+    [field, 'U+0090', '\u0090'],
+  ])
+
+  it.each(CONTROL)('stores a %s made only of %s unchanged', async (field, _, text) => {
+    const result = await insertInsight(insight({ [field]: text }), NOW)
+    expect(result).toStrictEqual({ ok: true, id: expect.any(Number) })
+
+    const [stored] = await storedRows()
+    expect(stored[field]).toBe(text)
+  })
+})
+
 describe('reading re-validates the stored chart (Ruling 8)', () => {
   async function storeRaw(text: string): Promise<number> {
     const id = await inserted(insight({ kind: 'chart', chart_spec: spec() }))

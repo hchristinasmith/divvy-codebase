@@ -426,6 +426,24 @@ describe('insertProposal', () => {
   })
 })
 
+// Today's behaviour, pinned so #342 can flip it: a control character is not
+// invisible to the blank check, so a reason made of one is stored exactly as
+// given. #342 turns these into refusals, and the expectations here are what
+// change.
+describe("insertProposal stores today's control-character reasons unchanged (pins #342)", () => {
+  it.each([
+    ['U+0001', '\u0001'],
+    ['U+0085', '\u0085'],
+    ['U+0090', '\u0090'],
+  ])('stores a reason made only of %s unchanged', async (_, reason) => {
+    const txId = await transaction('a')
+
+    const result = await insertProposal(proposal(txId, { reason }), NOW)
+    expect(result).toStrictEqual({ inserted: true, id: expect.any(Number) })
+    expect((await rows())[0].reason).toBe(reason)
+  })
+})
+
 describe('setStatus', () => {
   it('decides a pending proposal once, and never overwrites a decision', async () => {
     const txId = await transaction('a')
