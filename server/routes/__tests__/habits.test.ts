@@ -7,8 +7,10 @@ import {
   it,
   vi,
 } from 'vitest'
+import { connect } from 'node:net'
 
 import connection from '../../db/connection.ts'
+import * as habitsDb from '../../db/habits.ts'
 import {
   closeDb,
   freshApp,
@@ -27,6 +29,17 @@ import type { HabitVerdictRow } from '../../db/habits.ts'
 // fixed at 23:30 UTC on 27 October 2026, which is 12:30 NZDT on the 28th,
 // so today in NZ is 2026-10-28. Stored instants are midnight UTC, so each
 // row's NZ date is its UTC date. Every value below is invented.
+
+// The data module is the real one; its two entry points are wrapped only so
+// a test can make one fail with an error that is not a HabitsDataError.
+vi.mock('../../db/habits.ts', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../../db/habits.ts')>()
+  return {
+    ...real,
+    readHabits: vi.fn(real.readHabits),
+    setVerdict: vi.fn(real.setVerdict),
+  }
+})
 
 let served: LoopbackApi | undefined
 let api: LoopbackApi['api']
@@ -91,6 +104,7 @@ function tx(
 
 const EVERYDAY = 'acc_sentinel_everyday'
 const TRADING = 'acc_sentinel_trading'
+const SAVER = 'acc_sentinel_saver'
 
 async function insertAll(table: string, rows: Row[]) {
   // One insert per row: a multi-row insert binds NULL for a key a row
@@ -121,6 +135,23 @@ async function seedAccounts() {
   ])
 }
 
+async function seedSaver() {
+  await connection('accounts').insert(
+    account({
+      id: 3,
+      akahu_id: SAVER,
+      name: 'Sentinel Saver',
+      scope: 'personal',
+      balance_cents: 0,
+    }),
+  )
+  await connection('account_settings').insert({
+    account_id: 3,
+    role: 'savings',
+    updated_at: STAMP,
+  })
+}
+
 // Personal: history from 2026-09-01, a grocery spend, a pending spend, a
 // refund-like inflow.
 const PERSONAL_ROWS = [
@@ -144,7 +175,10 @@ const STRAWB_ROWS = [
 ]
 
 // Strawb → Personal on the same day: not spend in All, Strawb's spend in
-// Strawb, an inflow (never spend) in Personal.
+// Strawb, an inflow (never spend) in Personal. This rests on the provisional
+// transfer option A, pair match (DECISION PENDING in shared/habits.ts
+// `findOwnTransfers`); every test titled "(decision pending: transfer
+// detection)" changes with that decision.
 const TRANSFER_ROWS = [
   tx(203, TRADING, '2026-10-22', -40_000, 396_000),
   tx(104, EVERYDAY, '2026-10-22', 40_000, 912_000),
@@ -242,7 +276,7 @@ const STREAK_58: HabitStreak = {
 }
 
 describe('GET: the response is the contract', () => {
-  it('all: hand-worked runway, the streak and both scopes’ spending', async () => {
+  it('all: hand-worked runway, the streak and both scopes’ spending (decision pending: transfer detection)', async () => {
     await seed()
 
     const res = await get('all')
@@ -276,7 +310,7 @@ describe('GET: the response is the contract', () => {
     })
   })
 
-  it('strawb: the drawing to Personal is Strawb’s spend', async () => {
+  it('strawb: the drawing to Personal is Strawb’s spend (decision pending: transfer detection)', async () => {
     await seed()
 
     const res = await get('strawb')
@@ -327,17 +361,149 @@ describe('GET: the response is the contract', () => {
     })
   })
 
-  it('an Akahu row with no date is a fixed-text 500', async () => {
+  // The pending row and the savings row are read only because a row with no
+  // date is read whatever its status and account; the settled row on a
+  // current account would also be read as overdraft history.
+  it.each([
+    ['settled, on a current account', EVERYDAY, 'settled'],
+    ['pending, on a current account', EVERYDAY, 'pending'],
+    ['settled, on a savings account', SAVER, 'settled'],
+  ])(
+    'an Akahu row with no date (%s) is a fixed-text 500',
+    async (_name, akahuId, status) => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      await seedAccounts()
+      await seedSaver()
+      await insertAll('transactions', [
+        { ...tx(101, akahuId, '2026-10-20', -100, null), status, date: null },
+      ])
+
+      const res = await get('all')
+
+      expect(res.status).toBe(500)
+      expect(res.body).toStrictEqual({ error: 'a transaction is incomplete' })
+    },
+  )
+
+  it('an Akahu row with no amount is a fixed-text 500, not 0', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    await seedAccounts()
+    await seed()
     await insertAll('transactions', [
-      { ...tx(101, EVERYDAY, '2026-10-20', -100, 100), date: null },
+      { ...tx(105, EVERYDAY, '2026-10-23', 0, 900_000), amount_cents: null },
     ])
 
     const res = await get('all')
 
     expect(res.status).toBe(500)
     expect(res.body).toStrictEqual({ error: 'a transaction is incomplete' })
+  })
+
+  it('an account with no balance is a fixed-text 500, not 0', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await seed()
+    await connection('accounts').insert(
+      account({
+        id: 3,
+        akahu_id: SAVER,
+        name: 'Sentinel Saver',
+        scope: 'personal',
+        balance_cents: null,
+      }),
+    )
+
+    const res = await get('all')
+
+    expect(res.status).toBe(500)
+    expect(res.body).toStrictEqual({ error: 'an account has no balance' })
+    expect(log.mock.calls).toEqual([
+      ['habits: could not read habits', 'HabitsDataError'],
+    ])
+  })
+
+  // Integer affinity keeps a fractional value as REAL, so it reaches
+  // shared/habits.ts, whose TypeError names the field; a balance whose ten
+  // times is past the safe integers is its RangeError.
+  it.each([
+    ['a fractional transaction amount (TypeError)', 'transactions', -128_000.5],
+    ['a fractional account balance (TypeError)', 'accounts', 1_000_000.5],
+    ['a balance too large for runway (RangeError)', 'accounts', 1e15],
+  ])(
+    '%s is the fixed text from the shared checks',
+    async (_name, table, value) => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      await seed()
+      if (table === 'transactions') {
+        await connection('transactions')
+          .where({ id: 101 })
+          .update({ amount_cents: value })
+      } else {
+        await connection('accounts')
+          .where({ id: 1 })
+          .update({ balance_cents: value })
+      }
+
+      const res = await get('all')
+
+      expect(res.status).toBe(500)
+      expect(res.body).toStrictEqual({ error: 'habits input invalid' })
+    },
+  )
+
+  it('an account with no role adds nothing to runway and is not a current account', async () => {
+    await seed()
+    // No account_settings row. Were it `current`, its balance would lift
+    // runway and, with no settled row to count from, it would drop the
+    // streak.
+    await connection('accounts').insert(
+      account({
+        id: 3,
+        akahu_id: SAVER,
+        name: 'Sentinel Saver',
+        scope: 'personal',
+        balance_cents: 9_000_000,
+      }),
+    )
+
+    const res = await get('personal')
+
+    expect(res.body).toStrictEqual({
+      // As without it: 10,000,000 ÷ 128,500 = 77.8 → 77.
+      runwayTenths: 77,
+      streaks: [STREAK_58],
+      verdicts: [GROCER],
+    })
+  })
+})
+
+describe('overdraft history before the read window', () => {
+  it('a settled row on a current account older than the window starts the streak', async () => {
+    await seedAccounts()
+    // habitsReadFrom(2026-10-28) is 2026-07-29; this row is before it.
+    await insertAll('transactions', [
+      tx(110, EVERYDAY, '2026-06-01', -1_000, 999_000),
+      tx(102, EVERYDAY, '2026-09-01', 5_000, 900_000),
+    ])
+
+    const res = await get('personal')
+
+    // 2026-06-01 to 2026-10-28, both counted: 30 + 31 + 31 + 30 + 28.
+    expect(res.body.streaks).toStrictEqual([{ ...STREAK_58, days: 150 }])
+    // Older than the verdict window, so not listed.
+    expect(res.body.verdicts).toStrictEqual([])
+  })
+
+  it('an old row on a savings account is not read', async () => {
+    await seed()
+    await seedSaver()
+    // Were it read, its missing amount would be a 500.
+    await insertAll('transactions', [
+      { ...tx(302, SAVER, '2026-06-01', 0, 100), amount_cents: null },
+    ])
+
+    const res = await get('personal')
+
+    expect(res.status).toBe(200)
+    expect(res.body.streaks).toStrictEqual([STREAK_58])
   })
 })
 
@@ -359,7 +525,7 @@ describe('NZ calendar dates from stored UTC instants', () => {
     ])
   })
 
-  it('the read reaches a leg whose UTC day is before the window’s first NZ day', async () => {
+  it('the read reaches a leg whose UTC day is before the window’s first NZ day (decision pending: transfer detection)', async () => {
     await seedAccounts()
     await connection('accounts').insert(
       account({
@@ -399,7 +565,7 @@ describe('NZ calendar dates from stored UTC instants', () => {
 })
 
 describe('scope isolation', () => {
-  it('Strawb spend, verdicts and transfers neither appear in nor move Personal', async () => {
+  it('Strawb spend, verdicts and transfers neither appear in nor move Personal (decision pending: transfer detection)', async () => {
     await seedAccounts()
     await insertAll('transactions', PERSONAL_ROWS)
     const before = (await get('personal')).body
@@ -410,7 +576,7 @@ describe('scope isolation', () => {
     expect((await get('personal')).body).toStrictEqual(before)
   })
 
-  it('Personal spend, verdicts and transfers neither appear in nor move Strawb', async () => {
+  it('Personal spend, verdicts and transfers neither appear in nor move Strawb (decision pending: transfer detection)', async () => {
     await seedAccounts()
     await insertAll('transactions', STRAWB_ROWS)
     const before = (await get('strawb')).body
@@ -638,5 +804,155 @@ describe('PUT /verdicts/:transactionId', () => {
       .send({ verdict: 'worth_it' })
 
     expect(res.status).toBe(200)
+  })
+
+  it('Sec-Fetch-Site: none (typed in the address bar) passes the site check', async () => {
+    await seed()
+
+    const res = await api
+      .put('/api/v1/habits/verdicts/101')
+      .set('Sec-Fetch-Site', 'none')
+      .send({ verdict: 'worth_it' })
+
+    expect(res.status).toBe(200)
+    expect(await verdictRows()).toHaveLength(1)
+  })
+
+  it('an Origin naming this host passes the site check', async () => {
+    await seed()
+
+    const res = await api
+      .put('/api/v1/habits/verdicts/101')
+      .set('Origin', `http://127.0.0.1:${served?.address.port}`)
+      .send({ verdict: 'worth_it' })
+
+    expect(res.status).toBe(200)
+    expect(await verdictRows()).toHaveLength(1)
+  })
+
+  it('an Origin matches a Host header in any case', async () => {
+    await seed()
+
+    const res = await api
+      .put('/api/v1/habits/verdicts/101')
+      .set('Host', 'DIVVY.EXAMPLE')
+      .set('Origin', 'http://divvy.example')
+      .send({ verdict: 'worth_it' })
+
+    expect(res.status).toBe(200)
+  })
+
+  it('an Origin with no Host header is a 403 and writes nothing', async () => {
+    await seed()
+    // HTTP/1.0 over a raw socket: Node's HTTP client always sends Host, and
+    // Node's server answers an HTTP/1.1 request without one with a 400
+    // before the app sees it.
+    const port = served?.address.port ?? 0
+
+    // The control: the same request with no Origin reaches the route.
+    const control = await rawPutWithoutHost(port, 103, [])
+    expect(control.status).toBe(409)
+
+    const res = await rawPutWithoutHost(port, 101, ['Origin: http://127.0.0.1'])
+
+    expect(res.status).toBe(403)
+    expect(JSON.parse(res.body)).toStrictEqual({ error: 'Forbidden' })
+    expect(await verdictRows()).toHaveLength(0)
+  })
+
+  it('a settled row of 0 is not spending: a 400 that writes nothing', async () => {
+    await seed()
+    await insertAll('transactions', [
+      tx(105, EVERYDAY, '2026-10-23', 0, 900_000),
+    ])
+
+    const res = await put(105, { verdict: 'worth_it' })
+
+    expect(res.status).toBe(400)
+    expect(res.body).toStrictEqual({ error: 'Only spending can be tagged' })
+    expect(await verdictRows()).toHaveLength(0)
+  })
+
+  it('a settled row with no amount is a fixed-text 500, not money in', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    await seed()
+    await insertAll('transactions', [
+      { ...tx(105, EVERYDAY, '2026-10-23', 0, 900_000), amount_cents: null },
+    ])
+
+    const res = await put(105, { verdict: 'worth_it' })
+
+    expect(res.status).toBe(500)
+    expect(res.body).toStrictEqual({ error: 'a transaction is incomplete' })
+    expect(await verdictRows()).toHaveLength(0)
+  })
+})
+
+/** Status and body of a PUT sent as HTTP/1.0 with no Host header. */
+function rawPutWithoutHost(
+  port: number,
+  id: number,
+  headers: string[],
+): Promise<{ status: number; body: string }> {
+  const body = JSON.stringify({ verdict: 'worth_it' })
+  const request = [
+    `PUT /api/v1/habits/verdicts/${id} HTTP/1.0`,
+    'Content-Type: application/json',
+    `Content-Length: ${Buffer.byteLength(body)}`,
+    ...headers,
+    '',
+    body,
+  ].join('\r\n')
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = []
+    const socket = connect(port, '127.0.0.1', () => socket.write(request))
+    socket.on('data', (chunk: Buffer) => chunks.push(chunk))
+    socket.on('error', reject)
+    socket.on('close', () => {
+      const text = Buffer.concat(chunks).toString('utf8')
+      const [head, ...rest] = text.split('\r\n\r\n')
+      resolve({
+        status: Number(head.split(' ')[1]),
+        body: rest.join('\r\n\r\n'),
+      })
+    })
+  })
+}
+
+describe('a failure that is not a HabitsDataError', () => {
+  // A message that must reach neither the client nor the log.
+  class SentinelFailure extends Error {}
+  const SECRET = 'SQLITE_ERROR near acc_sentinel_secret 4821'
+
+  it('GET answers the generic text and logs only the error class', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(habitsDb.readHabits).mockRejectedValueOnce(
+      new SentinelFailure(SECRET),
+    )
+
+    const res = await get('all')
+
+    expect(res.status).toBe(500)
+    expect(res.body).toStrictEqual({ error: 'Could not read habits' })
+    expect(log.mock.calls).toEqual([
+      ['habits: could not read habits', 'SentinelFailure'],
+    ])
+  })
+
+  it('PUT answers the generic text and logs only the error class', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await seed()
+    vi.mocked(habitsDb.setVerdict).mockRejectedValueOnce(
+      new SentinelFailure(SECRET),
+    )
+
+    const res = await put(101, { verdict: 'worth_it' })
+
+    expect(res.status).toBe(500)
+    expect(res.body).toStrictEqual({ error: 'Could not save verdict' })
+    expect(log.mock.calls).toEqual([
+      ['habits: could not save verdict', 'SentinelFailure'],
+    ])
+    expect(await verdictRows()).toHaveLength(0)
   })
 })

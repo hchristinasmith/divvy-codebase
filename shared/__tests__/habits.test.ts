@@ -665,7 +665,7 @@ describe('recentSpendingIds', () => {
     expect(ids([p, s], 'strawb')).toEqual([s.id])
   })
 
-  it('a transfer leg is not listed', () => {
+  it('a transfer leg is not listed (decision pending: transfer detection)', () => {
     const out = tx('1', TODAY, -7_700)
     const inn = tx('4', TODAY, 7_700)
     expect(ids([out, inn], 'all')).toEqual([])
