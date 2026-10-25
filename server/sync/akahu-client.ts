@@ -543,8 +543,9 @@ export interface AkahuClient {
    * Settled transactions dated within the window (prd-01 Ruling 2). With
    * neither bound, Akahu returns everything it allows for the app
    * (docs/akahu-pending-semantics.md §3); that is the form the first sync
-   * uses. An `end` alone is sent as given, because only the no-bounds form is
-   * documented. Every page of one listing sends the same bounds.
+   * uses. A lone `start` or `end` is sent as given, with no default for the
+   * other: what Akahu does with one bound is undocumented, so the client
+   * invents nothing. Every page of one listing sends the same bounds.
    */
   listTransactions(range: { start?: Date; end?: Date }): Promise<SettledTransaction[]>
   listPendingTransactions(): Promise<PendingTransaction[]>
