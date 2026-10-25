@@ -26,6 +26,20 @@
 // Instants are written by the application as ISO-8601 UTC strings ending in
 // `Z`. There is no `CURRENT_TIMESTAMP` default: its format sorts differently
 // from the ISO strings beside it.
+//
+// Never rebuild `accounts` in a later migration (knex `dropColumn`, `.alter()`,
+// or anything that recreates the table). The rebuild runs inside the migration
+// transaction, where PRAGMA foreign_keys = OFF is ignored, so it deletes every
+// `account_settings` row (CASCADE) and clears every `bills.account_id`
+// (SET NULL). The fuller note is in
+// 20261025120000_prd02_budgets_bills_goals_roles_dismissals.js.
+// `server/db/__tests__/migration-guards.test.ts` (#165) enforces the no-rebuild
+// rule by test. Sync must update an account in place, keyed on `akahu_id`:
+// #145 names `INSERT … ON CONFLICT(akahu_id) DO UPDATE`, and
+// `server/sync/upsert.ts` reads, then updates or inserts, with the same effect.
+// Never `INSERT OR REPLACE`, a delete and reinsert, or a delete of an account
+// Akahu stops returning. `server/sync/__tests__/run.test.ts` (#145) enforces
+// the upsert rule by test.
 
 const SCOPES = ['personal', 'strawb']
 const SOURCES = ['akahu', 'xero']

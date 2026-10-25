@@ -125,14 +125,17 @@ async function claim(
             error_message: ABANDONED_MESSAGE,
           })
       }
+      // Only a start in the exact `toISOString()` form is ranked; anything
+      // else is skipped (#169). As text, 'not-a-timestamp' sorts after every
+      // ISO time; and julianday() alone reads strings Date.parse does not,
+      // such as 'now', so windowFor would get a start it cannot use.
       const lastSuccess: Pick<SyncRun, 'started_at'> | undefined = await trx(
         'sync_runs',
       )
         .where({ outcome: 'success' })
-        .orderBy([
-          { column: 'started_at', order: 'desc' },
-          { column: 'id', order: 'desc' },
-        ])
+        .whereRaw("strftime('%Y-%m-%dT%H:%M:%fZ', started_at) = started_at")
+        .orderByRaw('julianday(started_at) DESC')
+        .orderBy('id', 'desc')
         .first('started_at')
       const [runId] = await trx('sync_runs').insert({
         started_at: startedIso,
