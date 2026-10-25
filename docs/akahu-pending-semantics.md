@@ -130,7 +130,10 @@ From [Accessing transactional data][guide], read on 2026-10-25:
   `start` and `end` must be sent on every page of one query.
 - **Not yet observed:** how far back BNZ actually returns for this
   connection. The first full fetch answers it: record the oldest `date` it
-  returned beside `access_granted_at`.
+  returned beside `access_granted_at`, in Divvy's own database or Hannah's
+  private notes, never in this repository. Both are real personal dates,
+  and this repository is public. (`sync_runs` has no column for either
+  today; adding one is the sync lane's call.)
 
 The answer, then: up to 730 days before consent, subject to an undocumented
 BNZ limit that the first run will show. prd-01 still lists Open question 3
@@ -155,8 +158,10 @@ how the code consumes it on 2026-10-25:
 - `20261023130000_transaction_effective_category.js` backfilled `category`
   from `category_name`, and the seed writes `category` from
   `category.name` (`server/db/seeds/transactions.js:68`).
-  `20261024100003_…` repairs any row left with a NULL `category` beside a
-  non-NULL `category_name` the same way.
+  `20261024100003_…` repairs the same way any row with
+  `category_source = 'akahu'` that was left with a NULL `category` beside
+  a non-NULL `category_name`. A row a user, rule or Claude owns is never
+  filled in.
 
 `data/cats.js` maps each group to its category names, and every name
 appears under exactly one group (checked 2026-10-25), so a name always

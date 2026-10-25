@@ -73,11 +73,12 @@ export async function up(knex) {
     ),
   )
 
-  // A row that has Akahu's category name but no effective category gets
-  // Akahu's name. Rows that already have a category, whoever set it, are
-  // left alone, and so is `category_source`; running this twice changes
-  // nothing.
+  // A row whose category is still Akahu's to set, that has Akahu's category
+  // name but no effective category, gets Akahu's name. Rows that already
+  // have a category, and rows a user, rule or Claude owns, are left alone,
+  // and so is `category_source`; running this twice changes nothing.
   await knex('transactions')
+    .where({ category_source: 'akahu' })
     .whereNull('category')
     .whereNotNull('category_name')
     .update({ category: knex.ref('category_name') })
@@ -89,10 +90,18 @@ export async function up(knex) {
  * is still in the legacy `category_*` columns, so nothing Akahu sent is lost.
  * A category repaired by `up` stays repaired.
  *
+ * Pending rows are deleted first: without `status` they would look settled,
+ * with no `akahu_id`, and the M1 code would count them beside the settled
+ * row they become. The next sync re-mirrors them. `category_corrections`
+ * is already gone (its `down` runs first), so nothing cascades. A
+ * `source = 'xero'` row would become indistinguishable from an Akahu one;
+ * none exists yet.
+ *
  * @param { import("knex").Knex } knex
  * @returns { Promise<void> }
  */
 export async function down(knex) {
+  await knex('transactions').where({ status: 'pending' }).del()
   await knex.raw('DROP INDEX ??', [INDEX])
   for (const column of NEW_COLUMNS) {
     await knex.raw('ALTER TABLE ?? DROP COLUMN ??', ['transactions', column])

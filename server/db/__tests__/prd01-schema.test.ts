@@ -280,6 +280,53 @@ describe('backfill of existing transactions (Done-when 1)', () => {
     })
   })
 
+  it("leaves an Akahu-owned row's existing category alone even when Akahu's differs", async () => {
+    await db('transactions').insert({
+      akahu_id: 'trans_legacy_akahu_differs',
+      account_id: 'acc_fixture_everyday',
+      amount_cents: -300,
+      ...BAKERIES,
+      category: 'Convenience stores',
+      category_source: 'akahu',
+    })
+
+    await db.migrate.latest()
+
+    expect(
+      await db('transactions')
+        .where({ akahu_id: 'trans_legacy_akahu_differs' })
+        .first('category', 'category_source', 'akahu_category_name'),
+    ).toEqual({
+      category: 'Convenience stores',
+      category_source: 'akahu',
+      akahu_category_name: 'Bakeries',
+    })
+  })
+
+  it("never fills in a missing category on a row a user, rule or Claude owns", async () => {
+    const owners = ['user', 'rule', 'claude']
+    await db('transactions').insert(
+      owners.map((owner) => ({
+        akahu_id: `trans_legacy_${owner}_no_category`,
+        account_id: 'acc_fixture_everyday',
+        amount_cents: -300,
+        ...BAKERIES,
+        category: null,
+        category_source: owner,
+      })),
+    )
+
+    await db.migrate.latest()
+
+    expect(
+      await db('transactions')
+        .whereIn('category_source', owners)
+        .whereNull('category')
+        .orderBy('id')
+        .pluck('category_source'),
+    ).toEqual(owners)
+  })
+
   it('changes nothing else in any row, and does not rebuild the table', async () => {
     // Without this gap a rebuild would land on the same counter value.
     expect(beforeSequence).toBeGreaterThan(Math.max(...before.map((r) => Number(r.id))))
@@ -539,6 +586,15 @@ describe('sync_runs (Done-when 3)', () => {
     ).rejects.toThrow(/CHECK constraint failed: sync_runs_running_iff_unfinished/)
   })
 
+  it('refuses a negative count', async () => {
+    for (const count of ['inserted_count', 'updated_count', 'pending_mirrored_count']) {
+      await expect(
+        db('sync_runs').insert({ started_at: AT, [count]: -1 }),
+      ).rejects.toThrow(/CHECK constraint failed: sync_runs_counts_non_negative/)
+    }
+    expect(await db('sync_runs').count('* as n').first()).toEqual({ n: 0 })
+  })
+
   it('refuses an unknown outcome', async () => {
     await expect(
       db('sync_runs').insert({ started_at: AT, finished_at: LATER, outcome: 'bogus' }),
@@ -695,5 +751,20 @@ describe('rollback (Done-when 8)', () => {
 
     await db.migrate.latest()
     expect((await columns('transactions')).sort()).toEqual([...TRANSACTION_COLUMNS].sort())
+  })
+
+  it('deletes pending rows, so none is left looking settled', async () => {
+    await db.migrate.latest()
+    await db('transactions').insert([
+      { account_id: 'acc_fixture_everyday', status: 'pending', amount_cents: -1200 },
+      { account_id: 'acc_fixture_everyday', status: 'pending', amount_cents: -1200 },
+    ])
+
+    while ((await applied()).includes(FIRST)) await db.migrate.down()
+
+    expect(await db('transactions').count('* as n').first()).toEqual({ n: before.length })
+    expect(await db('transactions').whereNull('akahu_id').count('* as n').first()).toEqual({
+      n: 0,
+    })
   })
 })

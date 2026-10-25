@@ -2,8 +2,9 @@
 // seen with its error text and the counts of what a run changed.
 //
 // The CHECKs keep a row honest: a run is `running` exactly while it has no
-// `finished_at`, and a `failed` run always says why. The partial unique index
-// allows one `running` row at a time (prd-01 Ruling 6, one sync at a time).
+// `finished_at`, a `failed` run always says why, and no count is negative.
+// The partial unique index allows one `running` row at a time (prd-01
+// Ruling 6, one sync at a time).
 //
 // Consequence for sync: a process that dies mid-run leaves its row
 // `running`, and the index then refuses every later run. At boot, sync must
@@ -43,6 +44,11 @@ export async function up(knex) {
       '?? <> ? OR ?? IS NOT NULL',
       ['outcome', 'failed', 'error_message'],
       'sync_runs_failed_has_error',
+    )
+    table.check(
+      '?? >= 0 AND ?? >= 0 AND ?? >= 0',
+      ['inserted_count', 'updated_count', 'pending_mirrored_count'],
+      'sync_runs_counts_non_negative',
     )
   })
   await knex.raw(
