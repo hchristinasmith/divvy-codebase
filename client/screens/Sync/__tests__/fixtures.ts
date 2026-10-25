@@ -95,9 +95,11 @@ export interface Reply {
 
 /**
  * A handler answers, returns 'pending' to leave the request unsettled, or
- * 'reject' to fail it as an unreachable server does.
+ * 'reject' to fail it as an unreachable server does. A promise of either
+ * answer settles the request when the test resolves it.
  */
-export type Handler = () => Reply | 'pending' | 'reject'
+type Answer = Reply | 'reject'
+export type Handler = () => Answer | 'pending' | Promise<Answer>
 
 export interface Handlers {
   status?: Handler
@@ -120,6 +122,18 @@ export interface FetchCall {
 export function installFetch(initial: Handlers = {}) {
   const handlers: Handlers = { ...initial }
   const calls: FetchCall[] = []
+
+  function respond(answer: Answer): Promise<Response> {
+    if (answer === 'reject') return Promise.reject(new TypeError('offline'))
+    const text =
+      typeof answer.body === 'string' ? answer.body : JSON.stringify(answer.body)
+    return Promise.resolve(
+      new Response(text, {
+        status: answer.status ?? 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+  }
 
   function route(call: FetchCall): Handler | undefined {
     const path = call.url.pathname
@@ -144,15 +158,7 @@ export function installFetch(initial: Handlers = {}) {
     calls.push(call)
     const reply = route(call)?.() ?? 'pending'
     if (reply === 'pending') return pendingFetch()
-    if (reply === 'reject') return Promise.reject(new TypeError('offline'))
-    const text =
-      typeof reply.body === 'string' ? reply.body : JSON.stringify(reply.body)
-    return Promise.resolve(
-      new Response(text, {
-        status: reply.status ?? 200,
-        headers: { 'content-type': 'application/json' },
-      }),
-    )
+    return Promise.resolve(reply).then(respond)
   })
   vi.stubGlobal('fetch', fetchStub)
 

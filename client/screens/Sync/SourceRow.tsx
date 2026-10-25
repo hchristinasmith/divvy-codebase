@@ -17,7 +17,7 @@ export default function SourceRow({
 }) {
   const line = [state.lead, detail].filter((part) => part !== null).join(' · ')
   return (
-    <li className="grid grid-cols-[1fr_auto] items-center gap-4 border-b border-divider py-4">
+    <li className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 border-b border-divider py-4">
       <div className="flex flex-col gap-[3px]">
         <div className="flex flex-wrap items-center gap-2">
           <span
@@ -40,7 +40,7 @@ export default function SourceRow({
       </div>
       <span
         data-sync-time
-        className="text-right font-mono text-body-12 text-ink-muted"
+        className="whitespace-nowrap text-right font-mono text-body-12 text-ink-muted"
       >
         {state.time ?? ''}
       </span>

@@ -1,4 +1,8 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import {
+  useMutation,
+  useMutationState,
+  useQueryClient,
+} from '@tanstack/react-query'
 import { queryKeys } from '../../apis/queryKeys.ts'
 import { startSync } from '../../apis/sync.ts'
 
@@ -9,7 +13,7 @@ import { startSync } from '../../apis/sync.ts'
 // last success.
 const SYNC_NOW_KEY = ['syncNow'] as const
 
-export interface SyncNow {
+interface SyncNow {
   press: () => void
   isPending: boolean
   error: string | null
@@ -17,7 +21,7 @@ export interface SyncNow {
 
 export function useSyncNow(): SyncNow {
   const client = useQueryClient()
-  const mutation = useMutation({
+  const { mutate } = useMutation({
     mutationKey: SYNC_NOW_KEY,
     mutationFn: () => startSync(),
     // Returned, so the press stays pending until the re-read lands and the
@@ -25,7 +29,13 @@ export function useSyncNow(): SyncNow {
     onSuccess: () =>
       client.invalidateQueries({ queryKey: queryKeys.syncStatus.all }),
   })
-  const { mutate } = mutation
+  // The latest press as the mutation cache holds it, not as this hook's
+  // own observer saw it: a press made before the screen was left and
+  // opened again still shows busy, and its failure still shows.
+  const latest = useMutationState({
+    filters: { mutationKey: SYNC_NOW_KEY },
+    select: (mutation) => mutation.state,
+  }).at(-1)
 
   return {
     // The mutation cache knows at once that a press is in flight; the
@@ -35,7 +45,7 @@ export function useSyncNow(): SyncNow {
       if (client.isMutating({ mutationKey: SYNC_NOW_KEY }) > 0) return
       mutate()
     },
-    isPending: mutation.isPending,
-    error: mutation.error?.message ?? null,
+    isPending: latest?.status === 'pending',
+    error: latest?.status === 'error' ? (latest.error?.message ?? null) : null,
   }
 }

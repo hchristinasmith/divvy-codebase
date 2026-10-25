@@ -16,10 +16,10 @@ import type { SyncScreenStatus } from '../../apis/sync.ts'
 // report (issue 59 Done-when 1).
 
 /** Which state a row is in. The first that applies wins, in this order. */
-export type SyncRowKind = 'running' | 'failed' | 'never' | 'stale' | 'fresh'
+type SyncRowKind = 'running' | 'failed' | 'never' | 'stale' | 'fresh'
 
 /** The dot's colour: the pill's states, plus a failed run's danger. */
-export type SyncDotTone = 'fresh' | 'stale' | 'failed' | 'unknown'
+type SyncDotTone = 'fresh' | 'stale' | 'failed' | 'unknown'
 
 export interface SyncRowState {
   kind: SyncRowKind
@@ -40,7 +40,8 @@ function rowTime(pillLabel: string): string {
  *
  * - running: a sync is in flight on the server. The dot and time stay what
  *   the last success gives, so a row does not claim a new time early.
- * - failed: the last run failed. The time is when it failed.
+ * - failed: the last run failed. The time is when it failed, or none when
+ *   that time is not believable by the pill's rule.
  * - never, stale, fresh: from the last success, by the pill's rule.
  *
  * A `running` outcome with `running` false is a leftover row from a process
@@ -67,12 +68,17 @@ export function rowStateFor(
   }
   const run = status.lastRun
   if (run !== null && run.outcome === 'failed') {
-    const failedAt = Date.parse(run.finishedAt ?? run.startedAt)
+    // The pill's rule for a believable time, so a failure stamped ahead of
+    // the browser's clock shows no time rather than "just now".
+    const failedAt = parseSyncStatus(
+      { lastSuccessAt: run.finishedAt ?? run.startedAt },
+      now,
+    )
     return {
       kind: 'failed',
       tone: 'failed',
       lead: 'Last sync failed',
-      time: rowTime(formatSyncAge(now - failedAt)),
+      time: failedAt === null ? null : rowTime(formatSyncAge(now - failedAt)),
     }
   }
   if (pill.state === 'unknown') {

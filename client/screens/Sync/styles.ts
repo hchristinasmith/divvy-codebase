@@ -21,7 +21,7 @@ export const SECONDARY_BUTTON = `cursor-pointer rounded-pill bg-blush px-4 py-2 
 // Pink: the prototype's "Sync now" (padding 10px 18px, 13px semibold, the
 // spinner 8px before the label). Pink buttons carry the theme's small
 // offset.
-export const PRIMARY_BUTTON = `flex cursor-pointer items-center gap-2 whitespace-nowrap rounded-pill bg-pink px-4.5 py-2.5 text-body-13 font-semibold text-surface shadow-pill hover:bg-pink-hover disabled:cursor-wait ${FOCUS}`
+export const PRIMARY_BUTTON = `flex cursor-pointer items-center gap-2 whitespace-nowrap rounded-pill bg-pink px-4.5 py-2.5 text-body-13 font-semibold text-surface shadow-pill enabled:hover:bg-pink-hover disabled:cursor-wait ${FOCUS} focus-visible:outline-offset-2`
 
 // The prototype's 12px ring: a faint white track with a white leading edge,
 // one turn every 0.8 s, still when the system asks for reduced motion.

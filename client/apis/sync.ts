@@ -52,7 +52,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 // ---------------------------------------------------------------- status
 
 /** The part of a run the screen reads. No `error`: see the header. */
-export type SyncScreenRun = Pick<
+type SyncScreenRun = Pick<
   SyncRunStatus,
   'startedAt' | 'finishedAt' | 'outcome'
 >
@@ -182,7 +182,7 @@ export const syncAccountsQuery = queryOptions({
 // -------------------------------------------------------------- sync now
 
 /** What "Sync now" got: a run started, or one was already in flight. */
-export type SyncStart = 'started' | 'already running'
+type SyncStart = 'started' | 'already running'
 
 /** The one message a refused or failed "Sync now" shows. */
 export const SYNC_NOW_ERROR = "Couldn't start a sync. Try again."

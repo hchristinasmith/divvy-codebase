@@ -103,6 +103,19 @@ describe('rowStateFor', () => {
     expect(row.time).toBe('7 min ago')
   })
 
+  it('shows no time for a failed run stamped ahead of the clock, never "just now"', () => {
+    // Fails if the failure time skips the pill's rule for a believable time.
+    expectRow(
+      rowStateFor(
+        status({
+          lastRun: { startedAt: ago(-60 * MIN), finishedAt: ago(-59 * MIN), outcome: 'failed' },
+        }),
+        NOW,
+      ),
+      { kind: 'failed', tone: 'failed', lead: 'Last sync failed', time: null },
+    )
+  })
+
   it('leads with "Syncing…" while running and keeps the last success time and tone', () => {
     // Fails if a running row claims a new time or a green dot early.
     expectRow(

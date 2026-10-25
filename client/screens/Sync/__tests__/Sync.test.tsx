@@ -7,6 +7,10 @@ import {
   waitFor,
   within,
 } from '@testing-library/react'
+import type { ReactNode } from 'react'
+import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
+import { MemoryRouter } from 'react-router'
+import { ScopeProvider } from '../../../context/ScopeContext.tsx'
 import { renderWithProviders } from '../../../components/Shell/__tests__/renderWithProviders.tsx'
 import { SYNC_NOW_ERROR } from '../../../apis/sync.ts'
 import { queryKeys } from '../../../apis/queryKeys.ts'
@@ -21,6 +25,7 @@ import {
   statusBody,
   type Handler,
   type Handlers,
+  type Reply,
 } from './fixtures.ts'
 
 // The Sync screen (prd-02 issue 59), one describe per Done-when line. The
@@ -306,6 +311,10 @@ describe('rows come from the server status (Done-when 1)', () => {
     const el = row.querySelector('[data-sync-time]')
     expect(el?.classList.contains('font-mono')).toBe(true)
     expect(el?.classList.contains('text-body-12')).toBe(true)
+    // Fails if a long account list can push the time onto two lines or
+    // the name column can grow past the card.
+    expect(el?.classList.contains('whitespace-nowrap')).toBe(true)
+    expect(row.classList.contains('grid-cols-[minmax(0,1fr)_auto]')).toBe(true)
   })
 
   it('titles a bank with no connection by its account name', async () => {
@@ -517,6 +526,65 @@ describe('Sync now calls the trigger and shows its progress (Done-when 2)', () =
     // Fails if an old failure stays up under a new press.
     await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
     expect(fx.callsTo('POST', '/api/v1/sync/run')).toHaveLength(2)
+  })
+})
+
+describe('a press outlives leaving the screen', () => {
+  // The same client and providers as renderWithProviders, so the screen can
+  // be left and opened again with the mutation cache intact.
+  function tree(client: QueryClient, ui: ReactNode) {
+    return (
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={['/sync']}>
+          <ScopeProvider>{ui}</ScopeProvider>
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+  }
+
+  it('shows busy on return while the press is in flight, then its failure', async () => {
+    let settle: (answer: Reply) => void = () => {}
+    const { fx, client, rerender } = setup({
+      status: json(statusBody({ lastSuccessAt: minutesBefore(Date.now(), 4) })),
+      accounts: json(ACCOUNTS_BODY),
+      run: () =>
+        new Promise<Reply>((resolve) => {
+          settle = resolve
+        }),
+    })
+    await findRows()
+    fireEvent.click(syncButton())
+    await waitFor(() => expect(syncButton().disabled).toBe(true))
+
+    rerender(tree(client, <p>Elsewhere</p>))
+    expect(screen.queryByRole('button')).toBeNull()
+    rerender(tree(client, <Sync />))
+    await findRows()
+    // Fails if the returning screen offers an enabled "Sync now" whose press
+    // the in-flight guard would silently drop.
+    expect(syncButton().textContent).toBe('Syncing…')
+    expect(syncButton().disabled).toBe(true)
+    fireEvent.click(syncButton())
+    expect(fx.callsTo('POST', '/api/v1/sync/run')).toHaveLength(1)
+
+    act(() => settle({ status: 500, body: { error: 'boom SENTINEL' } }))
+    // Fails if the press's failure is lost with the observer that made it.
+    expect((await screen.findByRole('alert')).textContent).toBe(SYNC_NOW_ERROR)
+    expect(syncButton().disabled).toBe(false)
+  })
+
+  it('gives the pink button a visible focus offset and no hover while disabled', async () => {
+    setup({
+      status: json(statusBody({ lastSuccessAt: minutesBefore(Date.now(), 4) })),
+      accounts: json(ACCOUNTS_BODY),
+    })
+    await findRows()
+    const classes = syncButton().classList
+    // Fails if the outline sits flush on the pink, or a disabled button
+    // still darkens on hover.
+    expect(classes.contains('focus-visible:outline-offset-2')).toBe(true)
+    expect(classes.contains('enabled:hover:bg-pink-hover')).toBe(true)
+    expect(classes.contains('hover:bg-pink-hover')).toBe(false)
   })
 })
 

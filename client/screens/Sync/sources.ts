@@ -6,7 +6,7 @@ import type { SyncAccount } from '../../apis/sync.ts'
 // An account with no connection name is its own row, titled by its name,
 // and never merges with a connection that happens to share that name.
 
-export interface SyncSource {
+interface SyncSource {
   name: string
   accounts: string[]
 }
