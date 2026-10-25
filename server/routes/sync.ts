@@ -96,8 +96,8 @@ const router = express.Router()
 // Both queries rank runs the way run.ts's claim step does (#188, #169): only
 // a started_at in the exact toISOString() form is ranked, by julianday(). As
 // text, 'not-a-timestamp' or 'now' would sort after every ISO time and show
-// as the latest run. The filter is copied, not shared, because run.ts must
-// not import from a route.
+// as the latest run. The filter is a copy of the claim step's in
+// server/sync/run.ts; change both together.
 router.get('/status', async (req, res) => {
   try {
     const latest: SyncRun | undefined = await connection('sync_runs')

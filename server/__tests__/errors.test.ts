@@ -30,6 +30,9 @@ vi.mock('../routes/index.ts', async (importOriginal) => {
   router.get('/__test/next-error', (req, res, next) => {
     next(Object.assign(new Error(SECRET), { body: FIELD_SECRET, status: 418 }))
   })
+  router.get('/__test/status-code-404', (req, res, next) => {
+    next(Object.assign(new Error(SECRET), { body: FIELD_SECRET, statusCode: 404 }))
+  })
   router.get('/__test/status-503', (req, res, next) => {
     next(Object.assign(new Error(SECRET), { body: FIELD_SECRET, status: 503 }))
   })
@@ -168,6 +171,15 @@ describe('a client error on /api answers its own status with fixed text, and is 
       418,
       'Client error',
       () => api.get('/api/v1/__test/next-error').set('X-Divvy-Test', HEADER_SECRET),
+    ],
+    [
+      'a route error with only a statusCode of 404',
+      404,
+      'Client error',
+      () =>
+        api
+          .get('/api/v1/__test/status-code-404')
+          .set('X-Divvy-Test', HEADER_SECRET),
     ],
   ] as const)(
     '%s answers %i with { error: "%s" }',

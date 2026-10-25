@@ -46,8 +46,8 @@ server.get('*', (req, res, next) => {
 // only the stack of a 500 is logged, never the error object. Other paths
 // keep Express's default handling.
 //
-// An error whose integer `status` (else `statusCode`, as Express's
-// finalhandler reads them) is 4xx is the client's fault (#185): it answers
+// An error whose `status` is a 4xx integer, or which has no integer `status`
+// and a 4xx integer `statusCode`, is the client's fault (#185): it answers
 // that status with a fixed text, and nothing is logged. That covers a
 // malformed body (400), an oversize body (413), an unsupported charset or
 // Content-Encoding (415) and a bad percent-encoded path (400). Anything else,
