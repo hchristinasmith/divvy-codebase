@@ -138,9 +138,9 @@ export interface SafeToSpendResult {
   nextPayday: IsoDate
   liquidCents: Cents
   /**
-   * The unpaid bills subtracted from liquid: in-scope bills due on or before
-   * `nextPayday`, less `strawbBillsBufferCents`, the part the Strawb tax pot
-   * pays (prd-02 Ruling 12).
+   * The unpaid bills subtracted from liquid: in-scope bills not paid and due
+   * on or before `nextPayday`, less `strawbBillsBufferCents`, the part the
+   * Strawb tax pot pays (prd-02 Ruling 12).
    */
   unpaidBillsCents: Cents
   remainingBudgetCents: Cents

@@ -157,6 +157,13 @@ function parseDate(value: IsoDate, what: string): CivilDate {
 }
 
 function formatDate({ year, month, day }: CivilDate): IsoDate {
+  // A payday moved out of the years 0000 to 9999 has no YYYY-MM-DD form:
+  // year −1 would print as "00-1" (#126).
+  if (year < 0 || year > 9999) {
+    throw new RangeError(
+      `a payday must fall in the years 0000 to 9999, got year ${year}`,
+    )
+  }
   const mm = String(month).padStart(2, '0')
   const dd = String(day).padStart(2, '0')
   return `${String(year).padStart(4, '0')}-${mm}-${dd}`

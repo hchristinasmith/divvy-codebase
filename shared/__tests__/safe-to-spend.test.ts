@@ -1229,6 +1229,9 @@ describe('paydays', () => {
     ['0099-12-31', 2, '0099-12-29', '0100-01-05', 5],
     // Mon 1 Mar 0004: the last payday is before the leap day 29 Feb 0004
     ['0004-03-01', 2, '0004-02-24', '0004-03-02', 1],
+    // Tue 4 Jan 0000, the first payday the year 0000 has: 363 days before
+    //   Mon 1 Jan 0001 (year 0 is a leap year), and 363 = 7 × 51 + 6.
+    ['0000-01-04', 2, '0000-01-04', '0000-01-11', 7],
   ])('today %s, payday weekday %i: last %s, next %s, %i days', (today, weekday, last, next, days) => {
     expect(lastPayday(today, weekday)).toBe(last)
     expect(nextPayday(today, weekday)).toBe(next)
@@ -1246,6 +1249,19 @@ describe('paydays', () => {
     ['0050-03-01', '2026-10-23', 721955],
   ])('daysBetween %s and %s is %i', (from, to, days) => {
     expect(daysBetween(from, to)).toBe(days)
+  })
+
+  // Sat 1 Jan 0000: the last Tuesday is in year −1, which has no YYYY-MM-DD
+  // form; it is refused, not printed as "00-1-12-28" (#126). Thu 30 Dec
+  // 9999: the next Tuesday is in year 10000.
+  it('refuses a payday outside the years 0000 to 9999', () => {
+    expect(() => lastPayday('0000-01-01', 2)).toThrow(
+      /^a payday must fall in the years 0000 to 9999, got year -1$/,
+    )
+    expect(lastPayday('9999-12-30', 2)).toBe('9999-12-28')
+    expect(() => nextPayday('9999-12-30', 2)).toThrow(
+      /^a payday must fall in the years 0000 to 9999, got year 10000$/,
+    )
   })
 
   it.each<[number, number, number]>([
@@ -1312,6 +1328,17 @@ describe('refusals', () => {
       'a date with a leading character',
       { today: 'x2026-10-23' },
       /^today must be a YYYY-MM-DD calendar date, got "x2026-10-23"$/,
+    ],
+    // The week around `today` must stay in the years 0000 to 9999 (#126).
+    [
+      'a today whose last payday is before the year 0000',
+      { today: '0000-01-01' },
+      /^a payday must fall in the years 0000 to 9999, got year -1$/,
+    ],
+    [
+      'a today whose next payday is after the year 9999',
+      { today: '9999-12-30' },
+      /^a payday must fall in the years 0000 to 9999, got year 10000$/,
     ],
     ['a fractional tax rate', { taxRateBasisPoints: 2812.5 }, /taxRateBasisPoints must be a whole number/],
     ['a tax rate over 100%', { taxRateBasisPoints: 10001 }, /taxRateBasisPoints must be a whole number/],
