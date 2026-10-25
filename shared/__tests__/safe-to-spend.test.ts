@@ -431,6 +431,14 @@ const CASES: Case[] = [
     expected: { ...EXPECT_PERSONAL, personalTaxPotCents: 30000 },
   },
   {
+    // Owed typed as −0, a zero with a sign: reported as 0, never −0.
+    //   hold = max(0, 0 − 0) = 0, so the result is the base one.
+    // safe = 300000 − 112000 − 14000 − 0 − 0 = 174000; per day 43500
+    name: 'personal, tax owed −0 is reported as 0, not −0',
+    input: base({ scope: 'personal', personalTaxOwedCents: -0 }),
+    expected: EXPECT_PERSONAL,
+  },
+  {
     // Profit 5000000 at 100%: Strawb would owe 5000000, but Personal holds
     //   only the personal tax (owed 0 here), so the result is the base one.
     // safe = 300000 − 112000 − 14000 − 0 − 0 = 174000; per day 43500

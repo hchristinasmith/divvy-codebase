@@ -421,7 +421,11 @@ export function safeToSpend(input: SafeToSpendInput): SafeToSpendResult {
   const strawbTaxPotCents = strawbInView ? potsOf('strawb') : 0
   const strawbTaxHoldCents = Math.max(0, strawbTaxOwedCents - strawbTaxPotCents)
 
-  const personalTaxOwedCents = personalInView ? input.personalTaxOwedCents : 0
+  // `!== 0` also turns a typed −0 into 0, so the reported figure is never −0.
+  const personalTaxOwedCents =
+    personalInView && input.personalTaxOwedCents !== 0
+      ? input.personalTaxOwedCents
+      : 0
   const personalTaxPotCents = personalInView ? potsOf('personal') : 0
   const personalTaxHoldCents = Math.max(
     0,
