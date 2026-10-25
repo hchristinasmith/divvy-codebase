@@ -25,6 +25,7 @@ fly secrets set LITESTREAM_REPLICA_URL=<replica url> LITESTREAM_ACCESS_KEY_ID=<k
 ```
 
 - `<replica url>` is the bucket and a path inside it, in the form your provider documents for Litestream (for an S3-compatible bucket, `s3://<bucket>/<path>`, plus `?endpoint=<url>&region=<region>` when it is not AWS). Quote the whole `NAME=VALUE` argument in single quotes if the URL holds a `?` or `&`.
+- `scripts/start.sh` removes from the app only the variables whose names start `LITESTREAM_` or `AWS_` (#291, #318). Those cover the S3-compatible bucket this page assumes: Litestream's own keys and every name the AWS SDK reads. A non-S3 provider's credential names, such as `GOOGLE_APPLICATION_CREDENTIALS` or `AZURE_*`, do not start with either prefix. Choosing one means extending the `scrub=` assignment in `scripts/start.sh` first, or the new credential reaches npm and node and the check does not catch it.
 - Fly never shows a secret's value again. Keep all three in your password manager.
 - Keep the values out of your shell history: start the line with a space (zsh `HIST_IGNORE_SPACE`), or feed them on stdin instead, which **UNVERIFIED (flyctl -h only)** `fly secrets import` reads as `NAME=VALUE` lines:
 

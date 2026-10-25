@@ -136,6 +136,7 @@ log "serving $serve_target on the tailnet as $ts_hostname"
 #    newline is made without a backslash, so an echo of the -exec string
 #    cannot turn it into a line break.
 fail='fail() { echo "start.sh: ERROR: $* Refusing to start the app." >&2; exit 1; }'
+# A replica on a non-S3 provider needs this scrub extended first: see docs/restore.md, section 1.
 # shellcheck disable=SC2016 # sh -c expands these, not start.sh
 scrub='unset scrub_nl scrub_env scrub_line scrub_name; scrub_nl=$(echo; echo x); scrub_nl=${scrub_nl%x}; IFS=$scrub_nl; set -f; scrub_env=$(env) || fail "env failed, so the LITESTREAM_ and AWS_ variables were not removed."; for scrub_line in $scrub_env; do scrub_name=${scrub_line%%=*}; case $scrub_name in *[!A-Za-z0-9_]*) ;; LITESTREAM_* | AWS_*) unset "$scrub_name" || fail "unset failed on a LITESTREAM_ or AWS_ variable."; esac; done'
 # shellcheck disable=SC2016 # sh -c expands these, not start.sh
