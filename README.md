@@ -36,6 +36,8 @@ npm run dev
 - the Express API on <http://localhost:3005>, or on `PORT` if you set it
 - the Vite client on <http://localhost:5173>, which proxies `/api` to port 3005
 
+The Express process also starts the sync scheduler. It syncs every 15 minutes (set `SYNC_INTERVAL_MS` in `.env` to change that), with the first run one interval after start, and it writes to the dev database. With empty Akahu credentials each run records a `failed` row. `POST /api/v1/sync/run` starts a sync now.
+
 Open the client URL.
 
 ### Seeding

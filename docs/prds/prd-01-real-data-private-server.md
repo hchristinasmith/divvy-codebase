@@ -103,8 +103,12 @@ Every Akahu transaction is stored in full. `akahu_category_*` (id, name, group i
 
 *Implementation note 2026-10-25 (#21):* `runSync` does its own claiming and recovery. A `running` row younger than 30 minutes makes the run return `skipped` having written nothing; an older one is closed as `failed` with a fixed message at claim time, on every run, not only at boot. Wave 3 does not need a boot-time cleanup step for stale rows.
 
+*Implementation note 2026-10-25 (#27):* the overlap guard has two layers: an in-process guard in `server/sync/scheduler.ts` (a tick or a second "sync now" while a run is in flight is refused; the route answers 409) and `runSync`'s database claim, which covers a run left by a dead process. `SYNC_INTERVAL_MS` has a 60-second floor, and the first scheduled run is one interval after boot.
+
 ## Ruling 7 — No public surface, ever, in this PRD
 `fly.toml` has no `[http_service]` or public ports and the app gets no public IP; Tailscale runs inside the machine and serves the app (and the TLS certificate web push will need later, D5). No server-side auth is added (D4); the tailnet ACL is the access control.
+
+*Implementation note 2026-10-25 (#27):* `POST /api/v1/sync/run` has a cross-site guard (`Sec-Fetch-Site`, then `Origin` compared with `Host`); it is not auth, and adds no public surface.
 
 ## Ruling 8 — Accounts carry an owner scope column
 `accounts.scope` is `personal` or `strawb`, set by you per account (default `personal`), never inferred. Why: prd-02's scope toggle filters on it, and it is cheaper to add the column with the table than to migrate later. prd-01 populates it with a manual mapping and exposes no UI for it.

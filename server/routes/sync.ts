@@ -54,11 +54,6 @@ export type SyncRunResponse =
   | { started: true }
   | { started: false; reason: 'already running' }
 
-const NEWEST_FIRST = [
-  { column: 'started_at', order: 'desc' },
-  { column: 'id', order: 'desc' },
-] as const
-
 function toRunStatus(row: SyncRun): SyncRunStatus {
   return {
     id: row.id,
@@ -97,15 +92,25 @@ function fromThisSite(req: Request): boolean {
 const router = express.Router()
 
 // GET /api/v1/sync/status
+//
+// Both queries rank runs the way run.ts's claim step does (#188, #169): only
+// a started_at in the exact toISOString() form is ranked, by julianday(). As
+// text, 'not-a-timestamp' or 'now' would sort after every ISO time and show
+// as the latest run. The filter is a copy of the claim step's in
+// server/sync/run.ts; change both together.
 router.get('/status', async (req, res) => {
   try {
     const latest: SyncRun | undefined = await connection('sync_runs')
-      .orderBy([...NEWEST_FIRST])
+      .whereRaw("strftime('%Y-%m-%dT%H:%M:%fZ', started_at) = started_at")
+      .orderByRaw('julianday(started_at) DESC')
+      .orderBy('id', 'desc')
       .first()
     const lastSuccess: Pick<SyncRun, 'finished_at'> | undefined =
       await connection('sync_runs')
         .where({ outcome: 'success' })
-        .orderBy([...NEWEST_FIRST])
+        .whereRaw("strftime('%Y-%m-%dT%H:%M:%fZ', started_at) = started_at")
+        .orderByRaw('julianday(started_at) DESC')
+        .orderBy('id', 'desc')
         .first('finished_at')
     const state = syncScheduler.getState()
     const body: SyncStatus = {
