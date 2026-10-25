@@ -38,8 +38,9 @@ export const SMALL_STEP = `${STEP_SHAPE} bg-blush text-rose hover:bg-blush-hover
 export const LARGE_STEP = `${STEP_SHAPE} bg-pink text-surface hover:bg-pink-hover`
 
 // The dashed "New goal" card. The prototype's dash is the theme's offset
-// colour, which has no colour token; blush-hover is the nearest one.
-export const NEW_GOAL_CARD = `flex min-h-50 cursor-pointer flex-col items-center justify-center gap-2 rounded-card border-[1.5px] border-dashed border-blush-hover bg-transparent p-6 text-ink-muted hover:border-pink hover:bg-blush ${FOCUS}`
+// colour, which has no colour token; pink at 60% over the canvas is the
+// nearest blend of the tokens there are.
+export const NEW_GOAL_CARD = `flex min-h-50 cursor-pointer flex-col items-center justify-center gap-2 rounded-card border-[1.5px] border-dashed border-pink/60 bg-transparent p-6 text-ink-muted hover:border-pink hover:bg-blush ${FOCUS}`
 export const NEW_GOAL_TITLE = 'font-display text-display-28 font-medium text-ink'
 export const NEW_GOAL_HINT = 'text-body-13'
 
@@ -47,10 +48,11 @@ export const NOTE =
   'm-0 rounded-summary bg-surface px-5 py-4 text-body-14 leading-[1.45] text-ink-muted shadow-tile'
 export const NOTE_STRONG = 'text-ink'
 
-// The form's fields: no border, on the small offset (CHANGES-2 §1). Focus
-// is the outline.
+// The form's fields: no border, on the small offset (CHANGES-2 §1), padded
+// 12px by 14px as in the prototype. Focus is the outline, and the field
+// turns white, as the prototype's does.
 const FIELD_SHAPE =
-  'w-full min-w-0 rounded-tile border-0 bg-canvas px-3.5 py-2.5 text-body-14 text-ink shadow-pill disabled:cursor-not-allowed disabled:opacity-50'
+  'w-full min-w-0 rounded-tile border-0 bg-canvas px-3.5 py-3 text-body-14 text-ink shadow-pill focus:bg-surface disabled:cursor-not-allowed disabled:opacity-50'
 
 // DM Mono is for numbers: the typed target and the date.
 export const NUMBER_INPUT = `${FIELD_SHAPE} font-mono ${FOCUS}`
