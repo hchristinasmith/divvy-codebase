@@ -64,6 +64,10 @@ function toRow(txn) {
     category_name: txn.category?.name || null,
     category_group_id: group?._id || null,
     category_group_name: group?.name || null,
+    akahu_category_id: txn.category?._id || null,
+    akahu_category_name: txn.category?.name || null,
+    akahu_category_group_id: group?._id || null,
+    akahu_category_group_name: group?.name || null,
     // Seeded rows are Akahu data: the effective category is Akahu's.
     category: txn.category?.name || null,
     category_source: 'akahu',
