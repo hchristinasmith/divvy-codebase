@@ -45,16 +45,46 @@ server.get('*', (req, res, next) => {
 // fields; a body-parser error holds the raw request text in `err.body`, so
 // only the stack of a 500 is logged, never the error object. Other paths
 // keep Express's default handling.
+//
+// An error whose integer `status` (else `statusCode`, as Express's
+// finalhandler reads them) is 4xx is the client's fault (#185): it answers
+// that status with a fixed text, and nothing is logged. That covers a
+// malformed body (400), an oversize body (413), an unsupported charset or
+// Content-Encoding (415) and a bad percent-encoded path (400). Anything else,
+// including a 5xx status, is a 500 with the fixed text, and only its stack is
+// logged.
+const CLIENT_ERROR_TEXT: Partial<Record<number, string>> = {
+  400: 'Bad request',
+  413: 'Payload too large',
+  415: 'Unsupported media type',
+}
+
+/** The 4xx status an error carries, or undefined for anything else. */
+function clientStatus(err: unknown): number | undefined {
+  if (typeof err !== 'object' || err === null) return undefined
+  const status =
+    'status' in err && Number.isInteger(err.status)
+      ? err.status
+      : 'statusCode' in err
+        ? err.statusCode
+        : undefined
+  return typeof status === 'number' &&
+    Number.isInteger(status) &&
+    status >= 400 &&
+    status <= 499
+    ? status
+    : undefined
+}
+
 server.use(
   '/api',
   (err: unknown, req: Request, res: Response, next: NextFunction) => {
     if (res.headersSent) return next(err)
-    const type =
-      typeof err === 'object' && err !== null && 'type' in err
-        ? err.type
-        : undefined
-    if (type === 'entity.parse.failed') {
-      res.status(400).json({ error: 'Bad request' })
+    const client = clientStatus(err)
+    if (client !== undefined) {
+      res
+        .status(client)
+        .json({ error: CLIENT_ERROR_TEXT[client] ?? 'Client error' })
       return
     }
     console.error(

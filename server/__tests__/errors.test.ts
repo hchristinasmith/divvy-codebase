@@ -8,14 +8,17 @@ import {
   type LoopbackApi,
 } from '../test-utils/app.ts'
 
-// The /api error handler in server.ts (#177). The barrel is wrapped, not
-// replaced: every real router stays mounted, and a stand-in router adds two
-// routes that fail on purpose, so a route error can be provoked without
-// editing any router file.
+// The /api error handler in server.ts (#177, #185). The barrel is wrapped, not
+// replaced: every real router stays mounted, and a stand-in router adds routes
+// that fail on purpose, so a route error can be provoked without editing any
+// router file.
 const SECRET = 'secret detail /Users/someone/divvy'
 // Carried in an error field, as body-parser carries the raw request text in
 // `err.body`: it must reach neither the response nor the log.
 const FIELD_SECRET = 'raw request text in a field'
+// Sent as a request header on every request below: it must reach neither the
+// response nor the log.
+const HEADER_SECRET = 'header secret marker 5a1e0c'
 
 vi.mock('../routes/index.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../routes/index.ts')>()
@@ -26,6 +29,9 @@ vi.mock('../routes/index.ts', async (importOriginal) => {
   })
   router.get('/__test/next-error', (req, res, next) => {
     next(Object.assign(new Error(SECRET), { body: FIELD_SECRET, status: 418 }))
+  })
+  router.get('/__test/status-503', (req, res, next) => {
+    next(Object.assign(new Error(SECRET), { body: FIELD_SECRET, status: 503 }))
   })
   router.use(actual.default)
   return { default: router }
@@ -63,9 +69,14 @@ function expectNoLeak(text: string): void {
   for (const marker of STACK_MARKERS) expect(text).not.toContain(marker)
   expect(text).not.toContain(SECRET)
   expect(text).not.toContain(FIELD_SECRET)
+  expect(text).not.toContain(HEADER_SECRET)
 }
 
 const MALFORMED = '{"not json'
+// Over express.json()'s 100kb default limit.
+const OVERSIZE_JSON = JSON.stringify({ pad: 'x'.repeat(101 * 1024) })
+// Over express.urlencoded()'s 1000-parameter default limit.
+const MANY_PARAMS = Array.from({ length: 1001 }, (_, i) => `k${i}=1`).join('&')
 
 describe('a malformed JSON body on /api is a fixed JSON 400', () => {
   it.each([
@@ -93,16 +104,98 @@ describe('a malformed JSON body on /api is a fixed JSON 400', () => {
   )
 })
 
-describe('a route error on /api is a fixed JSON 500', () => {
+// A 4xx status answers that status with fixed text and is never logged (#185).
+// The 418 comes from a route's own `status`, not from a malformed request; it
+// is answered by the same rule.
+describe('a client error on /api answers its own status with fixed text, and is not logged', () => {
+  it.each([
+    [
+      'an oversize JSON body',
+      413,
+      'Payload too large',
+      () =>
+        api
+          .post('/api/v1/nothing')
+          .set('Content-Type', 'application/json')
+          .set('X-Divvy-Test', HEADER_SECRET)
+          .send(OVERSIZE_JSON),
+    ],
+    [
+      'more than 1000 urlencoded parameters',
+      413,
+      'Payload too large',
+      () =>
+        api
+          .post('/api/v1/nothing')
+          .set('Content-Type', 'application/x-www-form-urlencoded')
+          .set('X-Divvy-Test', HEADER_SECRET)
+          .send(MANY_PARAMS),
+    ],
+    [
+      'an unsupported charset',
+      415,
+      'Unsupported media type',
+      () =>
+        api
+          .post('/api/v1/nothing')
+          .set('Content-Type', 'application/json; charset=utf-9')
+          .set('X-Divvy-Test', HEADER_SECRET)
+          .send('{}'),
+    ],
+    [
+      'an unsupported Content-Encoding',
+      415,
+      'Unsupported media type',
+      () =>
+        api
+          .post('/api/v1/nothing')
+          .set('Content-Type', 'application/json')
+          .set('Content-Encoding', 'bogus')
+          .set('X-Divvy-Test', HEADER_SECRET)
+          .send('{}'),
+    ],
+    [
+      'a percent-encoding that does not decode',
+      400,
+      'Bad request',
+      () =>
+        api
+          .patch('/api/v1/transactions/%E0%A4%A')
+          .set('X-Divvy-Test', HEADER_SECRET),
+    ],
+    [
+      'a route error whose status is 418',
+      418,
+      'Client error',
+      () => api.get('/api/v1/__test/next-error').set('X-Divvy-Test', HEADER_SECRET),
+    ],
+  ] as const)(
+    '%s answers %i with { error: "%s" }',
+    async (_what, status, text, send) => {
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+      const res = await send()
+
+      expect(res.status).toBe(status)
+      expect(res.headers['content-type']).toMatch(/^application\/json/)
+      expect(res.body).toStrictEqual({ error: text })
+      expect(Object.keys(res.body)).toEqual(['error'])
+      expectNoLeak(res.text)
+      expect(errorLog).not.toHaveBeenCalled()
+    },
+  )
+})
+
+describe('a route error on /api with no client status is a fixed JSON 500', () => {
   it.each([
     ['a synchronous throw', '/api/v1/__test/throws'],
-    ['next(err)', '/api/v1/__test/next-error'],
+    ['next(err) with a 5xx status', '/api/v1/__test/status-503'],
   ])(
     '%s answers { error: "Internal server error" } with no message or stack',
     async (_how, path) => {
       const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-      const res = await api.get(path)
+      const res = await api.get(path).set('X-Divvy-Test', HEADER_SECRET)
 
       expect(res.status).toBe(500)
       expect(res.headers['content-type']).toMatch(/^application\/json/)
