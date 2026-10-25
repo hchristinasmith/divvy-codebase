@@ -52,7 +52,7 @@ RUN npm ci
 COPY . .
 RUN npm run build && npm prune --omit=dev
 
-# ---- runtime: only what start.sh and `npm start` need ----
+# ---- runtime: only what start.sh needs to migrate and serve ----
 FROM node:22-bookworm-slim
 WORKDIR /app
 
@@ -71,12 +71,13 @@ COPY --from=tools /tools/tailscale /tools/tailscaled /tools/litestream /usr/loca
 COPY --from=build /app/package.json /app/package-lock.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
-# `npm start` runs `knex migrate:latest` against this knexfile before the
-# server starts, so the migrations ship as source.
+# start.sh runs `npm run migrate:latest` (knex against this knexfile) before
+# the server starts, so the migrations ship as source (#255).
 COPY --from=build /app/server/db/knexfile.js ./server/db/knexfile.js
 COPY --from=build /app/server/db/migrations ./server/db/migrations
 
-# The boot path: join the tailnet, publish the app there, then `npm start`.
+# The boot path: join the tailnet, publish the app there, then migrate and
+# start the server.
 # chmod as well as git's exec bit, so any builder gets a runnable script.
 COPY --from=build /app/scripts/start.sh ./scripts/start.sh
 RUN chmod 755 /app/scripts/start.sh
