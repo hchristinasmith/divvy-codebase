@@ -19,7 +19,7 @@ function links() {
 }
 
 describe('the desktop sidebar', () => {
-  it('lists the nine handoff screens in order, then Wishlist and Settings', () => {
+  it('lists the shell screens in sidebar order, then Settings', () => {
     renderWithProviders(<ShellSidebar />)
     expect(links().map((a) => a.textContent)).toEqual([
       'Overview',
@@ -31,7 +31,6 @@ describe('the desktop sidebar', () => {
       'Advisor',
       'Sync',
       'Privacy',
-      'Wishlist',
       'Settings',
     ])
     expect(links().map((a) => a.getAttribute('href'))).toEqual([
@@ -44,7 +43,6 @@ describe('the desktop sidebar', () => {
       '/advisor',
       '/sync',
       '/privacy',
-      '/wishlist',
       '/settings',
     ])
   })

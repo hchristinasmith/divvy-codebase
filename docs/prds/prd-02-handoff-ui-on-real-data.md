@@ -61,6 +61,8 @@ Rejected alternatives:
 | Wishlist, `wish_web` concept | D11, still open; the Wishlist page is left untouched |
 | Per-account role/scope editing UI beyond a plain settings list | Not needed for one user; set once |
 
+> Amended 2026-10-26 (#387): the Wishlist row's "the Wishlist page is left untouched" is void. Hannah said "remove the wishlist page" and the page is removed from the client. D11 stays open for the `wishlist_items` table and `wish_web` (#219).
+
 ### Out-of-scope addition (2026-10-25)
 | Theme presets and colour overrides | Later; Hannah 2026-10-25 "i dont want presets yet" |
 | Usage tags and the "Barely used" tile | Later; Hannah 2026-10-25 "Drop usage for now" |
@@ -121,6 +123,8 @@ Outfit, DM Sans and DM Mono ship from the app, not Google Fonts (`handoff.md:71`
 
 ## Ruling 8 — Old pages are removed last, from the nav first
 The shell stops linking Transactions, Targets, Subscriptions and Challenges immediately; their files are deleted in the final sweep. Wishlist stays until D11.
+
+> Amended 2026-10-26 (#387): "Wishlist stays until D11" is void for the page. Hannah said "remove the wishlist page" and the page, its route, sidebar entry and icon are removed. The `wishlist_items` table stays and D11 stays open for it (#219).
 
 ## Ruling 9 — Payday is weekly, on a weekday (operator amendment, 2026-10-25; amends Ruling 2)
 Payday is one weekday, every week; Hannah's is Tuesday. The setting is `payday_weekday` (0 = Sunday … 6 = Saturday), replacing a day of the month. The last payday is the most recent payday weekday on or before today (today itself when today is payday); the next payday is seven days after it. So "unpaid bills due on or before the next payday" covers at most the next seven days plus anything overdue, "spent since the last payday" covers at most the last seven days, and every budget `limit` is a weekly amount. Why: Hannah pays herself weekly on Tuesday (2026-10-25); a monthly window would hold a month of bills against one week's pay. Extends to: every consumer of `lastPayday`/`nextPayday`, the settings panel (#46) and prd-03's `get_safe_to_spend`. Monthly paydays are not supported; adding them later is a new ruling.

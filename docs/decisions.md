@@ -11,3 +11,5 @@ Numbered, never renumbered. Each answers a question from `audit-2026-10-23.md` Â
 | D5 | **Web push for alerts, email for the weekly check-in** | Works on the phone from a home-screen install; Tailscale issues the HTTPS cert web push needs |
 
 Decided 2026-10-23. Still open from the audit: D6 Xero token storage, D7 job runner, D9 email ingestion route, D10 business/personal data model, D11 `wish_web/`, D12 integer cents (recommended yes, in M1).
+
+> 2026-10-26 (#387): D11's page half is settled. Hannah said "remove the wishlist page", and the Wishlist page is removed from the client (no route, sidebar entry or icon). D11 stays open for the data half: the `wishlist_items` table and the `wish_web/` question are untouched and tracked under #219, because dropping a table needs a migration and a separate decision.

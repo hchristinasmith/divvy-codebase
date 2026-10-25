@@ -18,7 +18,6 @@ describe('nav entries', () => {
       ['Advisor', 'advisor'],
       ['Sync', 'sync'],
       ['Privacy', 'privacy'],
-      ['Wishlist', 'wishlist'],
       ['Settings', 'settings'],
     ])
   })
@@ -57,7 +56,6 @@ describe('NavIcon', () => {
       'advisor',
       'sync',
       'privacy',
-      'wishlist',
       'settings',
     ]
     const drawn = names.map((name) => {
