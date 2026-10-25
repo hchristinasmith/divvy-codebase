@@ -13,8 +13,8 @@ export default function StorageCard() {
           this database once Xero is connected. Revisit when it is. */}
       <p className={CLAIM}>
         Divvy keeps your data in a single SQLite database on the server&apos;s
-        disk. Your Akahu token is not in it; it stays in the server&apos;s
-        settings.
+        disk. Your Akahu token is not in it; the server keeps it in its own
+        configuration, outside the database.
       </p>
       {/* Basis: D2 (Litestream, continuous); litestream.yml; docs/restore.md.
           Config, not a confirmed live backup: the replica's provider is not

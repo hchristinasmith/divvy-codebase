@@ -88,6 +88,12 @@ describe('the Privacy screen', () => {
 
   it('makes none of the design’s untrue claims', () => {
     const main = renderPrivacy()
+    // The cards rendered, so the check below runs over their copy.
+    for (const name of ['Banks', 'Advisor', 'Storage']) {
+      expect(
+        flat(within(main).getByRole('region', { name }).textContent),
+      ).toMatch(/\w+ \w+ \w+/)
+    }
     expect(flat(main.textContent)).not.toMatch(
       /local model|nightly|encrypt|runs on your server|stays inside that box|one machine|runs locally/i,
     )

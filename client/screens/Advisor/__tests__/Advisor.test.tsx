@@ -65,6 +65,8 @@ describe('the Advisor screen', () => {
 
   it('carries none of the chat design’s words', () => {
     const main = renderAt('/advisor')
+    // The card rendered, so the check below runs over its copy.
+    expect(flat(advisorCard(main).textContent)).toContain('Claude desktop')
     expect(flat(main.textContent)).not.toMatch(
       /send|ask about your money|typing|runs locally|private ·/i,
     )

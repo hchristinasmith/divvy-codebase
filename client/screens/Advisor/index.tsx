@@ -40,12 +40,12 @@ export default function Advisor() {
           an AI model or call an AI service, so there is nothing to type into on
           this screen.
         </p>
-        {/* Basis: prd-03 Ruling 1 (strictly read-only, fixed tools). "Once
-            that connection is set up" because the mcp/ tools are not live
-            yet; prd-03 revisits this when they are. */}
+        {/* Basis: prd-03 Ruling 1 (strictly read-only, fixed tools).
+            Conditional ("When ... is connected") because the mcp/ tools are
+            not live yet; it stays true once they are. */}
         <p className={PARAGRAPH}>
-          Once that connection is set up, Claude can read your Divvy data but
-          cannot change it.
+          When Claude desktop is connected to Divvy, Claude can read your Divvy
+          data but cannot change it.
         </p>
         {/* Basis: prd-03 Ruling 5 (tool results enter your Claude
             conversation and so leave your server). */}
