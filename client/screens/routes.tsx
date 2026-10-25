@@ -13,7 +13,10 @@ import Privacy from './Privacy/index.tsx'
 
 // The one route table for the handoff's screens. The sidebar, the phone tab
 // bar and App.tsx's routes all read it. A screen's issue replaces the default
-// export of ./<Name>/index.tsx and never edits this file or App.tsx.
+// export of its stub, ./<Name>/index.tsx, and leaves this file and App.tsx
+// alone. A
+// screen with no stub (Subscriptions, issue 230, in
+// ../components/Subscriptions/) adds its one entry and import here.
 
 export interface ScreenRoute {
   key: ScreenKey

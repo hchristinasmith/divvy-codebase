@@ -180,12 +180,13 @@ describe('the subscription rows', () => {
 
 describe('the totals', () => {
   it("shows the route's figures, not a sum of the rows", async () => {
-    // Deliberately unequal to the one row's 1599 a month.
+    // Deliberately unequal to the one row's 1599 a month, and the year is
+    // not 12 × the month, so a tile that multiplies cannot pass.
     setup(
       response({
         totals: {
           perMonthCents: 12345,
-          perYearCents: 148140,
+          perYearCents: 99999,
           countedCount: 1,
           uncountedCount: 0,
         },
@@ -194,7 +195,7 @@ describe('the totals', () => {
     await loaded()
 
     expect(screen.getByTestId('total-month').textContent).toBe('$123.45')
-    expect(screen.getByTestId('total-year').textContent).toBe('$1,481.40')
+    expect(screen.getByTestId('total-year').textContent).toBe('$999.99')
   })
 
   it('says how many active rows are left out of the totals', async () => {

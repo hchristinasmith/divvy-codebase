@@ -32,8 +32,13 @@ const shadowTokens = [
   ),
 ].map(([, name]) => name)
 
-// A sum, a rounding, or cents put through an operator.
-const ARITHMETIC = [/\.reduce\(/, /\bMath\./, /Cents\s*[*/+-]/]
+// A sum, a rounding, or cents put through an operator on either side.
+const ARITHMETIC = [
+  /\.reduce\(/,
+  /\bMath\./,
+  /Cents\s*[*/+-]/,
+  /[*/+-]\s*[\w.]*Cents\b/,
+]
 
 describe('subscriptions screen source', () => {
   it('finds the screen files to scan', () => {
