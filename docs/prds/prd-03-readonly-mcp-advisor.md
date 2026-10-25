@@ -34,6 +34,7 @@ Rejected alternatives:
 - **Transaction free text comes from third parties.** `description`, `particulars`, `code`, `reference`, `merchant_name` (`server/db/migrations/20250611031435_transactions.js:15,28-30,40`); anything in them reaches Claude's context.
 - **The number to match exists only after prd-02.** `shared/safe-to-spend.ts` is prd-02 ruling 1; the Overview shows what the server computes.
 - **The connection layer defaults to read-write.** `server/db/connection.ts:7` opens knex on the production file with no mode, and `server/db/knexfile.js:40` points at `/app/storage/prod.sqlite3`; the MCP must not use this module.
+  — Note (2026-10-26, #238): `server/db/knexfile.js:42` now points at `/data/divvy.sqlite3` (or `DATABASE_PATH`), not `/app/storage/prod.sqlite3`; the point of the bullet (the MCP must not use this module) still holds. `server/db/connection.ts:7` is still accurate.
 - **The handoff expects an auditable surface.** The Privacy screen's "outbound calls" and server card (`handoff.md:58`).
 - **Habits maths and category source are available.** prd-02 `shared/habits.ts`; prd-01 ruling 4 (`category`, `category_source`).
 
@@ -79,6 +80,7 @@ The tools are `get_safe_to_spend(scope)`, `list_transactions(scope, from, to, ca
 
 ## Ruling 2 — The MCP reads a scrubbed copy, as a user that cannot touch the live file
 A refresh job (run as the web app's OS user, on a loop in the start script, every 5 minutes and after each sync) takes a copy of the live database with SQLite's backup API, drops every non-allowlisted table and column, masks account numbers to the last four digits, and replaces `/app/replica/divvy-ro.sqlite3` by atomic rename. The MCP process runs as OS user `divvy-mcp`, which has read access to the replica and no access to `/app/storage`. It opens the file read-only (`mode=ro`, `immutable=1`, reopened per call). Why: a URI flag stops a bug; a file the user cannot write stops an attack. The copy is built from the live file by backup API rather than `litestream restore` so no object-store credentials are involved in the refresh; Litestream stays prd-01's backup. Cost: answers can be up to 5 minutes behind, which is why every tool returns `data_as_of`. Allowlist: transaction date, description, amount, merchant name, effective category and source, status, account name; no `reference`, `particulars`, `code`, card suffix, or `other_account`.
+  — Note (2026-10-26, #238): the live database is `/data/divvy.sqlite3` on the volume at `/data` (`server/db/knexfile.js:42`), so the exclusion is `/data`, not `/app/storage`. That also keeps `divvy-mcp` out of `/data/tailscale`, which holds the tailnet node key (`scripts/start.sh` `--statedir`, made mode 700).
 
 ## Ruling 3 — Transport is stdio over SSH; there is no HTTP endpoint
 Claude desktop launches `ssh` into the Fly machine over Tailscale and runs the server on stdio. Preferred: Tailscale SSH with an ACL rule that lets only your devices log in as `divvy-mcp`. Fallback: `fly ssh console` running the server through `su` to `divvy-mcp` (access is then gated by your Fly login). Streamable HTTP bound to the Tailscale interface is allowed only if stdio-over-SSH proves unworkable in the wave 1 spike, and would need a new ruling. Only your devices are in the tailnet ACL. Why: no listening port is no attack surface (D4).
@@ -139,6 +141,7 @@ Unfiled work implied, described not numbered: write tools PRD; background catego
 ## Open questions that block this
 
 - Does Tailscale SSH work on the Fly machine in the mode prd-01 runs Tailscale in, and does Claude desktop's MCP launcher work through an `ssh` command? Wave 1 spike answers it; if not, `fly ssh` (needs `flyctl` on your Mac) or Streamable HTTP. Open, not ruled.
+  — ANSWERED IN PART (#22, 2026-10-26): prd-01 runs Tailscale in userspace networking mode and `tailscale up` has no `--ssh` (`scripts/start.sh` steps 2 and 3), so Tailscale SSH is off and path A cannot be tested until a separate change enables it (docs/deploy.md section 9). Whether Tailscale SSH works in that mode, and whether the launcher works through `ssh`, are still unanswered. Open, not ruled.
 - Which devices are in your tailnet, and is the ACL already restrictive? A people-shaped fact, not in the repo. Open, not ruled.
 - Is stale-by-five-minutes acceptable for answers? Open, not ruled.
 
