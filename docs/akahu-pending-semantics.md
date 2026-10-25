@@ -89,6 +89,10 @@ Conclusions, and what the schema does about each:
   that the schema allows it.
 - A pending row's local `id` is **ephemeral**: the next sync deletes it and
   inserts a new row with a new id. Nothing may keep a pending row's id.
+- Rolling back `20261024100003_…` **deletes every pending row** before it
+  drops `status`: without the column they would read as settled rows with no
+  `akahu_id`, and the M1 code would count them beside the settled row they
+  become. Nothing is lost, since the next sync re-mirrors them.
 - A pending row's `category` and `akahu_category_*` are **NULL**: Akahu
   sends no category for it.
 - `status` defaults to `settled`, so the pending insert must set
