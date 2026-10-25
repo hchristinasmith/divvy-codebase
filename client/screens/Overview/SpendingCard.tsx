@@ -7,6 +7,7 @@ import type {
   SpendingByCategoryResponse,
 } from '../../../shared/contracts.ts'
 import {
+  BAR_TRACK,
   CARD,
   CARD_TITLE,
   ERROR,
@@ -35,7 +36,9 @@ import {
 const SPENDING_PATH = '/spending'
 
 // By rank, then the tail. Theme colours only, and none of ok, warn or
-// danger: a category is not good or bad.
+// danger: a category is not good or bad. Uncategorised is ink, the one
+// near-neutral dark in the theme, so it reads apart from every pink rank,
+// from Other's mauve, and from the canvas track behind the bar.
 const RANK_COLOURS = [
   'bg-deep',
   'bg-pink',
@@ -44,7 +47,7 @@ const RANK_COLOURS = [
   'bg-ink-faint',
 ]
 const OTHER_COLOUR = 'bg-ink-muted'
-const UNCATEGORISED_COLOUR = 'bg-line'
+const UNCATEGORISED_COLOUR = 'bg-ink'
 
 interface Line {
   key: string
@@ -90,12 +93,12 @@ export default function SpendingCard({ scope }: { scope: Scope }) {
     <section
       aria-labelledby="spending-heading"
       data-testid="spending-card"
-      className={`${CARD} relative flex flex-col gap-4 p-5.5 has-[a:focus-visible]:outline-2 has-[a:focus-visible]:outline-pink`}
+      className={`${CARD} relative flex flex-col gap-4 p-6 has-[a:focus-visible]:outline-2 has-[a:focus-visible]:outline-pink`}
     >
       <h2 id="spending-heading" className={CARD_TITLE}>
         <Link
           to={SPENDING_PATH}
-          className={`${LINK} after:absolute after:inset-0`}
+          className={`${LINK} focus-visible:outline-none after:absolute after:inset-0`}
         >
           Spending by category
         </Link>
@@ -148,7 +151,7 @@ function SpendingBody({ data }: { data: SpendingByCategoryResponse }) {
       <div
         aria-hidden="true"
         data-testid="spending-bar"
-        className="flex h-2.5 gap-0.5 overflow-hidden rounded-pill bg-canvas"
+        className={`${BAR_TRACK} flex gap-1 bg-canvas`}
       >
         {lines.map((line) => (
           <span
@@ -176,7 +179,7 @@ function SpendingBody({ data }: { data: SpendingByCategoryResponse }) {
             <span className="min-w-0 flex-1 truncate text-body-14 text-ink">
               {line.label}
             </span>
-            <span className="font-mono text-body-14 text-ink">
+            <span className="shrink-0 font-mono text-body-14 text-ink">
               {formatCents(line.cents)}
             </span>
           </li>

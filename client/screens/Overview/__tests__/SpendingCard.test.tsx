@@ -128,7 +128,7 @@ describe('what it shows', () => {
         fx.uncategorisedCents,
       ].map(String),
     )
-    // Ranks in theme colours, the tail muted, uncategorised the line colour.
+    // Ranks in theme colours, the tail muted, uncategorised ink.
     expect(shown.map((s) => s.className.split(' ').at(-1))).toEqual([
       'bg-deep',
       'bg-pink',
@@ -136,7 +136,7 @@ describe('what it shows', () => {
       'bg-blush-hover',
       'bg-ink-faint',
       'bg-ink-muted',
-      'bg-line',
+      'bg-ink',
     ])
   })
 
