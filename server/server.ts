@@ -57,9 +57,11 @@ server.get('*', (req, res, next) => {
 //   path: nothing. It is the client's fault.
 // - Any other 4xx, such as an upstream 401 or 429 carried on an AkahuError or
 //   XeroClientError (#203): one fixed line with the status and the
-//   constructor name. An expired token or a rate limit is not the caller's
-//   mistake and must leave a trace. A gzip or deflate body that does not
-//   inflate is body-parser's 400 with no `type`, so it logs this line too.
+//   constructor name, or `unknown` if reading the error to decide or to name
+//   it throws; the answer is the same either way. An expired token or a rate
+//   limit is not the caller's mistake and must leave a trace. A gzip or
+//   deflate body that does not inflate is body-parser's 400 with no `type`,
+//   so it logs this line too.
 // - A 500 from an Error: `err.name` and the stack frames, without the stack's
 //   first line, which is `name: message`. When the stack does not start with
 //   that line, or a line after it is not a frame, only `err.name` is logged.
@@ -182,12 +184,23 @@ server.use(
     }
     const client = clientStatus(err)
     if (client !== undefined) {
-      // clientStatus is only defined for a non-null object.
-      if (typeof err === 'object' && err !== null && !isRequestError(err)) {
+      // clientStatus is only defined for a non-null object. Deciding and
+      // naming read the error (a getter, a Proxy trap) and may throw; the
+      // answer must not change, so a throw logs the line with a fixed name.
+      let name: string | undefined
+      try {
+        name =
+          typeof err === 'object' && err !== null && !isRequestError(err)
+            ? constructorName(err)
+            : undefined
+      } catch {
+        name = 'unknown'
+      }
+      if (name !== undefined) {
         console.error(
           '4xx /api error not raised by body-parser or the router:',
           client,
-          constructorName(err),
+          name,
         )
       }
       res

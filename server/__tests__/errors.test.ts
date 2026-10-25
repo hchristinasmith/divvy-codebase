@@ -102,6 +102,38 @@ vi.mock('../routes/index.ts', async (importOriginal) => {
   router.get('/__test/plain-object-404', (req, res, next) => {
     next({ status: 404, detail: SECRET })
   })
+  // A 401 whose `type` cannot be read: deciding whether to log must not
+  // throw past the handler, or Express answers an HTML 500 instead.
+  router.get('/__test/type-getter-throws-401', (req, res, next) => {
+    const err = Object.assign(new Error(SECRET), { status: 401 })
+    Object.defineProperty(err, 'type', {
+      get() {
+        throw new Error(FIELD_SECRET)
+      },
+    })
+    next(err)
+  })
+  // A 401 whose prototype cannot be read, so neither `instanceof` nor the
+  // constructor name can be worked out.
+  router.get('/__test/prototype-throws-401', (req, res, next) => {
+    next(
+      new Proxy(Object.assign(new Error(SECRET), { status: 401 }), {
+        getPrototypeOf() {
+          throw new Error(FIELD_SECRET)
+        },
+      }),
+    )
+  })
+  // A 401 that passes the decision but whose prototype's `constructor`
+  // cannot be read, so only naming it throws.
+  router.get('/__test/constructor-throws-401', (req, res, next) => {
+    const proto = new Proxy(Error.prototype, {
+      getOwnPropertyDescriptor() {
+        throw new Error(FIELD_SECRET)
+      },
+    })
+    next(Object.assign(Object.create(proto) as object, { status: 401 }))
+  })
   router.get('/__test/plain-object', (req, res, next) => {
     next({ detail: SECRET })
   })
@@ -366,6 +398,37 @@ describe('a client error on /api answers its own status with fixed text; only on
           .get('/api/v1/__test/plain-object-404')
           .set('X-Divvy-Test', HEADER_SECRET),
       [[UNKNOWN_4XX_LOG, 404, 'Object']],
+    ],
+    // Nothing read from the error names it when reading throws.
+    [
+      'a 401 whose type getter throws',
+      401,
+      'Client error',
+      () =>
+        api
+          .get('/api/v1/__test/type-getter-throws-401')
+          .set('X-Divvy-Test', HEADER_SECRET),
+      [[UNKNOWN_4XX_LOG, 401, 'unknown']],
+    ],
+    [
+      'a 401 whose prototype cannot be read',
+      401,
+      'Client error',
+      () =>
+        api
+          .get('/api/v1/__test/prototype-throws-401')
+          .set('X-Divvy-Test', HEADER_SECRET),
+      [[UNKNOWN_4XX_LOG, 401, 'unknown']],
+    ],
+    [
+      "a 401 whose prototype's constructor cannot be read",
+      401,
+      'Client error',
+      () =>
+        api
+          .get('/api/v1/__test/constructor-throws-401')
+          .set('X-Divvy-Test', HEADER_SECRET),
+      [[UNKNOWN_4XX_LOG, 401, 'unknown']],
     ],
   ] as const)(
     '%s answers %i with { error: "%s" }',
