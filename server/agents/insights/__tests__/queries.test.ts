@@ -988,23 +988,76 @@ describe('cleanLabel', () => {
     expect(cleanLabel(null, FALLBACK)).toBe(FALLBACK)
   })
 
-  // #304 pins today's behaviour: every \p{M} mark is replaced by a space, so
-  // a mark inside a word splits it. NFKC runs first, so a base letter and a
-  // mark that compose are one letter and survive.
-  it('#304 pins today: a Devanagari vowel sign and virama become spaces, splitting the word', () => {
-    expect(cleanLabel('हिन्दी Store', FALLBACK)).toBe('ह न द Store')
+  // #304: combining marks are kept on a base (a letter or number), at most
+  // three on one base; a mark past the cap or with no base is dropped, not
+  // turned into a space. NFKC runs first, so marks are counted on its output.
+  it('#304: a Devanagari vowel sign and virama are kept, so the word reads whole', () => {
+    expect(cleanLabel('\u0939\u093F\u0928\u094D\u0926\u0940 Store', FALLBACK)).toBe(
+      '\u0939\u093F\u0928\u094D\u0926\u0940 Store',
+    )
   })
 
-  it('#304 pins today: a Latin base with stacked marks keeps the composed letter and turns the rest into one space', () => {
-    expect(cleanLabel('Ź̂̃̄̅oo', FALLBACK)).toBe('Ź oo')
+  it('#304: three marks on one base are kept (Hindi zindagi: a nukta, a vowel sign and an anusvara on ja)', () => {
+    // U+095B (ja with nukta) is a composition exclusion, so NFKC splits it
+    // into ja and a nukta: the input below is already in that form.
+    expect(cleanLabel('\u091C\u093C\u093F\u0902\u0926\u0917\u0940', FALLBACK)).toBe(
+      '\u091C\u093C\u093F\u0902\u0926\u0917\u0940',
+    )
   })
 
-  it('#304 pins today: a lone combining mark at the start is dropped', () => {
-    expect(cleanLabel('́Shop', FALLBACK)).toBe('Shop')
+  it('#304: a hostile stack keeps only the first three marks on its base, and the word is not split', () => {
+    // NFKC composes Z and the acute into U+0179 first; three of the four
+    // marks left survive.
+    expect(cleanLabel('Z\u0301\u0302\u0303\u0304\u0305oo', FALLBACK)).toBe('\u0179\u0302\u0303\u0304oo')
   })
 
-  it('#304 pins today: a decomposed Kāpiti is composed by NFKC and survives', () => {
-    expect(cleanLabel('Kāpiti', FALLBACK)).toBe('Kāpiti')
+  it('#304: a mark with no base, at the start, is dropped', () => {
+    expect(cleanLabel('\u0301Shop', FALLBACK)).toBe('Shop')
+    expect(cleanLabel('\u0301\u0302\u0303', FALLBACK)).toBe(FALLBACK)
+  })
+
+  it('#304: a mark after a space is dropped', () => {
+    expect(cleanLabel('a \u0301b', FALLBACK)).toBe('a b')
+  })
+
+  it('#304: a mark after kept punctuation or a dropped character has no base and leaves no space', () => {
+    expect(cleanLabel('A.\u0301B', FALLBACK)).toBe('A.B')
+    expect(cleanLabel('A&\u0301\u0302B', FALLBACK)).toBe('A&B')
+    expect(cleanLabel('a:\u0301b', FALLBACK)).toBe('a b')
+  })
+
+  it('#304: a mark on a default-ignorable letter has no base', () => {
+    // U+115F, a Hangul filler, is a letter that draws nothing. It is kept
+    // today (that is not #304's to change); the mark on it is not.
+    expect(cleanLabel('\u115F\u0301x', FALLBACK)).not.toContain('\u0301')
+  })
+
+  it('#304: NFKC composes before marks are counted, so a composed mark frees a place under the cap', () => {
+    expect(cleanLabel('a\u0301\u0302\u0303\u0304', FALLBACK)).toBe('\u00E1\u0302\u0303\u0304')
+  })
+
+  it('#304: a decomposed Kāpiti is composed by NFKC and keeps no mark', () => {
+    expect(cleanLabel('Ka\u0304piti', FALLBACK)).toBe('K\u0101piti')
+  })
+
+  it('#304: a decomposed Vietnamese name composes whole', () => {
+    expect(cleanLabel('Pho\u031B\u0309 Ha\u0300 No\u0323\u0302i', FALLBACK)).toBe('Ph\u1EDF H\u00E0 N\u1ED9i')
+  })
+
+  it.each([
+    ['the combining grapheme joiner', '\u034F'],
+    ['a variation selector', '\uFE0F'],
+    ['a supplementary variation selector', '\u{E0100}'],
+    ['a Mongolian free variation selector', '\u180B'],
+    ['an invisible Khmer vowel', '\u17B4'],
+    ['an enclosing circle', '\u20DD'],
+    ['an enclosing Cyrillic sign', '\u0488'],
+  ])('#304: %s is not an allowed mark and becomes a space', (_name, mark) => {
+    expect(cleanLabel(`a${mark}b`, FALLBACK)).toBe('a b')
+  })
+
+  it('#304: marks count toward the 40 code point cut, which keeps a base with its first marks', () => {
+    expect(cleanLabel('a'.repeat(38) + 'b\u0301\u0302\u0303', FALLBACK)).toBe('a'.repeat(38) + 'b\u0301')
   })
 
   it('cuts by code point and never splits a surrogate pair', () => {
@@ -1066,6 +1119,12 @@ describe('cleanLabel', () => {
     ['4111​1111/1111-1111', '####'],
     // Masked before the 40 code point cut, so no prefix of the number shows.
     ['a'.repeat(35) + ' 4111111111111111', 'a'.repeat(35) + ' ####'],
+    // #304: a combining mark on every digit is counted through, and masked
+    // with the digits, so it cannot break the run.
+    ['4\u03011\u03011\u03011\u0301 1\u03011\u03011\u03011\u0301 1\u03011\u03011\u03011\u0301 1\u03011\u03011\u03011\u0301', '####'],
+    ['Pay 4\u0301\u0302\u03031\u03011\u03011\u03011\u03011\u03011\u03011\u0301 now', 'Pay #### now'],
+    // Devanagari digits, each with a candrabindu.
+    ['\u096A\u0901\u0967\u0901\u0967\u0901\u0967\u0901\u0967\u0901\u0967\u0901\u0967\u0901\u0967\u0901', '####'],
   ])('a long digit run in %j is masked: %j', (input, output) => {
     const out = cleanLabel(input, FALLBACK)
     expect(out).toBe(output)
@@ -1084,26 +1143,63 @@ describe('cleanLabel', () => {
   })
 
   // The coupling between cleanLabel and the chart validator, pinned for every
-  // BMP code point (lone surrogates skipped), alone, flanked and repeated.
-  // Every output is checked for the banned characters; distinct outputs are
-  // each run through the validator once.
-  it('every BMP code point, cleaned, holds no banned character and passes the chart validator', () => {
+  // BMP code point (lone surrogates skipped), alone, flanked and repeated,
+  // and for every combining mark in the whole code space stacked deep on a
+  // base and placed with no base, plus a Zalgo string (#304). Every output is
+  // checked for the banned characters and against the mark rule; distinct
+  // outputs are each run through the validator once.
+  it('every BMP code point and every stacked mark, cleaned, holds no banned character, keeps the mark rule and passes the chart validator', () => {
     const banned = /[:<>/\\`[\]*|~!\n\r]/
-    const outputs = new Set<string>()
+    const inputs: string[] = []
     for (let code = 0; code <= 0xffff; code += 1) {
       if (code >= 0xd800 && code <= 0xdfff) continue
       const c = String.fromCharCode(code)
-      for (const input of [c, `a${c}b`, `${c}${c}${c}`]) {
-        const out = cleanLabel(input, FALLBACK)
-        if (banned.test(out)) expect.fail(`U+${code.toString(16)} in ${JSON.stringify(input)} leaves ${JSON.stringify(out)}`)
-        outputs.add(out)
-      }
+      inputs.push(c, `a${c}b`, `${c}${c}${c}`)
+    }
+    const marks: string[] = []
+    for (let code = 0; code <= 0x10ffff; code += 1) {
+      if (code >= 0xd800 && code <= 0xdfff) continue
+      const c = String.fromCodePoint(code)
+      if (/\p{M}/u.test(c)) marks.push(c)
+    }
+    // On a letter and a digit (bases); at the start, after a space, after kept
+    // punctuation and after a Hangul filler, a letter that draws nothing (no base).
+    for (const m of marks) {
+      inputs.push(`a${m.repeat(20)}b`, `1${m.repeat(20)}`, `${m.repeat(20)}a`, ` ${m}${m}`, `a.${m}b`, `\u3164${m}a`)
+    }
+    inputs.push(`Z${marks.slice(0, 30).join('')}algo`, `Z${marks.slice(-30).join('')}algo`)
+    const outputs = new Set<string>()
+    for (const input of inputs) {
+      const out = cleanLabel(input, FALLBACK)
+      if (banned.test(out)) expect.fail(`${JSON.stringify(input)} leaves ${JSON.stringify(out)}`)
+      const broken = markRuleBreak(out)
+      if (broken !== null) expect.fail(`${JSON.stringify(input)} leaves ${JSON.stringify(out)}: ${broken}`)
+      outputs.add(out)
     }
     for (const out of outputs) {
       if (!passesAsValue(out)) expect.fail(`${JSON.stringify(out)} is refused by the chart validator`)
     }
   })
 })
+
+// Why a cleaned label breaks #304's mark rule, or null: every run of marks
+// follows a letter or number that is not default-ignorable and holds at most
+// three, and no mark is an enclosing or default-ignorable one.
+function markRuleBreak(label: string): string | null {
+  const chars = Array.from(label)
+  let run = 0
+  for (let i = 0; i < chars.length; i += 1) {
+    if (!/\p{M}/u.test(chars[i])) {
+      run = 0
+      continue
+    }
+    if (/[\p{Me}\p{DI}]/u.test(chars[i])) return 'an enclosing or default-ignorable mark'
+    if (run === 0 && (i === 0 || !/^(?!\p{DI})[\p{L}\p{N}]$/u.test(chars[i - 1]))) return 'a mark with no base'
+    run += 1
+    if (run > 3) return 'more than three marks on one base'
+  }
+  return null
+}
 
 // A label as a chart data value, as prompt.ts writes it.
 function passesAsValue(label: string): boolean {
