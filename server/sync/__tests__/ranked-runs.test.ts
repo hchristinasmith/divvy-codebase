@@ -6,12 +6,13 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { rankByStartedAt } from '../ranked-runs.ts'
 import { closeDb, db, freshDb } from './harness.ts'
 
-// Issue #206: the claim step (run.ts) and GET /api/v1/sync/status rank
-// `sync_runs` through one helper. Only a started_at in the exact
-// toISOString() form is ranked, latest first; a tie goes to the higher id.
-// The behaviour through each caller is pinned in run.test.ts (#169) and
-// routes/__tests__/sync.test.ts (#188); this pins the helper itself and that
-// no second copy of its filter comes back.
+// Issue #206: the claim step (run.ts), GET /api/v1/sync/status and the
+// overview's dataAsOf (server/db/overview.ts) rank `sync_runs` through one
+// helper. Only a started_at in the exact toISOString() form is ranked,
+// latest first; a tie goes to the higher id. The behaviour through each
+// caller is pinned in run.test.ts (#169), routes/__tests__/sync.test.ts
+// (#188) and db/__tests__/overview.test.ts; this pins the helper itself and
+// that no second copy of its filter comes back anywhere under server/.
 
 beforeEach(async () => {
   await freshDb()
@@ -126,12 +127,13 @@ describe('static guard on the sync_runs ranking (#206)', () => {
       .sort()
   }
 
-  it('writes the started_at filter and ordering once, in ranked-runs.ts, across server/sync and server/routes', () => {
-    const files = [...sourceFiles('sync'), ...sourceFiles('routes')]
+  it('writes the started_at filter and ordering once, in ranked-runs.ts, across every non-test file under server/', () => {
+    const files = sourceFiles('')
     expect(files).toEqual(
       expect.arrayContaining([
         Path.join('sync', 'run.ts'),
         Path.join('routes', 'sync.ts'),
+        Path.join('db', 'overview.ts'),
       ]),
     )
 

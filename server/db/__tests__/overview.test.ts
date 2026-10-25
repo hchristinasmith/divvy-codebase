@@ -1646,6 +1646,20 @@ describe('readOverview: dataAsOf', () => {
       '2026-10-27T03:02:00.000Z',
     )
   })
+
+  it('skips a later success whose start is ISO but not toISOString form, such as 2999-01-01T00:00:00Z (#206)', async () => {
+    // Ends in Z and julianday() reads it as later than every real start,
+    // but it has no milliseconds, so only the toISOString-form filter keeps
+    // it from being the latest success.
+    await connection('sync_runs').insert([
+      run(1, '2026-10-27T03:00:00.000Z', '2026-10-27T03:02:00.000Z', 'success'),
+      run(2, '2999-01-01T00:00:00Z', '2026-10-27T09:30:00.000Z', 'success'),
+    ])
+
+    expect((await readOverview('all', NOW, connection)).dataAsOf).toBe(
+      '2026-10-27T03:02:00.000Z',
+    )
+  })
 })
 
 describe('readOverview writes nothing', () => {

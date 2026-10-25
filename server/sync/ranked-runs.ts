@@ -1,7 +1,8 @@
 import type { Knex } from 'knex'
 
-// A ranking for `sync_runs` rows, shared by the claim step in run.ts and
-// GET /api/v1/sync/status (#169, #188, #206): latest start first.
+// A ranking for `sync_runs` rows, latest start first (#169, #188, #206).
+// Shared by the claim step in run.ts, GET /api/v1/sync/status in
+// server/routes/sync.ts, and the overview's dataAsOf in server/db/overview.ts.
 //
 // Only a started_at in the exact `toISOString()` form is ranked, by
 // julianday(); a tie on started_at goes to the higher id, the later insert.

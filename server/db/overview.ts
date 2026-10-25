@@ -36,6 +36,7 @@ import {
 import connection from './connection.ts'
 import { loadDrawingIds } from './drawings.ts'
 import { listAccounts } from './synced.ts'
+import { rankByStartedAt } from '../sync/ranked-runs.ts'
 
 // The overview's data module (prd-02, issue #44): every read behind
 // GET /api/v1/overview and the one write behind dismissing an alert.
@@ -591,17 +592,11 @@ export async function readOverview(
     }
   })
 
-  // A copy of `lastSuccessAt` in server/routes/sync.ts GET /status; change
-  // together with it. Only a started_at in the exact toISOString() form is
-  // ranked, by julianday(), so a malformed one never shows as the latest.
-  const lastSuccess: Pick<SyncRun, 'finished_at'> | undefined = await db(
-    'sync_runs',
-  )
-    .where({ outcome: 'success' })
-    .whereRaw("strftime('%Y-%m-%dT%H:%M:%fZ', started_at) = started_at")
-    .orderByRaw('julianday(started_at) DESC')
-    .orderBy('id', 'desc')
-    .first('finished_at')
+  // dataAsOf is the finish time of the latest ranked success (rankByStartedAt).
+  const lastSuccess: Pick<SyncRun, 'finished_at'> | undefined =
+    await rankByStartedAt(db('sync_runs').where({ outcome: 'success' })).first(
+      'finished_at',
+    )
 
   return {
     safeToSpend: result,
