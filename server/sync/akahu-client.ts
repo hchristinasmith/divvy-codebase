@@ -134,6 +134,40 @@ function optionalText(
 }
 
 /**
+ * A logo or website URL, kept verbatim only when it is an absolute https URL
+ * (issue #193). Sync stores these and `/api/v1/accounts` and
+ * `/api/v1/transactions` serve them as stored. Nothing in `client/` renders
+ * them yet; the first page that puts one in an `<img src>` or `<a href>`
+ * would hand the browser whatever Akahu sent, so a `javascript:`, `data:` or
+ * protocol-relative value is refused here, at ingest, rather than stored. A
+ * refused value is dropped, not an error: the row is kept, sync does not
+ * fail and nothing is logged, because the value is Akahu's to choose. A
+ * non-text value is still refused, as `optionalText` refuses it.
+ *
+ * The text must begin with `https://`, case-insensitively and with nothing in
+ * front of it. A URL parser is lenient (it accepts `https:host` and trims
+ * leading spaces), and that leniency must not decide what a renderer is
+ * given, so the prefix is checked on the text as sent. The scheme is the
+ * text before the first `:`, so once the prefix holds a parser can only find
+ * `https:`; `new URL` is asked only whether the value parses at all, which
+ * refuses one with no host or a space in the host.
+ */
+function optionalHttpsUrl(
+  record: JsonRecord,
+  key: string,
+  where: string,
+): string | null {
+  const value = optionalText(record, key, where)
+  if (value === null || !/^https:\/\//i.test(value)) return null
+  try {
+    new URL(value)
+  } catch {
+    return null
+  }
+  return value
+}
+
+/**
  * Absent or null is an empty list; a list of text is kept in the order sent,
  * each item verbatim. Anything else, or a list holding anything but text, is
  * refused. No item's value is checked: the set is Akahu's and open.
@@ -261,7 +295,11 @@ function mapAccount(value: unknown): AkahuAccount {
       'connection_type',
       `${where}.connection`,
     ),
-    connection_logo: optionalText(connection, 'logo', `${where}.connection`),
+    connection_logo: optionalHttpsUrl(
+      connection,
+      'logo',
+      `${where}.connection`,
+    ),
     authorisation_id: optionalText(item, '_authorisation', where),
     credentials_id: optionalText(item, '_credentials', where),
     attributes: optionalTextList(item, 'attributes', where),
@@ -295,8 +333,8 @@ function mapMerchant(
     id: optionalText(merchant, '_id', inner),
     name: optionalText(merchant, 'name', inner),
     nzbn: optionalText(merchant, 'nzbn', inner),
-    website: optionalText(merchant, 'website', inner),
-    logo: optionalText(merchant, 'logo', inner),
+    website: optionalHttpsUrl(merchant, 'website', inner),
+    logo: optionalHttpsUrl(merchant, 'logo', inner),
   }
 }
 
@@ -324,7 +362,7 @@ function mapMeta(item: JsonRecord, where: string): TransactionMeta | null {
     particulars: optionalText(meta, 'particulars', inner),
     reference: optionalText(meta, 'reference', inner),
     other_account: optionalText(meta, 'other_account', inner),
-    logo: optionalText(meta, 'logo', inner),
+    logo: optionalHttpsUrl(meta, 'logo', inner),
     card_suffix: optionalText(meta, 'card_suffix', inner),
     conversion: mapConversion(meta, inner),
   }
