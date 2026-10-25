@@ -29,6 +29,7 @@ Rejected alternatives:
 - **The advisor decision is made.** D3 (MCP first, API only for background jobs) and D4 (Tailscale-only, no Auth0) in `docs/decisions.md:9-10`; audit decision 3 (`docs/audit-2026-10-23.md:109-111`).
 - **The gap is total.** "Advisor via Claude desktop, phone later: absent" (`docs/audit-2026-10-23.md:104`); no MCP code or dependency exists (`package.json:27-52` has no `@modelcontextprotocol/*`).
 - **The Akahu token is an environment variable and must stay out of reach.** `server/routes/akahu.ts:10-11` reads `AKAHU_USER_TOKEN` and `AKAHU_APP_ID` from `process.env`; prd-01 ruling 5 keeps it in Fly secrets and out of every table.
+  — Note (2026-10-26, #201): #32 deleted `server/routes/akahu.ts`. The token and app id are now read only by `server/sync/scheduler.ts:106-107`, at the start of each sync run; the point of the bullet (environment only, never in a table) still holds.
 - **Account numbers are in the data model.** `formatted_account` on accounts (`models/akahu.ts:12`).
 - **Transaction free text comes from third parties.** `description`, `particulars`, `code`, `reference`, `merchant_name` (`server/db/migrations/20250611031435_transactions.js:15,28-30,40`); anything in them reaches Claude's context.
 - **The number to match exists only after prd-02.** `shared/safe-to-spend.ts` is prd-02 ruling 1; the Overview shows what the server computes.
