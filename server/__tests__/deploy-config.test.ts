@@ -442,6 +442,7 @@ function runStart({
     TS_SOCKET: join(tmp, 's', 'ts.sock'),
     TS_WAIT_SECS: String(SOCKET_WAIT_SECS),
     LITESTREAM_CONFIG: join(tmp, 'litestream.yml'),
+    DATABASE_PATH: join(tmp, 'data', 'divvy.sqlite3'),
   }
   if (authkey !== null) base.TS_AUTHKEY = authkey
   const result = spawnSync('sh', [startScript], {
@@ -657,6 +658,44 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
     expect(reached).toBe(false)
     expect(ran(run.calls, 'npm')).toBe(false)
     expect(run.stderr).not.toContain('start.sh: serving ')
+  })
+
+  it.each(['-wal', '-shm', '-journal'])(
+    'refuses to start anything when %s is on the volume without its database',
+    (suffix) => {
+      const db = join(tmp, 'data', 'divvy.sqlite3')
+      mkdirSync(dirname(db))
+      writeFileSync(`${db}${suffix}`, 'not-a-real-database-leftover')
+      writeFileSync(join(tmp, 'litestream.yml'), 'dbs: []\n')
+      const run = runStart()
+
+      expect(run.status).not.toBe(0)
+      const errors = run.stderr
+        .split('\n')
+        .filter((line) => line.startsWith('start.sh: ERROR: '))
+      expect(errors).toHaveLength(1)
+      expect(errors[0]).toContain('with no database')
+      expect(errors[0]).toContain(`${db}${suffix}`)
+      expect(errors[0]).toContain('docs/restore.md')
+      expect(run.calls).toEqual([])
+      expect(existsSync(`${db}${suffix}`)).toBe(true)
+      expect(existsSync(db)).toBe(false)
+    },
+  )
+
+  it.each([
+    ['the database and its sidecars', ['', '-wal', '-shm']],
+    ['no database file at all', []],
+  ])('boots when the volume holds %s', (_label, files) => {
+    const db = join(tmp, 'data', 'divvy.sqlite3')
+    mkdirSync(dirname(db))
+    for (const suffix of files) writeFileSync(`${db}${suffix}`, '')
+    writeFileSync(join(tmp, 'litestream.yml'), 'dbs: []\n')
+    const run = runStart()
+
+    expect(run.status).toBe(0)
+    expect(run.stderr).not.toContain('ERROR')
+    expect(ran(run.calls, 'litestream replicate ')).toBe(true)
   })
 
   it('never hands the auth key to tailscaled, npm or litestream, and never prints it', () => {

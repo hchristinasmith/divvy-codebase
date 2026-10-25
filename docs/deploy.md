@@ -144,6 +144,7 @@ If a stale node named `divvy` already exists on the tailnet (from an earlier att
 - **`tailscaled exited before its socket appeared`.** `tailscaled` crashed at startup. Look at the lines before it in `fly logs` for its own error.
 - **`tailscale serve reset failed`.** `start.sh` clears the serve config on every boot, and that command failed or ran past its 30 second limit, so `tailscaled` was not answering. The app does not start. Read the lines before it in `fly logs`, then `fly machine restart -a divvy-strawb`.
 - **`tailscale serve status failed`.** The command that reads the serve config back failed, so `start.sh` cannot confirm the proxy or that Funnel is off, and it does not start the app. Read the lines before it in `fly logs`, then `fly machine restart -a divvy-strawb`.
+- **`start.sh: ERROR: leftover database files with no database`.** The volume holds a `-wal`, `-shm` or `-journal` (named in the message) but no `/data/divvy.sqlite3`, so someone deleted the database without its files. Booting would replay them onto the restored or new database. The machine exits 1 before it joins the tailnet. Move the named files off the volume, keeping them, then restart (restore.md, "What backs up what").
 - **`serve status does not show a proxy` or `Funnel is on`.** The serve config is not what `start.sh` set. It resets the config on every boot, so this means something else changed it; check `serve status` (section 6).
 
 ## 11. Bumping Tailscale or Litestream

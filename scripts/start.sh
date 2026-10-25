@@ -21,6 +21,23 @@ case "${HOST:-}" in
   *) die "HOST=$HOST would bind the app off loopback. Refusing to start: only tailscaled, on this machine, may reach it. Unset it with: fly secrets unset HOST" ;;
 esac
 
+# A -wal, -shm or -journal with no database beside it belongs to a database
+# that is gone. Litestream restores only when the database file is missing,
+# SQLite then replays a leftover WAL onto the restored copy, and that mix
+# replicates as the newest backup (#253; docs/restore.md). With backups off it
+# lands on a new, empty database instead. Refuse rather than move them, so the
+# volume is left as found, and before the tailnet steps, so a refused boot
+# starts nothing. The default is the production knexfile's: this checks the
+# file the app would open.
+db="${DATABASE_PATH:-/data/divvy.sqlite3}"
+if [ ! -e "$db" ]; then
+  leftovers=""
+  for sidecar in "$db-wal" "$db-shm" "$db-journal"; do
+    [ ! -e "$sidecar" ] || leftovers="$leftovers $sidecar"
+  done
+  [ -z "$leftovers" ] || die "leftover database files with no database:$leftovers. Refusing to start: they would be replayed onto the restored or new database. Move them off the volume (keep them), then restart. See docs/restore.md"
+fi
+
 state_dir="${TS_STATE_DIR:-/data/tailscale}"
 socket="${TS_SOCKET:-/var/run/tailscale/tailscaled.sock}"
 ts_hostname="${TS_HOSTNAME:-divvy}"
