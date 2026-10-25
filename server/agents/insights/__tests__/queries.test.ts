@@ -1048,14 +1048,15 @@ describe('dates', () => {
     expect(weekRange('0000-W26')).toStrictEqual({ label: '0000-W26', start: '0000-06-26', end: '0000-07-02' })
   })
 
-  // The other end is unchanged: 9999-W51's padded read ends on 9999-12-30.
+  // The other end is unchanged: 9999-W51's padded read stops before
+  // 9999-12-30 (the exclusive SQL bound), inside the year 9999.
   it('weekRange(9999-W51) is returned', () => {
     expect(weekRange('9999-W51')).toStrictEqual({ label: '9999-W51', start: '9999-12-20', end: '9999-12-26' })
   })
 
   // The first week the window math accepts, found by sweeping the year 0000
   // rather than written down, so a change to MONTHLY_MONTHS,
-  // UNUSUAL_LOOKBACK_WEEKS or TRANSFER_WINDOW_DAYS shows as a diff here.
+  // UNUSUAL_LOOKBACK_WEEKS or TRANSFER_WINDOW_DAYS that moves it fails here.
   // The year 0000 has no week 53, so its last accepted week is W52.
   it('sweeping the year 0000, weekRange accepts exactly 0000-W26 to 0000-W52', () => {
     const labels = Array.from({ length: 53 }, (_, i) => `0000-W${String(i + 1).padStart(2, '0')}`)
