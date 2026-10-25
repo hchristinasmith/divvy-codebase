@@ -208,6 +208,26 @@ describe('the settings form', () => {
     })
   })
 
+  it('treats a saved answer as the new baseline: Save is disabled again, and the next save sends only the next change', async () => {
+    update
+      .mockResolvedValueOnce({ ...SETTINGS, profitCents: 50000 })
+      .mockResolvedValueOnce({ ...SETTINGS, profitCents: 50000, paydayWeekday: 4 })
+    await renderLoaded()
+
+    type('Strawb profit, year to date ($)', '500')
+    fireEvent.click(saveButton())
+    await screen.findByRole('status')
+    expect(saveButton().disabled).toBe(true)
+
+    fireEvent.change(select('Payday'), { target: { value: '4' } })
+    expect(saveButton().disabled).toBe(false)
+    fireEvent.click(saveButton())
+
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(2))
+    expect(update.mock.calls[0][0]).toStrictEqual({ profitCents: 50000 })
+    expect(update.mock.calls[1][0]).toStrictEqual({ paydayWeekday: 4 })
+  })
+
   it('clears Saved on the next edit', async () => {
     update.mockResolvedValue({ ...SETTINGS, paydayWeekday: 3 })
     await renderLoaded()
@@ -302,6 +322,22 @@ describe('the settings form', () => {
       'profitCents must be a whole number of cents from 0 to 900719925474',
     )
     expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it("drops the server's refusal as soon as a field is edited", async () => {
+    update.mockRejectedValue(new Error('Server error (500)'))
+    await renderLoaded()
+
+    type('Strawb profit, year to date ($)', '12')
+    fireEvent.click(saveButton())
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'Server error (500)',
+    )
+
+    type('Tax rate (%)', '30')
+
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByText('Server error (500)')).toBeNull()
   })
 
   it.each([

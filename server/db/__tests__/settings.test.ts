@@ -32,6 +32,7 @@ afterAll(async () => {
 })
 
 const NOW = '2026-10-25T00:00:00.000Z'
+const OLD = '2020-01-02T03:04:05.000Z'
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
 
 const DEFAULTS: SettingsResponse = {
@@ -234,6 +235,24 @@ describe('updateSettings', () => {
     ])
   })
 
+  it('moves updated_at forward when a stored key is written again', async () => {
+    await connection('settings').insert({
+      key: 'profit_cents',
+      value: '100',
+      updated_at: OLD,
+    })
+    const before = new Date().toISOString()
+
+    await updateSettings({ profitCents: 200 })
+
+    const rows = await storedRows()
+    expect(rows).toHaveLength(1)
+    expect(rows[0].value).toBe('200')
+    expect(rows[0].updated_at).toMatch(ISO)
+    expect(rows[0].updated_at >= before).toBe(true)
+    expect(rows[0].updated_at > OLD).toBe(true)
+  })
+
   it('skips a field that is present but undefined', async () => {
     await updateSettings({ taxRateBasisPoints: undefined, profitCents: 1 })
 
@@ -375,6 +394,25 @@ describe('setAccountRole', () => {
     expect(await connection('accounts').where({ id }).first()).toStrictEqual(
       accountBefore,
     )
+  })
+
+  it('moves updated_at forward when a stored role is changed', async () => {
+    const [id] = await insertAccount({ akahu_id: 'acc_inv_1' })
+    await connection('account_settings').insert({
+      account_id: id,
+      role: 'current',
+      updated_at: OLD,
+    })
+    const before = new Date().toISOString()
+
+    await setAccountRole(id, 'savings')
+
+    const rows = await connection('account_settings').select('role', 'updated_at')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].role).toBe('savings')
+    expect(rows[0].updated_at).toMatch(ISO)
+    expect(rows[0].updated_at >= before).toBe(true)
+    expect(rows[0].updated_at > OLD).toBe(true)
   })
 
   it('clears a role that was never set without error', async () => {

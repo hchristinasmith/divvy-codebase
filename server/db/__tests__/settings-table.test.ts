@@ -87,20 +87,54 @@ describe('up', () => {
   })
 
   it.each([
-    ['NULL', null],
-    ['unparseable', 'not a date'],
-  ])('ranks an undated row (%s updated_at) below a dated row for the same key', async (_label, undated) => {
-    // The undated row is written last, so neither its rowid nor a "now"
-    // stand-in may carry it past the dated row.
-    await db('settings').insert([
-      { id: 's8', user_id: 1, key: 'personal_tax_owed_cents', value: '100', updated_at: OLD_TEXT },
-      { id: 's9', user_id: 1, key: 'personal_tax_owed_cents', value: '999', updated_at: undated },
-    ])
+    { label: 'NULL', undated: null, written: 'last' },
+    { label: 'NULL', undated: null, written: 'first' },
+    { label: 'unparseable', undated: 'not a date', written: 'last' },
+    { label: 'unparseable', undated: 'not a date', written: 'first' },
+  ])('ranks an undated row ($label updated_at) below a dated row for the same key, written $written', async ({ undated, written }) => {
+    // Written both first and last, so neither the undated row's rowid nor a
+    // "now" stand-in may carry it past the dated row, and the ranking does
+    // not depend on which row the sort reads first. The fixture rows are
+    // cleared so these two are the only pair the sort compares: with more
+    // rows the comparator's calls reach the pair only by luck.
+    const dated = {
+      id: 's8',
+      user_id: 1,
+      key: 'personal_tax_owed_cents',
+      value: '100',
+      updated_at: OLD_TEXT,
+    }
+    const undatedRow = { ...dated, id: 's9', value: '999', updated_at: undated }
+    await db('settings').delete()
+    await db('settings').insert(written === 'last' ? [dated, undatedRow] : [undatedRow, dated])
     await up()
 
     expect(
       await db('settings').where({ key: 'personal_tax_owed_cents' }).select('value', 'updated_at'),
     ).toStrictEqual([{ value: '100', updated_at: OLD_TEXT_ISO }])
+  })
+
+  it.each([
+    ['far above the Date range (1e20)', 1e20],
+    ['one past the Date range (8.64e15 + 1)', 8.64e15 + 1],
+    ['far below the Date range (-1e20)', -1e20],
+  ])('treats a numeric updated_at %s as undated, stored with the migration\'s own time, without throwing', async (_label, outOfRange) => {
+    await db('settings').insert({
+      id: 's8',
+      user_id: 1,
+      key: 'payday_weekday',
+      value: '4',
+      updated_at: outOfRange,
+    })
+    const before = new Date().toISOString()
+    await expect(db.migrate.up()).resolves.toBeDefined()
+    const after = new Date().toISOString()
+
+    const rows = await db('settings').where({ key: 'payday_weekday' }).select('value', 'updated_at')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].value).toBe('4')
+    expect(rows[0].updated_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
+    expect(rows[0].updated_at >= before && rows[0].updated_at <= after).toBe(true)
   })
 
   it('names the unique index settings_key_unique, not after the copy it was built on', async () => {

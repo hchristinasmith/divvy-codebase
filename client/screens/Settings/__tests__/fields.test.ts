@@ -27,8 +27,8 @@ describe('parseDollarsField', () => {
     expect(parseDollarsField('   ')).toStrictEqual({ error: 'Required' })
   })
 
-  it('refuses a negative amount', () => {
-    expect(parseDollarsField('-5')).toStrictEqual({
+  it.each(['-5', '-0.01'])('refuses the negative amount %j', (input) => {
+    expect(parseDollarsField(input)).toStrictEqual({
       error: 'Must be 0 or more',
     })
   })
