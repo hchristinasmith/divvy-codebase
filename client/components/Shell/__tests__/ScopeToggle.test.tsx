@@ -40,6 +40,20 @@ describe('ScopeToggle', () => {
     expect(pressed()).toEqual(['All'])
   })
 
+  it('is a 6px track on an offset, with 6px pills (update 2)', () => {
+    renderWithProviders(<ScopeToggle />)
+    const group = screen.getByRole('group', { name: 'Scope' })
+    for (const cls of ['rounded-pill', 'shadow-pill', 'p-[3px]']) {
+      expect(group.classList.contains(cls)).toBe(true)
+    }
+    expect([...group.classList].filter((c) => c.startsWith('border'))).toEqual(
+      [],
+    )
+    for (const button of within(group).getAllByRole('button')) {
+      expect(button.classList.contains('rounded-pill')).toBe(true)
+    }
+  })
+
   it('switches the scope every consumer reads', () => {
     renderWithProviders(
       <>

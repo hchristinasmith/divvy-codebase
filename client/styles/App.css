@@ -9,30 +9,61 @@
 @import '@fontsource/dm-mono/400.css';
 @import '@fontsource/dm-mono/500.css';
 
-/* Divvy design tokens, from docs/design/handoff.md "Design tokens". Values
-   are copied exactly; components use these utilities and never a hex.
-   Handoff names that the shadcn block below already owns for the old pages
-   are renamed: border -> line, muted -> ink-muted, faint -> ink-faint.
-   No shadow tokens: the design has no shadows, and new components never
-   use a shadow utility (tokens.test.ts scans for it). */
-@theme {
-  --color-canvas: #FAF6F3;
+/* The pinks of handoff update 2 (docs/design/CHANGES-2.md §1, prd-02
+   Ruling 13), with their Candy defaults. This block is the only place a pink
+   hex is written: every pink the app renders reads one of these vars, so a
+   later theme only has to reset them. Update 2 also declares
+   --dv-soliddiv, which nothing in it uses, so it is not taken. */
+:root {
+  --dv-bg: #FFF0F5;
+  --dv-blush: #FFD3E2;
+  --dv-blush2: #FFBFD5;
+  --dv-pink: #FF5C9E;
+  --dv-solid: #F0418A;
+  --dv-shadow: #FF9CC4;
+  --dv-deep: #E0297A;
+  --dv-rose: #B81E63;
+  --dv-border: #F7C9D8;
+  --dv-divider: #FBDDE7;
+}
+
+/* Divvy colour and offset tokens. `inline` makes each utility use the var
+   itself (`bg-pink` is `var(--dv-pink)`), so resetting a --dv-* var re-skins
+   wherever it is set, not only on :root. Components use these utilities and
+   never a hex. Names predate update 2 and stay so the pages built on them
+   keep working: canvas is --dv-bg, line is --dv-border, blush-hover is
+   --dv-blush2, pink-hover is --dv-solid; muted and faint are ink-muted and
+   ink-faint because the shadcn block below owns those names. Neutrals are
+   not theme tokens (CHANGES-2.md §1). */
+@theme inline {
+  --color-canvas: var(--dv-bg);
   --color-surface: #FFFFFF;
-  --color-line: #F0E4E6;
-  --color-divider: #F6ECEE;
-  --color-blush: #FBE4EA;
-  --color-blush-hover: #F7D2DC;
-  --color-pink: #EC6A94;
-  --color-pink-hover: #D9507D;
-  --color-deep: #C2386A;
-  --color-rose: #A12A56;
+  --color-line: var(--dv-border);
+  --color-divider: var(--dv-divider);
+  --color-blush: var(--dv-blush);
+  --color-blush-hover: var(--dv-blush2);
+  --color-pink: var(--dv-pink);
+  --color-pink-hover: var(--dv-solid);
+  --color-deep: var(--dv-deep);
+  --color-rose: var(--dv-rose);
   --color-ink: #2B2224;
-  --color-ink-muted: #7A6A6F;
-  --color-ink-faint: #B3A3A8;
+  --color-ink-muted: #8A5A70;
+  --color-ink-faint: #C9A0B3;
   --color-ok: #3E9A6E;
   --color-warn: #D9893A;
   --color-danger: #D23F5B;
 
+  /* Cards have no border; they sit on a hard offset in --dv-shadow, larger
+     for larger surfaces. Components use only these (noHardcodedStyle.test.ts
+     scans for any other). */
+  --shadow-card: 5px 5px 0 var(--dv-shadow);
+  --shadow-tile: 4px 4px 0 var(--dv-shadow);
+  --shadow-pill: 3px 3px 0 var(--dv-shadow);
+}
+
+/* The rest of the design tokens, from docs/design/handoff.md "Design
+   tokens" as update 2 changes them. */
+@theme {
   /* Display: Outfit 500/600. Body: DM Sans 400/500/600 (optical size axis,
      as the prototype loads it). Numbers: DM Mono 400/500. */
   --font-display: 'Outfit Variable', system-ui, sans-serif;
@@ -56,17 +87,19 @@
 
   --tracking-hero: -0.03em;
   --tracking-title: -0.02em;
-  --tracking-wordmark: 0.04em;
   --tracking-eyebrow: 0.1em;
   --tracking-tagline: 0.14em;
 
-  /* Radii: cards 24, tiles 14-18, buttons 12-14, pills 999, tag tiles 8-11.
-     Role names, because shadcn owns radius-sm/md/lg/xl. */
-  --radius-card: 24px;
+  /* Radii (update 2): cards 12, summary tiles 10, inset tiles 8; pills,
+     buttons, chips, badges and bars 6; sidebar rows and tabs 12; the
+     sidebar card and other 14px tiles; icon tiles 8 and 11. Role names,
+     because shadcn owns radius-sm/md/lg/xl. */
+  --radius-card: 12px;
+  --radius-summary: 10px;
+  --radius-inset: 8px;
+  --radius-pill: 6px;
+  --radius-nav: 12px;
   --radius-tile: 14px;
-  --radius-tile-lg: 18px;
-  --radius-button: 12px;
-  --radius-pill: 999px;
   --radius-tag: 8px;
   --radius-tag-lg: 11px;
 

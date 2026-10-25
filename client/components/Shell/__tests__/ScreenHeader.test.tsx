@@ -30,6 +30,12 @@ describe('ScreenHeader', () => {
     expect(titleBlock?.children).toHaveLength(2)
   })
 
+  it('sets the page title in --dv-deep (update 2)', () => {
+    renderWithProviders(<ScreenHeader title="Goals" />)
+    const title = screen.getByRole('heading', { level: 1 })
+    expect(title.classList.contains('text-deep')).toBe(true)
+  })
+
   it('shows the Divvy wordmark on the phone only', () => {
     renderWithProviders(<ScreenHeader title="Goals" />)
     const wordmark = screen.getByText('Divvy')
