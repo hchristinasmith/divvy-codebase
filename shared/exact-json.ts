@@ -28,6 +28,10 @@ import { parseDollars } from './money.ts'
 //   keeps the match from splitting a run of backslashes into escapes in every
 //   way, which a quote-only ending does (`\\[\s\S]?` lets an escape stop at
 //   its backslash).
+// - An escape may stop at its backslash (`\\[\s\S]?`) so that a string
+//   ending in a lone backslash still reaches the end of the text. An escape
+//   that needs a character after it cannot, and the string is rescanned from
+//   every quote in it.
 //
 // The amount pattern is JSON's number grammar too (no leading zero, no
 // exponent) with at most two decimal places, so a quoted amount cannot slip

@@ -165,7 +165,8 @@ describe('parseExactJson', () => {
     // explores all of them before it fails (the backslashes row). An escape
     // that needs a character after its backslash rescans the body from every
     // quote in it when the body ends in a lone backslash (the lone-backslash
-    // row). The shipped pattern finishes each in milliseconds. The limit is
+    // row), and with both changes the escaped-quotes row is rescanned the
+    // same way. The shipped pattern finishes each in milliseconds. The limit is
     // far from that so a slow CI machine cannot flip it.
     const started = performance.now()
     expect(() => parseExactJson(body)).toThrow(SyntaxError)
