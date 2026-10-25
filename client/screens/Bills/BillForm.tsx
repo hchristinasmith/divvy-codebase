@@ -8,7 +8,6 @@ import type {
   Scope,
 } from '../../../shared/contracts.ts'
 import { CARD_TITLE, ERROR, SECONDARY_BUTTON } from '../Overview/styles.ts'
-import { INPUT, SELECT as WORDS_FIELD } from '../Settings/styles.ts'
 import Field from './Field.tsx'
 import {
   ACCOUNT_DEFAULT,
@@ -26,8 +25,11 @@ import { REPEAT_LABELS, REPEAT_OPTIONS, scopeLabel, toRepeat } from './format.ts
 import {
   BUTTON_ROW,
   DANGER_BUTTON,
+  FORM,
   FORM_GRID,
+  INPUT,
   PRIMARY_BUTTON,
+  SELECT as WORDS_FIELD,
   TEXT_BUTTON,
 } from './styles.ts'
 import { useBillWrite, useBillWritePending } from './useBillActions.ts'
@@ -116,7 +118,7 @@ export default function BillForm({
     <form
       aria-label={title}
       noValidate
-      className="flex flex-col gap-4"
+      className={FORM}
       onSubmit={submit}
     >
       <h2 className={CARD_TITLE}>{bill === null ? 'Add a bill' : 'Edit bill'}</h2>

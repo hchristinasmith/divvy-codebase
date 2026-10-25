@@ -212,14 +212,12 @@ describe('the tiles', () => {
     ['strawb', true],
     ['personal', false],
   ] as const)(
-    'in %s, says the due figure is before the Strawb pot: %s',
+    'in %s, says the due figure includes the Strawb pot\'s bills: %s',
     async (scope, shown) => {
       setup(FOUR, { scope })
       await loaded()
 
-      const caption = screen.queryByText(
-        "All of them, before the Strawb tax pot's share, so it can be more than Overview's “Bills due”.",
-      )
+      const caption = screen.queryByText('Includes bills the Strawb tax pot covers.')
       expect(caption !== null).toBe(shown)
     },
   )
@@ -645,6 +643,25 @@ describe('the edit form', () => {
     expect(fx.callsTo('GET', LIST)).toHaveLength(2)
     expect(fx.callsTo('GET', OVERVIEW)).toHaveLength(2)
     expect(within(row('12')).getByTestId('bill-amount').textContent).toBe('$1,250.00')
+  })
+
+  it('closes without sending anything when the retyped amount is the same bill', async () => {
+    const { fx } = setup(FOUR)
+    // Answered, so a PATCH sent anyway would still close the form and only
+    // the call count can tell.
+    fx.handlers.update = () => ({ body: POWER })
+    await loaded()
+    const f = await openEdit('Invented Power Co')
+
+    type(f, 'Amount ($)', '1200')
+    const save = within(f).getByRole('button', { name: 'Save' }) as HTMLButtonElement
+    expect(save.disabled).toBe(false)
+    fireEvent.click(save)
+
+    await waitFor(() =>
+      expect(screen.queryByRole('form', { name: 'Edit Invented Power Co' })).toBeNull(),
+    )
+    expect(fx.callsTo('PATCH', billPath('12'))).toHaveLength(0)
   })
 
   it.each([

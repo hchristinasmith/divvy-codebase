@@ -34,8 +34,7 @@ export default function SummaryTiles({
         </span>
         {scope !== 'personal' && (
           <p className={TILE_CAPTION}>
-            All of them, before the Strawb tax pot&apos;s share, so it can be
-            more than Overview&apos;s “Bills due”.
+            Includes bills the Strawb tax pot covers.
           </p>
         )}
       </div>

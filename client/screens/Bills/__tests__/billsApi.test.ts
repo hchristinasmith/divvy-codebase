@@ -271,6 +271,43 @@ describe('failures with no server message', () => {
   })
 })
 
+describe('the bill path', () => {
+  // A stubbed fetch, so the id never reaches the server: only the path the
+  // client builds is under test.
+  function stubFetch() {
+    const fetch = vi.fn((_url: string, init?: RequestInit) =>
+      Promise.resolve(
+        init?.method === 'DELETE'
+          ? new Response(null, { status: 204 })
+          : new Response('{}', {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetch)
+    return fetch
+  }
+
+  function requested(fetch: ReturnType<typeof stubFetch>): string[] {
+    return fetch.mock.calls.map(([url]) => new URL(url).pathname)
+  }
+
+  it('escapes the id in every request that names a bill', async () => {
+    const fetch = stubFetch()
+
+    await api.updateBill('a/b', { name: 'Invented' })
+    await api.removeBill('a/b')
+    await api.markBillPaid('a/b')
+
+    expect(requested(fetch)).toEqual([
+      '/api/v1/bills/a%2Fb',
+      '/api/v1/bills/a%2Fb',
+      '/api/v1/bills/a%2Fb/payments',
+    ])
+  })
+})
+
 describe('the bills query', () => {
   it('is keyed by domain then scope', () => {
     expect(api.billsQuery('strawb').queryKey).toEqual(['bills', 'strawb'])

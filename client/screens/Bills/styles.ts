@@ -5,7 +5,7 @@ import type { RowTone } from './format.ts'
 // the Bills prototype (docs/design/Divvy.dc.html, the Bills section; update 2
 // surfaces per docs/design/CHANGES-2.md §1 and prd-02 Ruling 13). Card,
 // error, muted and secondary-button classes are imported from the
-// Overview's styles; field classes from the Settings styles.
+// Overview's styles; field labels, hints and errors from the Settings styles.
 //
 // Rows sit in a size container (the list's `ul`). From `@lg` (32rem wide)
 // a row is the prototype's four columns. Narrower, as on a phone, the date
@@ -27,7 +27,7 @@ export const TILE_CAPTION = 'm-0 text-body-12 text-ink-muted'
 export const LIST = '@container m-0 list-none p-0'
 
 export const ROW =
-  'grid grid-cols-[56px_1fr_auto] items-center gap-x-3 gap-y-2 border-b border-divider py-3.5 @lg:grid-cols-[56px_1fr_auto_auto] @lg:gap-x-4 @lg:gap-y-0'
+  'grid grid-cols-[56px_1fr_auto] items-center gap-x-3 gap-y-2 border-b border-divider py-3.5 @lg:grid-cols-[56px_1fr_auto_6rem] @lg:gap-x-4 @lg:gap-y-0'
 
 // The row an edit form has replaced.
 export const EDIT_ROW = 'border-b border-divider py-4'
@@ -55,8 +55,10 @@ export const META = 'text-body-12 text-ink-muted'
 export const AMOUNT = 'whitespace-nowrap font-mono text-body-15 text-ink'
 
 // The row's pill: the prototype's button, carrying the small offset. On a
-// narrow row it sits on the second line, under the name.
-const PILL = `cursor-pointer whitespace-nowrap rounded-pill px-3.5 py-[7px] text-body-12 font-semibold shadow-pill col-span-2 col-start-2 justify-self-start @lg:col-auto @lg:justify-self-auto ${FOCUS}`
+// narrow row it sits on the second line, under the name. From `@lg` it sits
+// at the right of a fixed 6rem column, so a "Paid" row's amount lines up
+// with a "Mark paid" row's.
+const PILL = `cursor-pointer whitespace-nowrap rounded-pill px-3.5 py-[7px] text-body-12 font-semibold shadow-pill col-span-2 col-start-2 justify-self-start @lg:col-auto @lg:justify-self-end ${FOCUS}`
 export const MARK_PAID_PILL = `${PILL} bg-blush text-rose hover:bg-blush-hover disabled:cursor-not-allowed disabled:opacity-50`
 // Not dimmed again when disabled: the paid row is already at .55.
 export const PAID_PILL = `${PILL} cursor-default bg-surface text-ink-muted`
@@ -74,6 +76,23 @@ export const DANGER_BUTTON = `${BUTTON_SHAPE} bg-danger ${FOCUS}`
 
 // "Delete bill": a text button, so it does not compete with Save.
 export const TEXT_BUTTON = `cursor-pointer bg-transparent p-0 text-body-13 font-semibold text-danger hover:underline disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS}`
+
+// The form's text and select fields. A copy of INPUT and SELECT in
+// client/screens/Settings/styles.ts with `border border-line` swapped for
+// `border-0 shadow-pill`: update 2 fields have no border and sit on the
+// small hard offset (docs/design/CHANGES-2.md §1). Focus keeps the outline;
+// the Settings copy's pink focus border is dropped, as there is no border.
+const FIELD_SHAPE =
+  'rounded-tile border-0 bg-canvas px-3.5 py-2.5 text-body-14 text-ink shadow-pill disabled:cursor-not-allowed disabled:opacity-50'
+
+// DM Mono is for numbers: the typed amount and the date.
+export const INPUT = `${FIELD_SHAPE} font-mono ${FOCUS}`
+
+// Words, not numbers: the name and the choices.
+export const SELECT = `${FIELD_SHAPE} font-sans ${FOCUS}`
+
+// Capped so the fields do not stretch across a wide screen.
+export const FORM = 'flex max-w-4xl flex-col gap-4'
 
 export const FORM_GRID = 'grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-4'
 export const BUTTON_ROW = 'flex flex-wrap items-center gap-3'
