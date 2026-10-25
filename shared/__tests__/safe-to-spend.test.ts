@@ -1296,6 +1296,124 @@ describe('a Strawb outflow and an equal personal inflow (#264 regression)', () =
   })
 })
 
+// Drawings (prd-02 Ruling 15, issue #264): the same pair as the regression
+// block above, handed over as the server hands a drawing over, with
+// Drawings as each half's effective category. A drawing is never spent, in
+// any budget, settled or pending, and balances (liquid) are untouched.
+// Done-when 2 (DW2) and 7 (DW7).
+describe('Drawings are never spent (prd-02 Ruling 15)', () => {
+  const CONTRACTORS: SafeToSpendBudget = {
+    id: 'contractors',
+    scope: 'strawb',
+    category: 'Contractors',
+    limitCents: 50000,
+  }
+  const DRAWINGS_BUDGET: SafeToSpendBudget = {
+    id: 'drawings',
+    scope: 'strawb',
+    category: 'Drawings',
+    limitCents: 10000,
+  }
+  const OUT: SafeToSpendTransaction = {
+    accountId: 's-cur',
+    date: '2026-10-21',
+    amountCents: -30000,
+    category: 'Drawings',
+    status: 'settled',
+  }
+  const IN: SafeToSpendTransaction = {
+    accountId: 'p-cur',
+    date: '2026-10-22',
+    amountCents: 30000,
+    category: 'Drawings',
+    status: 'settled',
+  }
+  const spent = (
+    transactions: SafeToSpendTransaction[],
+    scope: 'personal' | 'strawb',
+    category: string,
+  ) =>
+    budgetSpentCents({
+      accounts: ACCOUNTS,
+      transactions,
+      scope,
+      category,
+      from: '2026-10-20',
+      to: '2026-10-23',
+    })
+
+  it('a Strawb outflow in Drawings is not spent, even by a budget named Drawings (DW2)', () => {
+    expect(spent([OUT, IN], 'strawb', 'Drawings')).toBe(0)
+    expect(spent([{ ...OUT, status: 'pending' }], 'strawb', 'Drawings')).toBe(0)
+    // The same row in an ordinary category is spent: the skip is the
+    //   category, not the amount or the account.
+    expect(spent([{ ...OUT, category: 'Contractors' }], 'strawb', 'Contractors')).toBe(30000)
+  })
+
+  it('a personal outflow in Drawings is not spent either', () => {
+    expect(
+      spent([{ ...IN, amountCents: -30000 }], 'personal', 'Drawings'),
+    ).toBe(0)
+  })
+
+  it('Strawb: the pair changes no budget and no figure but liquid stays as given (DW2)', () => {
+    // Base Strawb safe is −90000 (the fixed table). Contractors has nothing
+    //   spent, remaining 50000: −90000 − 50000 = −140000. The Drawings
+    //   budget has nothing spent, remaining 10000: −140000 − 10000 =
+    //   −150000. Counting the outflow as Contractors would give −110000.
+    const withPair = safeToSpend(
+      base({
+        scope: 'strawb',
+        budgets: [...BUDGETS, CONTRACTORS, DRAWINGS_BUDGET],
+        transactions: [...TRANSACTIONS, OUT, IN],
+      }),
+    )
+    const without = safeToSpend(
+      base({
+        scope: 'strawb',
+        budgets: [...BUDGETS, CONTRACTORS, DRAWINGS_BUDGET],
+      }),
+    )
+    expect(withPair).toStrictEqual(without)
+    const contractors = withPair.budgets.find((b) => b.id === 'contractors')
+    expect(Object.keys(contractors ?? {}).sort()).toEqual(
+      [...BUDGET_LINE_KEYS].sort(),
+    )
+    expect(contractors).toStrictEqual({
+      ...CONTRACTORS,
+      spentCents: 0,
+      remainingCents: 50000,
+      overCents: 0,
+    })
+    expect(withPair.budgets.find((b) => b.id === 'drawings')).toStrictEqual({
+      ...DRAWINGS_BUDGET,
+      spentCents: 0,
+      remainingCents: 10000,
+      overCents: 0,
+    })
+    // s-cur 200000 is the only Strawb current account.
+    expect(withPair.liquidCents).toBe(200000)
+    expect(withPair.safeCents).toBe(-150000)
+  })
+
+  it('Personal: the inflow is no budget credit; the figure is the base 174000 (DW2)', () => {
+    const result = safeToSpend(
+      base({ scope: 'personal', transactions: [...TRANSACTIONS, OUT, IN] }),
+    )
+    expect(result.budgets).toStrictEqual([GROCERIES])
+    expect(result.safeCents).toBe(174000)
+  })
+
+  it('a row in Drawings is still checked: a fractional amount is refused', () => {
+    expect(() => spent([{ ...OUT, amountCents: -300.5 }], 'strawb', 'Drawings')).toThrow(
+      TypeError,
+    )
+    expect(() =>
+      safeToSpend(base({ transactions: [{ ...OUT, date: '2026-02-30' }] })),
+    ).toThrow(RangeError)
+  })
+})
+
 describe('paydays', () => {
   it.each<[string, number, string, string, number]>([
     // today (its weekday), payday weekday (0 Sunday … 6 Saturday),

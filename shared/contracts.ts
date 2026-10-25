@@ -296,7 +296,11 @@ export interface ActivityRow {
   /** A display name only, never an account number. */
   accountName: string
   status: TransactionStatus
-  /** Effective category; null when neither Akahu nor the user set one. */
+  /**
+   * Effective category; null when neither Akahu nor the user set one. A
+   * half of a drawing shows Drawings, with source `rule`, unless the user
+   * set its category (prd-02 Ruling 15).
+   */
   category: string | null
   categorySource: CategorySource
 }

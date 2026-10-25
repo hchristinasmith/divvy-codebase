@@ -1559,6 +1559,105 @@ describe('readOverview: transfers that are not drawings (#264 regression)', () =
   })
 })
 
+// Drawings (prd-02 Ruling 15, issue #264): the regression block above with
+// the personal inflow equal to the Strawb outflow. Both halves are handed to
+// safe-to-spend and shown as Drawings, so Software is back to the main
+// fixture's 2500 and every safe figure is the main fixture's.
+describe('readOverview: drawings (prd-02 Ruling 15)', () => {
+  const OUT_AT = '2026-10-27T05:00:00.000Z'
+  const NEXT_DAY = '2026-10-27T20:00:00.000Z'
+  const OVER_SOFTWARE = 'over_budget:3:2026-10-27'
+
+  async function seedPair(outFields: Row = {}) {
+    await seedMain()
+    await connection('transactions').insert([
+      tx(AKAHU.trading, OUT_AT, -30000, {
+        id: 101,
+        category: 'Software',
+        description: 'Invented transfer out',
+        ...outFields,
+      }),
+      tx(AKAHU.everyday, NEXT_DAY, 30000, {
+        id: 102,
+        description: 'Invented transfer in',
+      }),
+    ])
+  }
+
+  it('hands both halves to safe-to-spend as Drawings and counts neither (DW1, DW2)', async () => {
+    await seedPair()
+
+    const strawb = await readOverview('strawb', NOW, connection)
+    const handed = lastInput().transactions.filter((t) =>
+      [-30000, 30000].includes(t.amountCents),
+    )
+    expect(handed.map((t) => [t.amountCents, t.category])).toStrictEqual([
+      [-30000, 'Drawings'],
+      [30000, 'Drawings'],
+    ])
+    expect(strawb.safeToSpend.budgets.find((b) => b.id === '3')).toStrictEqual({
+      id: '3',
+      scope: 'strawb',
+      category: 'Software',
+      limitCents: 10000,
+      spentCents: 2500,
+      remainingCents: 7500,
+      overCents: 0,
+    })
+    expect(strawb.safeToSpend.safeCents).toBe(380500)
+    expect((await readOverview('personal', NOW, connection)).safeToSpend.safeCents).toBe(28500)
+    const all = await readOverview('all', NOW, connection)
+    expect(all.safeToSpend.safeCents).toBe(409000)
+    expect(all.recentActivity.find((r) => r.id === '101')).toMatchObject({
+      category: 'Drawings',
+      categorySource: 'rule',
+    })
+    expect(all.recentActivity.find((r) => r.id === '102')).toMatchObject({
+      category: 'Drawings',
+      categorySource: 'rule',
+    })
+    // The main fixture's rows keep their own categories.
+    expect(all.recentActivity.find((r) => r.id === '7')).toMatchObject({
+      category: 'Software',
+      categorySource: 'akahu',
+    })
+  })
+
+  it('a half set by hand counts by her category (DW4)', async () => {
+    await seedPair({ category_source: 'user' })
+
+    const strawb = await readOverview('strawb', NOW, connection)
+    // Software 2500 + 30000, as in the regression block.
+    expect(strawb.safeToSpend.budgets.find((b) => b.id === '3')?.spentCents).toBe(32500)
+    expect(strawb.recentActivity.find((r) => r.id === '101')).toMatchObject({
+      category: 'Software',
+      categorySource: 'user',
+    })
+    const personal = await readOverview('personal', NOW, connection)
+    expect(personal.recentActivity.find((r) => r.id === '102')).toMatchObject({
+      category: 'Drawings',
+      categorySource: 'rule',
+    })
+  })
+
+  it('dismissAlert sees drawings too: no Software alert exists to dismiss', async () => {
+    await seedPair()
+    expect(await dismissAlert(OVER_SOFTWARE, NOW, connection)).toBeNull()
+    expect(await connection('alert_dismissals').select()).toStrictEqual([])
+  })
+
+  it('dismissAlert still dismisses the Software alert when the inflow is 1 cent short', async () => {
+    await seedMain()
+    await connection('transactions').insert([
+      tx(AKAHU.trading, OUT_AT, -30000, { id: 101, category: 'Software' }),
+      tx(AKAHU.everyday, NEXT_DAY, 29999, { id: 102 }),
+    ])
+    expect(await dismissAlert(OVER_SOFTWARE, NOW, connection)).toMatchObject({
+      id: OVER_SOFTWARE,
+    })
+  })
+})
+
 describe('readOverview: dataAsOf', () => {
   const run = (
     id: number,

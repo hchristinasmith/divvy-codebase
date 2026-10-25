@@ -15,7 +15,10 @@ import {
   type SubscriptionMark,
   type SubscriptionTransaction,
 } from '../../shared/subscriptions.ts'
+import type { CategorySource } from '../../models/transactions.ts'
+import { effectiveCategory, isDrawingCategory } from '../../shared/drawings.ts'
 import connection from './connection.ts'
+import { loadDrawingIds } from './drawings.ts'
 import { nzCalendarDate } from './overview.ts'
 import { listAccounts } from './synced.ts'
 
@@ -31,7 +34,11 @@ import { listAccounts } from './synced.ts'
 //
 // Rows read: settled Akahu outflows on stored Akahu accounts, each taking
 // its account's scope. A Xero row is never read (prd-05 is M4). A
-// transaction whose account is not stored is not read.
+// transaction whose account is not stored is not read. A row whose
+// effective category is Drawings, a half of a drawing or one Hannah tagged
+// Drawings by hand, is dropped before detection: paying herself is not a
+// subscription (prd-02 Ruling 15). Dropped here, it is also not a charge
+// any mark can be written against.
 //
 // Writes go to `subscription_marks` only, one row per scope and merchant
 // key. Cancel and uncancel record a date; nothing is sent to the merchant
@@ -83,6 +90,7 @@ interface MerchantTarget {
 }
 
 interface ChargeQueryRow {
+  id: number
   account_id: string
   date: string | null
   description: string | null
@@ -90,6 +98,8 @@ interface ChargeQueryRow {
   status: TransactionStatus
   merchant_id: string | null
   merchant_name: string | null
+  category: string | null
+  category_source: CategorySource
 }
 
 function nzDate(instant: string | null): IsoDate {
@@ -102,7 +112,10 @@ function nzDate(instant: string | null): IsoDate {
   }
 }
 
-/** Settled Akahu outflows on stored Akahu accounts in `scope`, oldest row first. */
+/**
+ * Settled Akahu outflows on stored Akahu accounts in `scope`, oldest row
+ * first, without drawings.
+ */
 async function loadCharges(
   scope: Scope,
   db: Db,
@@ -116,6 +129,7 @@ async function loadCharges(
   }
   const rows: ChargeQueryRow[] = await db('transactions')
     .select(
+      'id',
       'account_id',
       'date',
       'description',
@@ -123,13 +137,25 @@ async function loadCharges(
       'status',
       'merchant_id',
       'merchant_name',
+      'category',
+      'category_source',
     )
     .where({ source: 'akahu', status: 'settled' })
     .where('amount_cents', '<', 0)
     .whereIn('account_id', [...accountScopes.keys()])
     .orderBy('id', 'asc')
+  const drawingIds = await loadDrawings(db)
 
-  return rows.map((row) => {
+  const charges = rows.filter(
+    (row) =>
+      !isDrawingCategory(
+        effectiveCategory(
+          { category: row.category, categorySource: row.category_source },
+          drawingIds.has(row.id),
+        ).category,
+      ),
+  )
+  return charges.map((row) => {
     const rowScope = accountScopes.get(row.account_id)
     if (rowScope === undefined)
       throw new SubscriptionsDataError('a transaction is incomplete')
@@ -143,6 +169,21 @@ async function loadCharges(
       description: row.description,
     }
   })
+}
+
+/**
+ * The drawing ids, with the shared matcher's RangeError or TypeError (whose
+ * messages name values) turned into the fixed text.
+ */
+async function loadDrawings(db: Db): Promise<Set<number>> {
+  try {
+    return await loadDrawingIds(db)
+  } catch (err) {
+    if (err instanceof RangeError || err instanceof TypeError) {
+      throw new SubscriptionsDataError('subscription input invalid')
+    }
+    throw err
+  }
 }
 
 async function loadMarks(db: Db): Promise<SubscriptionMark[]> {

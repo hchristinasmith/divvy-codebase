@@ -6,6 +6,11 @@ import {
   serveOnLoopback,
   type LoopbackApi,
 } from '../../test-utils/app.ts'
+import {
+  getCategoryGroups,
+  isKnownCategory,
+  isSelectableCategory,
+} from '../../db/categories.ts'
 
 let served: LoopbackApi | undefined
 let api: LoopbackApi['api']
@@ -50,5 +55,28 @@ describe('GET /api/v1/categories', () => {
 
     expect(new Set(groupNames).size).toBe(groupNames.length)
     expect(new Set(categoryNames).size).toBe(categoryNames.length)
+  })
+
+  it('ends with the Divvy group, which holds Drawings (prd-02 Ruling 15)', async () => {
+    const res = await api.get('/api/v1/categories')
+    const items: { name: string; categories: string[] }[] = res.body.items
+
+    expect(items.at(-1)).toStrictEqual({ name: 'Divvy', categories: ['Drawings'] })
+  })
+})
+
+// The agents check proposals against data/cats.js alone (server/agents/
+// contracts.ts), so an agent can never propose Drawings; Hannah can pick it.
+describe('Drawings is selectable, not part of the NZFCC list', () => {
+  it('isSelectableCategory accepts Drawings; isKnownCategory and getCategoryGroups do not hold it', () => {
+    expect(isSelectableCategory('Drawings')).toBe(true)
+    expect(isKnownCategory('Drawings')).toBe(false)
+    expect(getCategoryGroups().flatMap((g) => g.categories)).not.toContain('Drawings')
+    expect(getCategoryGroups().map((g) => g.name)).not.toContain('Divvy')
+    // Every NZFCC name stays selectable.
+    for (const name of getCategoryGroups().flatMap((g) => g.categories)) {
+      expect(isSelectableCategory(name), name).toBe(true)
+    }
+    expect(isSelectableCategory('Divvy')).toBe(false)
   })
 })

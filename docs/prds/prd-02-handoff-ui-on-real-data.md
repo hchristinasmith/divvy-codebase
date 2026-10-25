@@ -96,6 +96,8 @@ Why: the handoff's formula (`handoff.md:25`) only works once each term is pinned
 
 > Amended 2026-10-25 by Rulings 9, 10 and 11.
 >
+> Amended 2026-10-25 by Ruling 15: drawings are not spent.
+>
 > Amended 2026-10-25 (#35): bills repeat none/weekly/monthly/yearly; Hannah chose option C on #35. Each bill has its own repeat (none is a one-off), anchored on `first_due_date`, and every occurrence is computed from that anchor. A monthly bill keeps its day of month, clamped to the month's end; a yearly bill dated 29 Feb falls on 28 Feb outside leap years. "Mark paid" records a `bill_payments` row for that occurrence and the bill comes back next cycle; a one-off is done once paid. A bill's "unpaid" occurrences are those with no payment row. Open, not ruled: when several occurrences of one bill are unpaid on or before the next payday (a weekly bill overdue), whether each one counts toward "unpaid bills".
 >
 > Amended 2026-10-25 (#151), answering the open question in the #35 note: Hannah ruled that every unpaid occurrence of an overdue repeating bill counts toward "unpaid bills". A weekly bill two cycles overdue holds back both occurrences that fall on or before the next payday, so safe-to-spend never counts money already owed.
@@ -152,6 +154,9 @@ A Subscriptions screen sits after Bills in the nav and follows the All / Persona
 - **Xero bills are not read** until M4 (prd-05).
 - The advisor banner ("Help me cancel →") opens Claude desktop, like the Advisor placeholder; without usage tags it names no subscriptions.
 Ruling 8 still deletes the old Subscriptions page in wave 5; the new screen is a new component in the same nav slot. Why: Hannah added the screen to prd-02 on 2026-10-25 ("Add to prd-02 now"). Extends to: prd-03 may later read the same function; prd-04's detection row is superseded for subscriptions only.
+
+## Ruling 15 — Drawings are transfers, not spending (operator amendment, 2026-10-25)
+A transfer out of a `strawb` account matched by the same amount arriving in a `personal` account (within a small date window the architect sets and states) is a **drawing**. Both halves show the category **Drawings** unless Hannah has set a different category on that row by hand, which always wins. Drawings are left out of Strawb spending, budgets and subscriptions, and the personal half is not counted as spending or as a budget credit. They still move balances. "Drawings" is added to the categories Hannah can pick, so an unmatched one can be tagged by hand. Why: counting a drawing as spending double-counts her own money and makes Strawb look like it spends what it pays her.
 
 ## Sequencing
 

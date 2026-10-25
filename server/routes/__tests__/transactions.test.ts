@@ -419,15 +419,18 @@ describe('PATCH /api/v1/transactions/:id corrections', () => {
 })
 
 describe('GET /api/v1/categories', () => {
-  it('serves data/cats.js, the list the Category dropdown reads', async () => {
+  it('serves data/cats.js, then the Divvy group holding Drawings (prd-02 Ruling 15)', async () => {
     const res = await api.get('/api/v1/categories')
 
     expect(res.status).toBe(200)
-    expect(res.body).toEqual({
-      items: Object.entries(categories).map(([name, names]) => ({
-        name,
-        categories: names,
-      })),
+    expect(res.body).toStrictEqual({
+      items: [
+        ...Object.entries(categories).map(([name, names]) => ({
+          name,
+          categories: names,
+        })),
+        { name: 'Divvy', categories: ['Drawings'] },
+      ],
     })
   })
 
