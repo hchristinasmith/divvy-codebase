@@ -1,4 +1,4 @@
-import { parseDollars } from '../../shared/money.ts'
+import { exactAmountToCents, parseExactJson } from '../../shared/exact-json.ts'
 import type {
   AkahuAccount,
   PendingTransaction,
@@ -25,12 +25,13 @@ import type {
 // (prd-01 Ruling 2); pagination only ever adds `cursor`.
 //
 // Amounts: `JSON.parse` would turn `19.99` into a binary double before any
-// code saw it, so `parseExactJson` quotes every number literal first and each
-// amount arrives as the decimal text Akahu sent. That text must look like
-// `-12.34` (JSON's number grammar, at most two decimal places, no exponent;
-// the same text sent quoted, `"-12.34"`, is accepted too) and is converted by
-// `parseDollars`, which is string arithmetic. A shape not seen before is
-// refused, never rounded.
+// code saw it, so the body is read with the shared exact-text reader
+// (`parseExactJson`, shared/exact-json.ts), which quotes every number literal
+// first, and each amount arrives as the decimal text Akahu sent. That text
+// must look like `-12.34` (JSON's number grammar, at most two decimal places,
+// no exponent; the same text sent quoted, `"-12.34"`, is accepted too) and is
+// converted by the shared `exactAmountToCents`, which is string arithmetic. A
+// shape not seen before is refused, never rounded.
 //
 // Failures: every one rejects with `AkahuError`, and none resolves as an
 // empty or partial list, so a caller that sees zero items can trust there are
@@ -68,27 +69,7 @@ function badResponse(message: string, status: number | null = null) {
 }
 
 // ---------------------------------------------------------------------------
-// Reading JSON without letting an amount become a float.
-
-// One token at a time: a whole string literal (escapes included, so `\"`
-// does not end it), or a JSON number literal. A number is matched by JSON's
-// own grammar, so `01` splits into `0` and `1` and the quoted result fails to
-// parse, as `JSON.parse` would. A number followed by `:` is left bare, so an
-// invalid numeric key stays invalid instead of becoming a quoted one. An
-// escape may stop at its backslash (`\\[\s\S]?`), so a string with no
-// closing quote is consumed once (still invalid) rather than rescanned from
-// every quote in it.
-const JSON_TOKEN =
-  /"(?:[^"\\]|\\[\s\S]?)*(?:"|$)|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?(?!\s*:)/g
-
-/** JSON.parse with every number literal kept as its source text. */
-function parseExactJson(text: string): unknown {
-  return JSON.parse(
-    text.replace(JSON_TOKEN, (token) =>
-      token.startsWith('"') ? token : `"${token}"`,
-    ),
-  )
-}
+// Reading Akahu's items field by field.
 
 type JsonRecord = Record<string, unknown>
 
@@ -151,23 +132,24 @@ function optionalText(
   return value
 }
 
-// JSON's number grammar, so a quoted amount cannot slip past it with a
-// leading zero (`"0019.99"`) that a bare number literal could not have.
-const AKAHU_AMOUNT = /^-?(?:0|[1-9]\d*)(?:\.\d{1,2})?$/
-
 /**
  * Akahu's decimal dollar text as integer cents (prd-01 Ruling 3).
- * `parseDollars` already returns 0, not -0, for a negative zero.
+ * `exactAmountToCents` already returns 0, not -0, for a negative zero.
  */
 function toCents(value: unknown, field: string): number {
-  if (typeof value !== 'string' || !AKAHU_AMOUNT.test(value)) {
+  if (typeof value !== 'string') {
     throw badResponse(`${field} is missing or not an amount`)
   }
+  let cents: number | null
   try {
-    return parseDollars(value)
+    cents = exactAmountToCents(value)
   } catch {
     throw badResponse(`${field} is out of range`)
   }
+  if (cents === null) {
+    throw badResponse(`${field} is missing or not an amount`)
+  }
+  return cents
 }
 
 function requiredCents(record: JsonRecord, key: string, where: string) {
