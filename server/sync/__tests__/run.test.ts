@@ -498,6 +498,20 @@ describe('the settled window (Ruling 2, amended by Ruling 10)', () => {
     ).toEqual({ start: null, end: null })
   })
 
+  it('uses the latest success with a readable start, even when an unreadable one came after it (#169)', async () => {
+    // 'not-a-timestamp' sorts after every ISO string as text, so an ordering
+    // on the raw column would pick it and send the first-run window forever.
+    expect(
+      await windowAfter([
+        { started_at: at(-15 * MINUTE_MS).toISOString(), outcome: 'success' },
+        { started_at: 'not-a-timestamp', outcome: 'success' },
+      ]),
+    ).toEqual({
+      start: at(-30 * DAY_MS - 15 * MINUTE_MS).toISOString(),
+      end: NOW.toISOString(),
+    })
+  })
+
   it('follows the most recent success, not the oldest or the first inserted', async () => {
     // The recent success has the lower id, so neither ascending start order
     // nor descending id order alone finds it.

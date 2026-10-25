@@ -125,14 +125,15 @@ async function claim(
             error_message: ABANDONED_MESSAGE,
           })
       }
+      // A start that does not parse is skipped, not ranked: as text it would
+      // sort after every ISO time and stay the latest success (#169).
       const lastSuccess: Pick<SyncRun, 'started_at'> | undefined = await trx(
         'sync_runs',
       )
         .where({ outcome: 'success' })
-        .orderBy([
-          { column: 'started_at', order: 'desc' },
-          { column: 'id', order: 'desc' },
-        ])
+        .whereRaw('julianday(started_at) IS NOT NULL')
+        .orderByRaw('julianday(started_at) DESC')
+        .orderBy('id', 'desc')
         .first('started_at')
       const [runId] = await trx('sync_runs').insert({
         started_at: startedIso,
