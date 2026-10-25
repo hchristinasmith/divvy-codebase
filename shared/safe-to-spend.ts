@@ -174,17 +174,30 @@ function assertPaydayWeekday(paydayWeekday: number): void {
   }
 }
 
-// Date.UTC and the getUTC* readers are plain arithmetic on the given
+// setUTCFullYear and the getUTC* readers are plain arithmetic on the given
 // fields: no clock, no timezone.
 
+/**
+ * Midnight UTC on a civil date, as epoch milliseconds. A `day` past the end
+ * of the month (or below 1) rolls over, as `Date` does. Built with
+ * `setUTCFullYear`, never `Date.UTC`: `Date.UTC` reads years 0 to 99 as 1900
+ * to 1999, which would give wrong weekdays and day counts for dates
+ * `parseDate` accepts (#126).
+ */
+function utcMidnight({ year, month, day }: CivilDate): number {
+  const d = new Date(0)
+  d.setUTCFullYear(year, month - 1, day)
+  return d.getTime()
+}
+
 /** The weekday of a date: 0 is Sunday, 6 is Saturday. */
-function weekday({ year, month, day }: CivilDate): number {
-  return new Date(Date.UTC(year, month - 1, day)).getUTCDay()
+function weekday(date: CivilDate): number {
+  return new Date(utcMidnight(date)).getUTCDay()
 }
 
 /** `date` moved by `days` calendar days (negative moves back). */
 function addDays({ year, month, day }: CivilDate, days: number): CivilDate {
-  const d = new Date(Date.UTC(year, month - 1, day + days))
+  const d = new Date(utcMidnight({ year, month, day: day + days }))
   return {
     year: d.getUTCFullYear(),
     month: d.getUTCMonth() + 1,
@@ -227,10 +240,7 @@ export function nextPayday(today: IsoDate, paydayWeekday: number): IsoDate {
 export function daysBetween(from: IsoDate, to: IsoDate): number {
   const a = parseDate(from, 'from')
   const b = parseDate(to, 'to')
-  // Date.UTC is plain arithmetic on the given fields: no clock, no timezone.
-  const ms =
-    Date.UTC(b.year, b.month - 1, b.day) - Date.UTC(a.year, a.month - 1, a.day)
-  return Math.round(ms / 86_400_000)
+  return Math.round((utcMidnight(b) - utcMidnight(a)) / 86_400_000)
 }
 
 // ---------------------------------------------------------------------------

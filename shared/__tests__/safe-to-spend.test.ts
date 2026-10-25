@@ -1191,10 +1191,30 @@ describe('paydays', () => {
     // the ends of the weekday range, both on Sun 25 Oct 2026
     ['2026-10-25', 0, '2026-10-25', '2026-11-01', 7], // Sunday payday, on a Sunday
     ['2026-10-25', 6, '2026-10-24', '2026-10-31', 6], // Saturday payday: yesterday
+    // Years 0 to 99, which Date.UTC would read as 1900 to 1999 (#126).
+    // Weekdays checked against Python's proleptic Gregorian `datetime`.
+    ['0050-03-01', 2, '0050-03-01', '0050-03-08', 7], // Tue, payday itself
+    // Thu 31 Dec 0099: the next payday is in the year 100
+    ['0099-12-31', 2, '0099-12-29', '0100-01-05', 5],
+    // Mon 1 Mar 0004: the last payday is before the leap day 29 Feb 0004
+    ['0004-03-01', 2, '0004-02-24', '0004-03-02', 1],
   ])('today %s, payday weekday %i: last %s, next %s, %i days', (today, weekday, last, next, days) => {
     expect(lastPayday(today, weekday)).toBe(last)
     expect(nextPayday(today, weekday)).toBe(next)
     expect(daysBetween(today, next)).toBe(days)
+  })
+
+  it.each<[string, string, number]>([
+    // Years 0 to 99 (#126). Counts checked against Python's `datetime`,
+    //   which starts at year 1; year 0 is a leap year (divisible by 400), so
+    //   0000-01-01 to 0001-01-01 is 366 days.
+    ['0099-12-31', '0100-01-01', 1],
+    ['0001-01-01', '0100-01-01', 36159],
+    ['0000-01-01', '0100-01-01', 36525], // 366 + 36159
+    ['0000-02-28', '0000-03-01', 2], // 29 Feb 0000 exists
+    ['0050-03-01', '2026-10-23', 721955],
+  ])('daysBetween %s and %s is %i', (from, to, days) => {
+    expect(daysBetween(from, to)).toBe(days)
   })
 
   it.each<[number, number, number]>([
