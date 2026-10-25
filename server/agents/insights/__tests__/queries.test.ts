@@ -359,8 +359,10 @@ describe('collectAggregates against the hand-written oracle', () => {
     await tx({ account: 'acc_p2', at: day(inflowDay), cents: 8800, merchant: 'Invented Transfer Early', category: 'Transfers' })
     await tx({ at: day(windowStart), cents: -1500, merchant: 'Fixture Bakery', category: 'Cafes' })
     const a = await collectAggregates('personal', WEEK)
-    expect(a.topMerchants.map((m) => m.merchant)).not.toContain('Invented Transfer Early')
     expect(a.monthly).toStrictEqual([{ month: windowStart.slice(0, 7), category: 'Cafes', spendCents: 1500 }])
+    // Read from the window start alone, the same outflow has no partner.
+    const narrow = excludeOwnAccountTransfers(await loadLedger('personal', windowStart, range.end))
+    expect(narrow.map((r) => r.merchant)).toContain('Invented Transfer Early')
   })
 
   it('a strawb inflow of equal cents does not cancel a personal outflow', async () => {
