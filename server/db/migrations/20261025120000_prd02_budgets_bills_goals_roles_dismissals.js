@@ -42,11 +42,14 @@
 // "Mark paid" writes a `bill_payments` row whose `due_date` is the
 // occurrence it pays. A bill's current occurrence is the earliest one with
 // no payment; a one-off is done once its single payment exists. That
-// derivation belongs to the bills route (#44), not here. The database does
+// derivation belongs to the bills (#49) and overview (#44) routes, not here. The database does
 // not check that a payment's `due_date` lies on the bill's schedule (that
 // would need a trigger); the route validates it. One payment per occurrence:
 // UNIQUE (bill_id, due_date). Deleting a bill deletes its payments. A bill
-// whose account is deleted keeps existing with no account.
+// whose account is deleted keeps existing with no account. `bills.scope` is
+// the bill's own and does not follow its account: the database accepts an
+// `account_id` whose `accounts.scope` differs, so the bills route must
+// refuse one.
 //
 // goals and goal_contributions (Ruling 5): a contribution is a record, not a
 // transfer. A goal's saved amount is the SUM of its contributions; there is
@@ -73,6 +76,13 @@
 // OFF is ignored, so it deletes every `account_settings`, `bill_payments` and
 // `goal_contributions` row and clears every `bills.account_id`. See the
 // hazard in 20261023120000_money_as_cents.js.
+//
+// For the same reason, prd-01 sync must upsert `accounts` with
+// `INSERT … ON CONFLICT(akahu_id) DO UPDATE`, never `INSERT OR REPLACE` or a
+// delete and reinsert, and must not delete an account Akahu stops returning.
+// Each of those deletes the account's `account_settings` row (CASCADE) and
+// clears its bills' `account_id` (SET NULL); a lost `credit_card` role
+// overstates safe-to-spend (Ruling 10).
 
 const SCOPES = ['personal', 'strawb']
 const BILL_REPEATS = ['none', 'weekly', 'monthly', 'yearly']

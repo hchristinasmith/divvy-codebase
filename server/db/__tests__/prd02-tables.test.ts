@@ -149,6 +149,15 @@ async function columnTypes(table: string): Promise<Record<string, string>> {
   )
 }
 
+// `table.column` for every NOT NULL column SQLite reports, bar the `id`
+// primary keys (a rowid alias, filled in when omitted).
+async function notNullColumns(table: string): Promise<string[]> {
+  const info: { name: string; notnull: number }[] = await db.raw('PRAGMA table_info(??)', [
+    table,
+  ])
+  return info.filter((c) => c.notnull && c.name !== 'id').map((c) => `${table}.${c.name}`)
+}
+
 async function tables(): Promise<string[]> {
   return db('sqlite_master').where({ type: 'table' }).orderBy('name').pluck('name')
 }
@@ -257,6 +266,55 @@ const contribution = (fields: Row) => ({
   ...fields,
 })
 
+// Every NOT NULL column of the seven tables. The first test in 'NOT NULL
+// columns' fails if this list and the schema disagree in either direction.
+const NOT_NULL_COLUMNS: [table: string, column: string][] = [
+  ['budgets', 'scope'],
+  ['budgets', 'category'],
+  ['budgets', 'limit_cents'],
+  ['budgets', 'created_at'],
+  ['budgets', 'updated_at'],
+  ['bills', 'scope'],
+  ['bills', 'name'],
+  ['bills', 'amount_cents'],
+  ['bills', 'repeat'],
+  ['bills', 'first_due_date'],
+  ['bills', 'created_at'],
+  ['bills', 'updated_at'],
+  ['bill_payments', 'bill_id'],
+  ['bill_payments', 'due_date'],
+  ['bill_payments', 'amount_cents'],
+  ['bill_payments', 'paid_at'],
+  ['goals', 'name'],
+  ['goals', 'target_cents'],
+  ['goals', 'created_at'],
+  ['goals', 'updated_at'],
+  ['goal_contributions', 'goal_id'],
+  ['goal_contributions', 'amount_cents'],
+  ['goal_contributions', 'contributed_at'],
+  ['account_settings', 'account_id'],
+  ['account_settings', 'role'],
+  ['account_settings', 'updated_at'],
+  ['alert_dismissals', 'alert_id'],
+  ['alert_dismissals', 'dismissed_at'],
+]
+
+// One valid row per table, with the parents it needs inserted first.
+async function validRows(): Promise<Record<string, Row>> {
+  const accountId = await insertAccount()
+  const [billId] = await db('bills').insert(bill())
+  const [goalId] = await db('goals').insert(goal())
+  return {
+    budgets: budget(),
+    bills: bill(),
+    bill_payments: payment({ bill_id: billId }),
+    goals: goal(),
+    goal_contributions: contribution({ goal_id: goalId }),
+    account_settings: { account_id: accountId, role: 'current', updated_at: AT },
+    alert_dismissals: { alert_id: 'over_budget:1', dismissed_at: AT },
+  }
+}
+
 let tablesBefore: string[]
 let targetsBefore: Awaited<ReturnType<typeof targetsShape>>
 let targetsSequenceBefore: number | undefined
@@ -332,6 +390,34 @@ describe('schema (Done-when 1, 4)', () => {
   })
 })
 
+describe('NOT NULL columns', () => {
+  it('lists every NOT NULL column the schema has, and no other', async () => {
+    const actual: string[] = []
+    for (const table of NEW_TABLES) actual.push(...(await notNullColumns(table)))
+
+    expect(NOT_NULL_COLUMNS.map(([table, column]) => `${table}.${column}`).sort()).toEqual(
+      actual.sort(),
+    )
+  })
+
+  it.each(NOT_NULL_COLUMNS)(
+    '%s.%s refuses NULL, and refuses being left out (no default)',
+    async (table, column) => {
+      const row = (await validRows())[table]
+      const refusal = new RegExp(`NOT NULL constraint failed: ${table}\\.${column}$`)
+
+      await expect(db(table).insert(row), 'the valid row').resolves.toBeDefined()
+      const stored = await count(table)
+
+      await expect(db(table).insert({ ...row, [column]: null }), 'set to null').rejects.toThrow(
+        refusal,
+      )
+      await expect(db(table).insert(omit(row, column)), 'left out').rejects.toThrow(refusal)
+      expect(await count(table)).toBe(stored)
+    },
+  )
+})
+
 describe('budgets (Rulings 6, 9)', () => {
   it('round-trips a budget', async () => {
     const full: Omit<Budget, 'id'> = {
@@ -395,11 +481,14 @@ describe('budgets (Rulings 6, 9)', () => {
     expect(await count('budgets')).toBe(2)
   })
 
-  it('requires a category and both timestamps', async () => {
-    for (const column of ['category', 'created_at', 'updated_at']) {
-      await expect(db('budgets').insert(budget({ [column]: null }))).rejects.toThrow(
-        new RegExp(`NOT NULL constraint failed: budgets.${column}`),
-      )
+  it('stores no note as NULL, whether null or left out', async () => {
+    const [explicit] = await db('budgets').insert(budget({ note: null }))
+    const [left] = await db('budgets').insert(omit(budget({ category: 'Other' }), 'note'))
+
+    for (const id of [explicit, left]) {
+      const row = await db('budgets').where({ id }).first()
+      expect(Object.keys(row).sort()).toEqual(Object.keys(BUDGET_KEYS).sort())
+      expect(row.note).toBeNull()
     }
   })
 })
@@ -485,6 +574,19 @@ describe('bills (#35 option C)', () => {
     await expect(
       db('bills').insert(bill({ account_id: accountId + 1 })),
     ).rejects.toThrow(/FOREIGN KEY constraint failed/)
+  })
+
+  it("accepts a personal bill on a strawb account: the database does not check, the bills route must", async () => {
+    const accountId = await insertAccount({ scope: 'strawb' })
+
+    const [id] = await db('bills').insert(bill({ scope: 'personal', account_id: accountId }))
+
+    expect(
+      await db('bills')
+        .join('accounts', 'accounts.id', 'bills.account_id')
+        .where('bills.id', id)
+        .first('bills.scope as billScope', 'accounts.scope as accountScope'),
+    ).toEqual({ billScope: 'personal', accountScope: 'strawb' })
   })
 
   it("keeps a bill when its account is deleted, with no account", async () => {
@@ -822,13 +924,6 @@ describe('alert_dismissals', () => {
     expect(row).toStrictEqual(full)
   })
 
-  it('refuses a dismissal with no alert id', async () => {
-    for (const row of [{ alert_id: null, dismissed_at: AT }, { dismissed_at: AT }]) {
-      await expect(db('alert_dismissals').insert(row)).rejects.toThrow(/NOT NULL constraint failed: alert_dismissals.alert_id/)
-    }
-    expect(await count('alert_dismissals')).toBe(0)
-  })
-
   it('refuses a duplicate, and an ignored conflict keeps the first dismissed_at', async () => {
     await db('alert_dismissals').insert({ alert_id: 'over_budget:3', dismissed_at: AT })
 
@@ -843,12 +938,6 @@ describe('alert_dismissals', () => {
     expect(await db('alert_dismissals').select()).toEqual([
       { alert_id: 'over_budget:3', dismissed_at: AT },
     ])
-  })
-
-  it('requires dismissed_at', async () => {
-    await expect(
-      db('alert_dismissals').insert({ alert_id: 'over_budget:3', dismissed_at: null }),
-    ).rejects.toThrow(/NOT NULL constraint failed: alert_dismissals.dismissed_at/)
   })
 })
 
