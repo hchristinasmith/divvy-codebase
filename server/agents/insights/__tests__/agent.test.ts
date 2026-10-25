@@ -17,9 +17,8 @@ import { cleanLabel, collectAggregates, type Aggregates } from '../queries.ts'
 // can be made to throw, and `insertInsight` calls are counted (one attempt,
 // no retry).
 //
-// A run's finished_at is the later of the wall clock and the `now` it is
-// given, so a test that reads it fakes the wall clock (Date only) rather
-// than depend on the real date relative to NOW.
+// The run's clock is passed in: `clockAt(NOW)` for a fixed time, or a
+// stepping clock where a test needs started_at and finished_at to differ.
 
 const hooks = vi.hoisted(() => ({
   drafts: null as null | ((drafts: NewInsight[]) => NewInsight[]),
@@ -86,17 +85,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   errors.mockRestore()
-  vi.useRealTimers()
 })
-
-// The wall clock, set relative to NOW. Only Date is faked, so knex and
-// SQLite keep their real timers.
-function wallClockAt(offsetMs: number): Date {
-  vi.useFakeTimers({ toFake: ['Date'] })
-  const at = new Date(NOW.getTime() + offsetMs)
-  vi.setSystemTime(at)
-  return at
-}
 
 afterAll(async () => {
   await connection.destroy()
@@ -108,6 +97,18 @@ const WEEK = '2026-W43' // Monday 2026-10-19 to Sunday 2026-10-25
 const NOW = new Date('2026-10-27T00:00:00.000Z')
 
 const day = (date: string) => `${date}T00:00:00.000Z`
+
+// A clock that always answers `at`.
+const clockAt = (at: Date) => (): Date => at
+
+// A clock that answers `first` on its first call and `then` on every call after.
+const steppingClock = (first: Date, then: Date) => {
+  let calls = 0
+  return vi.fn((): Date => {
+    calls += 1
+    return calls === 1 ? first : then
+  })
+}
 
 const INSIGHT_KEYS = ['body_md', 'chart_spec_json', 'created_at', 'dismissed_at', 'id', 'kind', 'period', 'scope', 'title']
 const RUN_KEYS = [
@@ -220,9 +221,7 @@ const stripCodeSpans = (md: string) => md.replace(/`[^`]*`/g, '')
 describe('a run', () => {
   it('writes the three insights with scope and period, and logs one successful run', async () => {
     await seedLedger()
-    // The wall clock a minute behind NOW: the run still finishes at NOW.
-    wallClockAt(-60_000)
-    const result = await runInsightsAgent('personal', {}, NOW)
+    const result = await runInsightsAgent('personal', {}, clockAt(NOW))
 
     const rows = await insightRows()
     expect(rows).toHaveLength(3)
@@ -266,27 +265,44 @@ describe('a run', () => {
     expect((await collectAggregates('personal', WEEK)).ledgerRowCount).toBe(considered)
   })
 
-  it('finishes at the wall clock when that is after now', async () => {
+  // The clock is read once at start and once at finish (#305). The start
+  // reading is the run's: started_at, every insight's created_at, and the
+  // period when none is given. The finish reading is finished_at.
+  it('reads the clock twice, and finishes at the second reading', async () => {
     await seedLedger()
-    const later = wallClockAt(3_600_000)
-    await runInsightsAgent('personal', {}, NOW)
+    const later = new Date(NOW.getTime() + 3_600_000)
+    const clock = steppingClock(NOW, later)
+    const result = await runInsightsAgent('personal', {}, clock)
+
+    expect(result).toMatchObject({ outcome: 'success', written: 3 })
+    expect(clock).toHaveBeenCalledTimes(2)
     const [run] = await runRows()
     expect(run).toMatchObject({ started_at: NOW.toISOString(), finished_at: later.toISOString() })
+    const rows = await insightRows()
+    expect(rows).toHaveLength(3)
+    for (const r of rows) expect(r.created_at).toBe(NOW.toISOString())
   })
 
-  // #305 pins today's behaviour: finished_at is the later of the wall clock
-  // and `now`, so a wall clock behind `now` leaves finished_at at `now`.
-  it('#305 pins today: finishes at now when the wall clock is before it', async () => {
+  it('reads the clock twice on a failed run too, and finishes it at the second reading', async () => {
     await seedLedger()
-    wallClockAt(-3_600_000)
-    await runInsightsAgent('personal', {}, NOW)
+    hooks.failQuery = true
+    const later = new Date(NOW.getTime() + 3_600_000)
+    const clock = steppingClock(NOW, later)
+    const result = await runInsightsAgent('personal', {}, clock)
+
+    expect(result.outcome).toBe('failed')
+    expect(clock).toHaveBeenCalledTimes(2)
     const [run] = await runRows()
-    expect(run.finished_at).toBe(NOW.toISOString())
+    expect(run).toMatchObject({
+      outcome: 'failed',
+      started_at: NOW.toISOString(),
+      finished_at: later.toISOString(),
+    })
   })
 
   it('takes a weekly trigger and an explicit period', async () => {
     await seedLedger()
-    const result = await runInsightsAgent('personal', { period: '2026-W42', trigger: 'weekly' }, NOW)
+    const result = await runInsightsAgent('personal', { period: '2026-W42', trigger: 'weekly' }, clockAt(NOW))
     expect(result.period).toBe('2026-W42')
     const [run] = await runRows()
     expect(run.trigger).toBe('weekly')
@@ -295,7 +311,7 @@ describe('a run', () => {
 
   it('every number in every stored spec is a number collectAggregates produced', async () => {
     await seedLedger()
-    await runInsightsAgent('personal', {}, NOW)
+    await runInsightsAgent('personal', {}, clockAt(NOW))
     const produced = new Set(numbersIn(await collectAggregates('personal', WEEK)))
     const stored = (await insightRows()).flatMap((r) => numbersIn(specOf(r)))
     expect(stored.length).toBeGreaterThan(0)
@@ -304,7 +320,7 @@ describe('a run', () => {
 
   it('the stored spec numbers equal a hand-written oracle', async () => {
     await seedLedger()
-    await runInsightsAgent('personal', {}, NOW)
+    await runInsightsAgent('personal', {}, clockAt(NOW))
     const rows = await insightRows()
     const byKind = new Map(rows.map((r) => [r.kind, specOf(r)]))
 
@@ -350,7 +366,7 @@ describe('a run', () => {
     // A second Fixture Bakery outflow this week: one merchant of two
     // transactions, and a Cafes change whose two weeks differ.
     await tx('acc_p1', day('2026-10-22'), -750, 'Fixture Bakery', 'Cafes')
-    await runInsightsAgent('personal', {}, NOW)
+    await runInsightsAgent('personal', {}, clockAt(NOW))
     const [pattern, report, chart] = await insightRows()
     expect(pattern.body_md).toBe(
       [
@@ -396,7 +412,7 @@ describe('a run', () => {
 
   it('each stored spec is the fixed chart around its values', async () => {
     await seedLedger()
-    await runInsightsAgent('personal', {}, NOW)
+    await runInsightsAgent('personal', {}, clockAt(NOW))
     const specs = new Map(
       (await insightRows()).map((r) => [r.kind, JSON.parse(r.chart_spec_json ?? 'null') as Record<string, unknown>]),
     )
@@ -537,7 +553,7 @@ describe('scope', () => {
 
   it('a personal run stores nothing derived from strawb rows', async () => {
     await seedLedger()
-    await runInsightsAgent('personal', {}, NOW)
+    await runInsightsAgent('personal', {}, clockAt(NOW))
     const rows = await insightRows()
     expect(rows.length).toBe(3)
     const text = textOf(rows)
@@ -549,7 +565,7 @@ describe('scope', () => {
 
   it('a strawb run stores nothing derived from personal rows', async () => {
     await seedLedger()
-    await runInsightsAgent('strawb', {}, NOW)
+    await runInsightsAgent('strawb', {}, clockAt(NOW))
     const rows = await insightRows()
     expect(rows.length).toBe(3)
     expect(rows.every((r) => r.scope === 'strawb')).toBe(true)
@@ -562,8 +578,8 @@ describe('scope', () => {
 
   it('no stored text holds an account id, a transaction id or a description', async () => {
     await seedLedger()
-    await runInsightsAgent('personal', {}, NOW)
-    await runInsightsAgent('strawb', {}, NOW)
+    await runInsightsAgent('personal', {}, clockAt(NOW))
+    await runInsightsAgent('strawb', {}, clockAt(NOW))
     const rows = await insightRows()
     expect(rows).toHaveLength(6)
     const text = textOf(rows)
@@ -580,7 +596,7 @@ describe('drawings (prd-02 Ruling 15)', () => {
     // Out of Strawb on Tuesday, into personal on Wednesday: a drawing.
     await tx('acc_s1', day('2026-10-20'), -31415, 'Owner Pay Fixture', 'Owner Pay Category')
     await tx('acc_p1', day('2026-10-21'), 31415, 'Owner Pay Fixture', 'Owner Pay Category')
-    const result = await runInsightsAgent('strawb', {}, NOW)
+    const result = await runInsightsAgent('strawb', {}, clockAt(NOW))
     expect(result).toMatchObject({ outcome: 'success', written: 3 })
     // The strawb half is read and considered, though no insight counts it.
     expect(result.considered).toBe(before + 1)
@@ -622,7 +638,7 @@ describe('hostile merchant text', () => {
       await tx('acc_p1', day('2026-10-20'), -cents, name, name)
       await tx('acc_p1', day('2026-10-13'), -100, name, name)
     }
-    const result = await runInsightsAgent('personal', {}, NOW)
+    const result = await runInsightsAgent('personal', {}, clockAt(NOW))
     expect(result).toMatchObject({ outcome: 'success', written: 3, rejected: [] })
 
     const rows = await insightRows()
@@ -681,7 +697,7 @@ describe('a refused spec', () => {
   ])('%s stores nothing from that draft, and the run is logged failed', async (_why, spec, reason, path) => {
     await seedLedger()
     hooks.drafts = swapPattern(spec)
-    const result = await runInsightsAgent('personal', {}, NOW)
+    const result = await runInsightsAgent('personal', {}, clockAt(NOW))
 
     expect(result).toMatchObject({ outcome: 'failed', written: 2, skipped: 0 })
     expect(result.rejected).toStrictEqual([{ kind: 'pattern', reason, path }])
@@ -704,7 +720,7 @@ describe('failure and repeat', () => {
   it('a query that throws logs a failed run with nothing considered or written, and logs its class, not its SQL', async () => {
     await seedLedger()
     hooks.failQuery = true
-    const result = await runInsightsAgent('personal', {}, NOW)
+    const result = await runInsightsAgent('personal', {}, clockAt(NOW))
     expect(result).toMatchObject({ outcome: 'failed', considered: 0, written: 0, skipped: 0, rejected: [] })
     expect(await insightRows()).toEqual([])
     const [run] = await runRows()
@@ -718,9 +734,9 @@ describe('failure and repeat', () => {
 
   it('a second run for the same period writes nothing and skips all three', async () => {
     await seedLedger()
-    await runInsightsAgent('personal', {}, NOW)
+    await runInsightsAgent('personal', {}, clockAt(NOW))
     const before = await insightRows()
-    const again = await runInsightsAgent('personal', {}, NOW)
+    const again = await runInsightsAgent('personal', {}, clockAt(NOW))
     expect(again).toMatchObject({ outcome: 'success', written: 0, skipped: 3 })
     expect(await insightRows()).toStrictEqual(before)
     const runs = await runRows()
@@ -732,10 +748,10 @@ describe('failure and repeat', () => {
 
   it('a dismissed insight is not written again', async () => {
     await seedLedger()
-    await runInsightsAgent('personal', {}, NOW)
+    await runInsightsAgent('personal', {}, clockAt(NOW))
     const [first] = await insightRows()
     expect(await dismissInsight(first.id, NOW)).toBe(true)
-    const again = await runInsightsAgent('personal', {}, NOW)
+    const again = await runInsightsAgent('personal', {}, clockAt(NOW))
     expect(again).toMatchObject({ written: 0, skipped: 3 })
     const rows = await insightRows()
     expect(rows).toHaveLength(3)
@@ -744,8 +760,8 @@ describe('failure and repeat', () => {
 
   it('the next week in the same scope is not a repeat', async () => {
     await seedLedger()
-    const earlier = await runInsightsAgent('personal', { period: '2026-W42' }, NOW)
-    const later = await runInsightsAgent('personal', { period: WEEK }, NOW)
+    const earlier = await runInsightsAgent('personal', { period: '2026-W42' }, clockAt(NOW))
+    const later = await runInsightsAgent('personal', { period: WEEK }, clockAt(NOW))
     expect([earlier, later].map((r) => [r.written, r.skipped])).toEqual([
       [3, 0],
       [3, 0],
@@ -762,14 +778,14 @@ describe('failure and repeat', () => {
 
   it('the same period in the other scope is not a repeat', async () => {
     await seedLedger()
-    await runInsightsAgent('personal', {}, NOW)
-    const strawb = await runInsightsAgent('strawb', {}, NOW)
+    await runInsightsAgent('personal', {}, clockAt(NOW))
+    const strawb = await runInsightsAgent('strawb', {}, clockAt(NOW))
     expect(strawb).toMatchObject({ written: 3, skipped: 0 })
   })
 
   it('an empty week writes nothing and succeeds', async () => {
     await seedAccounts()
-    const result = await runInsightsAgent('personal', {}, NOW)
+    const result = await runInsightsAgent('personal', {}, clockAt(NOW))
     expect(result).toMatchObject({ outcome: 'success', considered: 0, written: 0, skipped: 0, rejected: [] })
     expect(await insightRows()).toEqual([])
     const [run] = await runRows()
@@ -782,7 +798,7 @@ describe('failure and repeat', () => {
     ['a sync trigger', 'personal', { trigger: 'sync' }, 'trigger must be manual or weekly'],
   ])('%s is refused before any run is logged', async (_why, scope, options, message) => {
     await expect(
-      runInsightsAgent(scope as 'personal', options as { period?: string }, NOW),
+      runInsightsAgent(scope as 'personal', options as { period?: string }, clockAt(NOW)),
     ).rejects.toThrow(message)
     expect(await runRows()).toEqual([])
   })
@@ -808,7 +824,7 @@ describe('what a run touches', () => {
       return out
     }
     const before = await snapshot()
-    await runInsightsAgent('personal', {}, NOW)
+    await runInsightsAgent('personal', {}, clockAt(NOW))
     expect(await snapshot()).toStrictEqual(before)
     expect(await insightRows()).toHaveLength(3)
   })
@@ -823,7 +839,7 @@ describe('what a run touches', () => {
       }
       await tx('acc_p1', day('2026-10-13'), -(10 + i), name, name)
     }
-    const result = await runInsightsAgent('personal', {}, NOW)
+    const result = await runInsightsAgent('personal', {}, clockAt(NOW))
     expect(result).toMatchObject({ outcome: 'success', written: 3 })
     const rows = await insightRows()
     const counts = new Map<string, { rows: number; keys: number; categories: number }>()
