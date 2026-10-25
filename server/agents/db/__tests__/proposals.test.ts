@@ -304,6 +304,45 @@ describe('insertProposal', () => {
     expect(result).toStrictEqual({ inserted: true, id: expect.any(Number) })
     expect((await rows())[0].reason).toBe(reason)
   })
+
+  // #329 regression: pins old behaviour; the build replaces this. Today
+  // current_category has no cap and no type check, so any length and any type
+  // reaches the column.
+  it('accepts a current_category of 100,000 code points and stores it whole', async () => {
+    const txId = await transaction('a')
+    const current = 'a'.repeat(100_000)
+    expect(Array.from(current)).toHaveLength(100_000)
+
+    const result = await insertProposal(proposal(txId, { current_category: current }), NOW)
+    expect(result).toStrictEqual({ inserted: true, id: expect.any(Number) })
+    expect((await rows())[0].current_category).toBe(current)
+  })
+
+  // #329 regression: pins old behaviour; the build replaces this.
+  it('accepts a non-string current_category (the number 42) and stores it', async () => {
+    const txId = await transaction('a')
+
+    const result = await insertProposal(
+      proposal(txId, { current_category: 42 as unknown as string }),
+      NOW,
+    )
+    expect(result).toStrictEqual({ inserted: true, id: expect.any(Number) })
+    expect((await rows())[0].current_category).toBe('42') // the TEXT column's affinity turns the number into text
+  })
+
+  // #330 regression: pins old behaviour; the build replaces this. A reason made
+  // only of invisible characters passes the blank check and is stored.
+  it.each([
+    ['U+3164 only', '\u3164'],
+    ['U+200B only', '\u200b'],
+    ['U+3164 and spaces', '\u3164 \u3164'],
+  ])('stores a reason of %s', async (_, reason) => {
+    const txId = await transaction('a')
+
+    const result = await insertProposal(proposal(txId, { reason }), NOW)
+    expect(result).toStrictEqual({ inserted: true, id: expect.any(Number) })
+    expect((await rows())[0].reason).toBe(reason)
+  })
 })
 
 describe('setStatus', () => {
