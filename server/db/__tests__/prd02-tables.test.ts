@@ -941,7 +941,9 @@ describe('targets and rollback (Ruling 6, Done-when 2)', () => {
     expect(await db('category_corrections').orderBy('id')).toStrictEqual(correctionsBefore)
     // Each row is compared on the columns it had before `latest`: a later
     // migration may add `transactions` columns, and the TRANSACTION_COLUMNS
-    // pin is what catches a column appearing or disappearing.
+    // pin (transactionColumns.ts, asserted in prd01-schema.test.ts and
+    // transactions.test.ts) is what catches a column appearing or
+    // disappearing.
     const transactionsAfter: Row[] = await db('transactions').orderBy('id')
     expect(
       transactionsAfter.map((row, i) =>

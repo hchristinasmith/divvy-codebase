@@ -11,8 +11,9 @@
 // NULL when Akahu stops sending one (#155). `posted_date` is stored exactly as
 // Akahu sends it, ISO-8601 UTC text like `date`, `created_at` and
 // `updated_at` (20261024100001_accounts.js), not cut down to YYYY-MM-DD.
-// Sync compares the stored text with the incoming text on every run, so any
-// reformatting would read as a change on every run.
+// Sync compares the stored text with the incoming text on every run, so a
+// value stored in any other form than the one sync sends would read as a
+// change on every run.
 //
 // No backfill. A row already stored has NULL in both until the next sync
 // sees it, and sync writes them back as an ordinary change.
@@ -23,7 +24,9 @@
 // PRAGMA foreign_keys = OFF is ignored, and the rebuild cascades into
 // `category_corrections` and deletes every correction. So `up` only adds
 // columns (a native ADD COLUMN) and `down` uses native ALTER TABLE ... DROP
-// COLUMN (SQLite 3.35+), never knex's `dropColumn`.
+// COLUMN (SQLite 3.35+), never knex's `dropColumn`. Native DROP COLUMN
+// refuses a column an index names, so if a later change indexes either
+// column, `down` must drop that index first or it errors.
 //
 // Rolling back drops both columns and the values in them. The next sync
 // writes them again for the rows Akahu returns; older rows stay NULL.

@@ -2,7 +2,9 @@
 // `transactions.merchant_nzbn`. The migration only adds and drops columns
 // natively, so these tests pin that it never rebuilds `transactions`: a
 // rebuild would reset the AUTOINCREMENT counter, move the table to a new
-// root page, drop its index and cascade into `category_corrections`.
+// root page and cascade into `category_corrections`. The index check only
+// catches a hand-written rebuild that forgets the index: knex's rebuild
+// recreates it.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import knex, { Knex } from 'knex'
 import config from '../../knexfile.js'
