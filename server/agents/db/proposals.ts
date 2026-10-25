@@ -16,7 +16,12 @@
 // reason carries merchant text. So does a refused write: knex puts the SQL,
 // bound values and all, in its error message, and `scrubbed` rethrows it as
 // SQLite's own words alone. A reason past its length cap is a refused input
-// too, as a title or body_md is in insights.ts.
+// too, as a title or body_md is in insights.ts, and so is a reason with
+// nothing visible in it.
+//
+// current_category is capped at the column's width, in code points, and kept
+// raw, never trimmed or normalised: the accept route's stale check compares
+// it with transactions.category as stored.
 import {
   PROPOSAL_ORIGINS,
   parseProposedCategory,
@@ -43,6 +48,16 @@ export type InsertProposalResult =
 // Length cap, counted in code points, not UTF-16 units: a non-BMP character
 // is one code point and two units.
 const REASON_MAX_LENGTH = 2_000
+const CURRENT_CATEGORY_MAX_LENGTH = 255
+
+// A private copy of insights.ts's notBlank, not an export: a lift is a
+// separate issue. Blank means nothing visible, so whitespace and default-
+// ignorable characters are removed before the test.
+function notBlank(value: unknown, field: string): void {
+  if (typeof value !== 'string' || value.replace(/[\s\p{DI}]/gu, '') === '') {
+    throw new Error(`${field} must not be blank`)
+  }
+}
 
 function atMostLength(value: string, field: string, max: number): void {
   if (Array.from(value).length > max) {
@@ -71,12 +86,16 @@ export async function insertProposal(
   if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
     throw new Error('confidence must be a number from 0 to 1')
   }
-  if (typeof proposal.reason !== 'string' || proposal.reason.trim() === '') {
-    throw new Error('reason must not be blank')
-  }
+  notBlank(proposal.reason, 'reason')
   atMostLength(proposal.reason, 'reason', REASON_MAX_LENGTH)
   if (!(PROPOSAL_ORIGINS as readonly unknown[]).includes(proposal.origin)) {
     throw new Error('origin is not a known proposal origin')
+  }
+  if (proposal.current_category !== null && typeof proposal.current_category !== 'string') {
+    throw new Error('current_category must be a string or null')
+  }
+  if (proposal.current_category !== null) {
+    atMostLength(proposal.current_category, 'current_category', CURRENT_CATEGORY_MAX_LENGTH)
   }
 
   const row: Omit<CategoryProposal, 'id'> = {

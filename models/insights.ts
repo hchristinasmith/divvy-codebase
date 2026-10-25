@@ -330,17 +330,14 @@ function onlyKeys(obj: PlainObject, allowed: ReadonlySet<string>, path: string):
   }
 }
 
-const INVISIBLE = new Set([0x00ad, 0x034f, 0x061c, 0x180e, 0xfeff])
+// Invisible means the Unicode property Default_Ignorable_Code_Point, plus
+// the C0 and C1 controls and DEL, which the property leaves out (#331). The
+// rule is the property, not a list of code points, so a character the
+// property covers cannot be missed by a list that forgot it.
+const DEFAULT_IGNORABLE = /\p{DI}/u
 
-function isInvisible(code: number): boolean {
-  return (
-    code <= 0x1f ||
-    (code >= 0x7f && code <= 0x9f) ||
-    (code >= 0x200b && code <= 0x200f) ||
-    (code >= 0x202a && code <= 0x202e) ||
-    (code >= 0x2060 && code <= 0x2069) ||
-    INVISIBLE.has(code)
-  )
+function isInvisible(char: string, code: number): boolean {
+  return code <= 0x1f || (code >= 0x7f && code <= 0x9f) || DEFAULT_IGNORABLE.test(char)
 }
 
 // Embedding, override and isolate controls: they reorder how a label reads,
@@ -356,7 +353,7 @@ function checkText(value: string, path: string): string {
   for (const char of folded) {
     const code = char.codePointAt(0) ?? 0
     if (isBidiControl(code)) reject('bidi_in_string', path)
-    if (isInvisible(code) || /\s/.test(char)) continue
+    if (isInvisible(char, code) || /\s/.test(char)) continue
     compact += char
   }
   // A browser reads a leading `\\` or `/\` as `//`.

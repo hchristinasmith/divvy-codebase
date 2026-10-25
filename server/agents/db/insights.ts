@@ -13,8 +13,9 @@
 // ignored, and a read row has no `mermaid` key.
 //
 // A refused input throws an error naming the field, never its value, and a
-// title or body_md past its length cap is a refused input. A refused write
-// throws SQLite's words without the row (`scrubbed`, in ./scrubbed.ts).
+// title or body_md past its length cap is a refused input, and so is a
+// title, body_md or period with nothing visible in it. A refused write throws
+// SQLite's words without the row (`scrubbed`, in ./scrubbed.ts).
 import {
   INSIGHT_KINDS,
   parseChartSpecJson,
@@ -51,8 +52,10 @@ export type InsertInsightResult =
 
 type InsightRow = Omit<Insight, 'mermaid'>
 
+// Blank means nothing visible: whitespace and default-ignorable characters
+// are removed before the test, and the value is stored exactly as given.
 function notBlank(value: unknown, field: string): void {
-  if (typeof value !== 'string' || value.trim() === '') {
+  if (typeof value !== 'string' || value.replace(/[\s\p{DI}]/gu, '') === '') {
     throw new Error(`${field} must not be blank`)
   }
 }

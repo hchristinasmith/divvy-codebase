@@ -188,6 +188,17 @@ describe('insertInsight', () => {
     ['blank title', { title: '  ' }, /^title must not be blank$/],
     ['blank body_md', { body_md: '' }, /^body_md must not be blank$/],
     ['blank period', { period: '\t' }, /^period must not be blank$/],
+    ['title U+3164 only', { title: '\u3164' }, /^title must not be blank$/],
+    ['body_md U+200B only', { body_md: '\u200b' }, /^body_md must not be blank$/],
+    ['period U+3164 and spaces', { period: '\u3164 \u3164' }, /^period must not be blank$/],
+    ['title tag characters (non-BMP)', { title: '\u{E0041}\u{E0042}' }, /^title must not be blank$/],
+    ['body_md a variation selector', { body_md: '\ufe0f' }, /^body_md must not be blank$/],
+    ['period U+200B, space, U+3164 and tab', { period: '\u200b \u3164\t' }, /^period must not be blank$/],
+    // The blank check runs before the cap: a blank value over the cap is blank.
+    ['title 201 spaces', { title: ' '.repeat(201) }, /^title must not be blank$/],
+    ['title 201 U+200B', { title: '\u200b'.repeat(201) }, /^title must not be blank$/],
+    ['body_md 20,001 spaces', { body_md: ' '.repeat(20_001) }, /^body_md must not be blank$/],
+    ['title 42', { title: 42 as unknown as string }, /^title must not be blank$/],
   ]
 
   it.each(BAD)('throws on a bad %s, and writes nothing', async (_, fields, message) => {
@@ -256,6 +267,42 @@ describe('insertInsight', () => {
     expect(error).toBeInstanceOf(Error)
     expect((error as Error).message).toBe(`${field} must be at most ${max} characters`)
     expect((error as Error).message).not.toContain(sentinel)
+  })
+
+  // The blank check counts visible characters only: a value made of default-
+  // ignorable characters and whitespace is refused like an empty one.
+  const BLANK_LIKE: [field: 'title' | 'body_md' | 'period', name: string, text: string][] = (
+    ['title', 'body_md', 'period'] as const
+  ).flatMap((field): [typeof field, string, string][] => [
+    [field, 'U+3164', '\u3164'],
+    [field, 'U+200B', '\u200b'],
+    [field, 'tag characters (non-BMP)', '\u{E0041}\u{E0042}'],
+    [field, 'a variation selector', '\ufe0f'],
+    [field, 'U+200B, space, U+3164 and tab', '\u200b \u3164\t'],
+  ])
+
+  it.each(BLANK_LIKE)('refuses a %s made only of %s, and writes nothing', async (field, _, text) => {
+    await expect(insertInsight(insight({ [field]: text }), NOW)).rejects.toThrow(
+      new RegExp(`^${field} must not be blank$`),
+    )
+    expect(await storedRows()).toEqual([])
+  })
+
+  // Visible text keeps its invisible characters as given: only a value with
+  // nothing visible is refused, and nothing is stripped.
+  const KEPT: [field: 'title' | 'body_md' | 'period', text: string][] = [
+    ['title', 'Moved\u3164 twice'],
+    ['body_md', 'Most\u200b of the week went to **Fixture Bakery**.'],
+    ['period', '2026-W43\u3164'],
+    ['title', '\u200bx\u200b'],
+  ]
+
+  it.each(KEPT)('stores a %s with visible text among invisible characters, unchanged', async (field, text) => {
+    const result = await insertInsight(insight({ [field]: text }), NOW)
+    expect(result).toStrictEqual({ ok: true, id: expect.any(Number) })
+
+    const [stored] = await storedRows()
+    expect(stored[field]).toBe(text)
   })
 })
 

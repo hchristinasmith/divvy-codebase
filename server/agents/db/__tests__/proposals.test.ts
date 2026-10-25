@@ -192,6 +192,16 @@ describe('insertProposal', () => {
     ],
     ['reason empty', { reason: '' }, /^reason must not be blank$/],
     ['reason spaces', { reason: '   ' }, /^reason must not be blank$/],
+    ['reason U+3164 only', { reason: '\u3164' }, /^reason must not be blank$/],
+    ['reason U+200B only', { reason: '\u200b' }, /^reason must not be blank$/],
+    ['reason U+3164 and spaces', { reason: '\u3164 \u3164' }, /^reason must not be blank$/],
+    ['reason tag characters (non-BMP)', { reason: '\u{E0041}\u{E0042}' }, /^reason must not be blank$/],
+    ['reason a variation selector', { reason: '\ufe0f' }, /^reason must not be blank$/],
+    ['reason U+200B, space, U+3164 and tab', { reason: '\u200b \u3164\t' }, /^reason must not be blank$/],
+    // The blank check runs before the cap: a blank value over the cap is blank.
+    ['reason 2,001 spaces', { reason: ' '.repeat(2_001) }, /^reason must not be blank$/],
+    ['reason 2,001 U+200B', { reason: '\u200b'.repeat(2_001) }, /^reason must not be blank$/],
+    ['reason 42', { reason: 42 as unknown as string }, /^reason must not be blank$/],
     [
       'origin claude',
       { origin: 'claude' as unknown as NewProposal['origin'] },
@@ -299,6 +309,116 @@ describe('insertProposal', () => {
     const reason = 'ﷺ'.repeat(200)
     expect(Array.from(reason)).toHaveLength(200)
     expect(Array.from(reason.normalize('NFKC'))).toHaveLength(3_600)
+
+    const result = await insertProposal(proposal(txId, { reason }), NOW)
+    expect(result).toStrictEqual({ inserted: true, id: expect.any(Number) })
+    expect((await rows())[0].reason).toBe(reason)
+  })
+
+  // current_category is the raw category the transaction had when the proposal
+  // was made. It is capped at the column's 255 code points and never trimmed,
+  // normalised or blank-checked: the accept route compares it with the raw
+  // transactions.category (#329).
+  const CURRENT_SENTINEL = 'Fixture Category 9042'
+  const CURRENT_CAP = /^current_category must be at most 255 characters$/
+
+  it('accepts a current_category of exactly 255 code points, and stores it whole', async () => {
+    const txId = await transaction('a')
+    const current = 'a'.repeat(255)
+    expect(Array.from(current)).toHaveLength(255)
+
+    const result = await insertProposal(proposal(txId, { current_category: current }), NOW)
+    expect(result).toStrictEqual({ inserted: true, id: expect.any(Number) })
+    expect((await rows())[0].current_category).toBe(current)
+  })
+
+  // Non-BMP characters are two UTF-16 units each: 255 of them are 510 units,
+  // and a `.length` cap would refuse this value.
+  it('counts current_category in code points, not UTF-16 units: 255 non-BMP code points (510 units) is accepted', async () => {
+    const txId = await transaction('a')
+    const current = '\u{20000}'.repeat(255)
+    expect(Array.from(current)).toHaveLength(255)
+    expect(current.length).toBe(510)
+
+    const result = await insertProposal(proposal(txId, { current_category: current }), NOW)
+    expect(result).toStrictEqual({ inserted: true, id: expect.any(Number) })
+    expect((await rows())[0].current_category).toBe(current)
+  })
+
+  it('refuses a current_category of 256 code points, naming the field and the cap, and writes nothing', async () => {
+    const txId = await transaction('a')
+    const attempt = insertProposal(proposal(txId, { current_category: 'a'.repeat(256) }), NOW)
+    await expect(attempt).rejects.toThrow(CURRENT_CAP)
+    expect(await rows()).toEqual([])
+  })
+
+  // The refusal never echoes the value, so the message must not hold the sentinel.
+  it('refuses a 256-code-point current_category holding a sentinel, with a message that does not contain it', async () => {
+    const txId = await transaction('a')
+    const current = CURRENT_SENTINEL + 'a'.repeat(256 - Array.from(CURRENT_SENTINEL).length)
+    expect(Array.from(current)).toHaveLength(256)
+
+    const attempt = insertProposal(proposal(txId, { current_category: current }), NOW)
+    await expect(attempt).rejects.toThrow(CURRENT_CAP)
+    await expect(attempt).rejects.not.toThrow(CURRENT_SENTINEL)
+    expect(await rows()).toEqual([])
+  })
+
+  it('refuses a current_category of 100,000 code points, and writes nothing', async () => {
+    const txId = await transaction('a')
+    const attempt = insertProposal(proposal(txId, { current_category: 'a'.repeat(100_000) }), NOW)
+    await expect(attempt).rejects.toThrow(CURRENT_CAP)
+    expect(await rows()).toEqual([])
+  })
+
+  const NOT_STRINGS: [label: string, value: unknown][] = [
+    ['the number 42', 42],
+    ['undefined', undefined],
+    ['an object', {}],
+    ['true', true],
+  ]
+  it.each(NOT_STRINGS)(
+    'refuses current_category as %s, naming the field and the type, and writes nothing',
+    async (_, value) => {
+      const txId = await transaction('a')
+      const attempt = insertProposal(
+        proposal(txId, { current_category: value as unknown as string }),
+        NOW,
+      )
+      await expect(attempt).rejects.toThrow(/^current_category must be a string or null$/)
+      expect(await rows()).toEqual([])
+    },
+  )
+
+  it('stores a null current_category as null', async () => {
+    const txId = await transaction('a')
+    await inserted(proposal(txId, { current_category: null }))
+    expect((await rows())[0].current_category).toBeNull()
+  })
+
+  // Raw: leading and trailing spaces and an invisible character are kept as given.
+  it('stores a current_category with spaces and U+3164 byte-for-byte unchanged', async () => {
+    const txId = await transaction('a')
+    const current = '  \u3164 Bakeries \u3164  '
+    await inserted(proposal(txId, { current_category: current }))
+    expect((await rows())[0].current_category).toBe(current)
+  })
+
+  // The cap counts the value as given: the trailing space is the 256th code point.
+  it('refuses 255 code points followed by a space, counting the space: the cap is on the raw value', async () => {
+    const txId = await transaction('a')
+    const attempt = insertProposal(proposal(txId, { current_category: 'a'.repeat(255) + ' ' }), NOW)
+    await expect(attempt).rejects.toThrow(CURRENT_CAP)
+    expect(await rows()).toEqual([])
+  })
+
+  // A reason with visible text keeps its invisible characters as given: the
+  // blank check refuses only a value with nothing visible, and never strips.
+  it.each([
+    ['visible text and U+3164', 'Moved\u3164 twice'],
+    ['one visible character among U+200B', '\u200bx\u200b'],
+  ])('stores a reason of %s byte-for-byte unchanged', async (_, reason) => {
+    const txId = await transaction('a')
 
     const result = await insertProposal(proposal(txId, { reason }), NOW)
     expect(result).toStrictEqual({ inserted: true, id: expect.any(Number) })
