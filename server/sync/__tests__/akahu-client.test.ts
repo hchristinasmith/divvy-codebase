@@ -5,7 +5,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AkahuError, createAkahuClient, MAX_PAGES } from '../akahu-client.ts'
 import type { AkahuClient, AkahuFetch, AkahuGetInit } from '../akahu-client.ts'
-import type { PendingTransaction, SettledTransaction } from '../types.ts'
+import type {
+  AkahuAccount,
+  PendingTransaction,
+  SettledTransaction,
+} from '../types.ts'
 
 // Issue #20 (prd-01 w1): the Akahu client returns typed, cents-converted
 // accounts and transactions, follows the cursor to the end, and never lets a
@@ -172,11 +176,16 @@ const META_KEYS = [
 const CONVERSION_KEYS = ['amount_cents', 'currency', 'rate']
 
 const ACCOUNT_KEYS = [
+  'attributes',
+  'authorisation_id',
   'balance_available_cents',
   'balance_current_cents',
   'balance_limit_cents',
   'connection_id',
+  'connection_logo',
   'connection_name',
+  'connection_type',
+  'credentials_id',
   'currency',
   'formatted_account',
   'id',
@@ -451,6 +460,17 @@ describe('accounts', () => {
       status: 'ACTIVE',
       connection_id: 'conn_fixture0001',
       connection_name: 'Example Bank',
+      connection_type: 'classic',
+      connection_logo: 'https://example.com/fixture-bank-logo.png',
+      authorisation_id: 'auth_fixture0001',
+      credentials_id: 'creds_fixture0001',
+      attributes: [
+        'PAYMENT_FROM',
+        'PAYMENT_TO',
+        'TRANSACTIONS',
+        'TRANSFER_FROM',
+        'TRANSFER_TO',
+      ],
       formatted_account: 'XX-XXXX-XXXXXXX-XX',
       currency: 'NZD',
       balance_current_cents: 123456,
@@ -498,6 +518,11 @@ describe('accounts', () => {
       refreshed_balance: null,
       refreshed_meta: null,
       refreshed_transactions: null,
+      connection_type: null,
+      connection_logo: null,
+      authorisation_id: null,
+      credentials_id: null,
+      attributes: [],
     })
   })
 
@@ -1124,6 +1149,171 @@ describe('full fields (#155, prd-01 Ruling 4)', () => {
       message:
         'pending transaction.meta.conversion.currency is not a currency code',
     })
+  })
+})
+
+describe('account full fields (#155, prd-01 Ruling 4)', () => {
+  /**
+   * A bare account with `top` raw JSON members added to the item and
+   * `connection` raw JSON members added to its connection.
+   */
+  function accountWith({ top = '', connection = '' }): string {
+    return `{"_id":"acc_fixture_full_inline","name":"Fixture Full","type":"SAVINGS","status":"ACTIVE","connection":{"_id":"conn_fixture_full","name":"Example Bank"${connection}},"balance":{"current":10}${top}}`
+  }
+
+  async function onlyAccount(members: {
+    top?: string
+    connection?: string
+  }): Promise<AkahuAccount> {
+    const [account] = await clientWith([
+      page([accountWith(members)]),
+    ]).client.listAccounts()
+    return account
+  }
+
+  it('maps the attributes, connection type and logo, and authorisation ids of every fixture account', async () => {
+    const { client } = clientWith([fixture('akahu-accounts.json')])
+
+    const accounts = await client.listAccounts()
+
+    const shared = {
+      connection_type: 'classic',
+      connection_logo: 'https://example.com/fixture-bank-logo.png',
+      authorisation_id: 'auth_fixture0001',
+      credentials_id: 'creds_fixture0001',
+    }
+    expect(
+      accounts.map((a) => ({
+        id: a.id,
+        attributes: a.attributes,
+        connection_type: a.connection_type,
+        connection_logo: a.connection_logo,
+        authorisation_id: a.authorisation_id,
+        credentials_id: a.credentials_id,
+      })),
+    ).toEqual([
+      {
+        id: 'acc_fixture0001everyday',
+        attributes: [
+          'PAYMENT_FROM',
+          'PAYMENT_TO',
+          'TRANSACTIONS',
+          'TRANSFER_FROM',
+          'TRANSFER_TO',
+        ],
+        ...shared,
+      },
+      {
+        id: 'acc_fixture0002savings',
+        attributes: ['TRANSACTIONS', 'TRANSFER_FROM', 'TRANSFER_TO'],
+        ...shared,
+      },
+      {
+        id: 'acc_fixture0003credit',
+        attributes: ['PAYMENT_TO', 'TRANSACTIONS', 'TRANSFER_TO'],
+        ...shared,
+      },
+    ])
+  })
+
+  it('keeps the attributes in the order Akahu sent them, not sorted', async () => {
+    // The fixture's lists are already sorted, so this one is not.
+    const account = await onlyAccount({
+      top: ',"attributes":["TRANSFER_TO","PAYMENT_FROM","TRANSACTIONS"]',
+    })
+
+    expect(account.attributes).toEqual([
+      'TRANSFER_TO',
+      'PAYMENT_FROM',
+      'TRANSACTIONS',
+    ])
+  })
+
+  it('keeps an attribute it has not seen before', async () => {
+    const account = await onlyAccount({
+      top: ',"attributes":["FIXTURE_NEW_ATTRIBUTE"]',
+    })
+
+    expect(account.attributes).toEqual(['FIXTURE_NEW_ATTRIBUTE'])
+  })
+
+  it.each([
+    ['absent', ''],
+    ['null', ',"attributes":null'],
+    ['an empty list', ',"attributes":[]'],
+  ])('gives an empty list when the attributes are %s', async (_label, top) => {
+    const account = await onlyAccount({ top })
+
+    expect(account.attributes).toEqual([])
+  })
+
+  // A bare number reaches the client as its text and is kept verbatim, as
+  // for every optional text field.
+  it('keeps a bare number in the attributes as its text', async () => {
+    const account = await onlyAccount({ top: ',"attributes":[7]' })
+
+    expect(account.attributes).toEqual(['7'])
+  })
+
+  it.each([
+    ['text', '"TRANSACTIONS"'],
+    ['an object', '{}'],
+    ['a list holding an object', '["TRANSACTIONS",{}]'],
+    ['a list holding null', '["TRANSACTIONS",null]'],
+    ['a list holding a list', '[["TRANSACTIONS"]]'],
+  ])('rejects attributes that are %s, naming the field', async (_label, attributes) => {
+    const { client } = clientWith([
+      page([accountWith({ top: `,"attributes":${attributes}` })]),
+    ])
+
+    await expect(client.listAccounts()).rejects.toMatchObject({
+      code: 'bad_response',
+      message: 'account.attributes is not a list of text',
+    })
+  })
+
+  it.each([
+    [
+      'connection.connection_type',
+      { connection: ',"connection_type":true' },
+      'account.connection.connection_type is not text',
+    ],
+    [
+      'connection.logo',
+      { connection: ',"logo":true' },
+      'account.connection.logo is not text',
+    ],
+    [
+      '_authorisation',
+      { top: ',"_authorisation":true' },
+      'account._authorisation is not text',
+    ],
+    [
+      '_credentials',
+      { top: ',"_credentials":true' },
+      'account._credentials is not text',
+    ],
+  ])('rejects a %s that is not text', async (_label, members, message) => {
+    const { client } = clientWith([page([accountWith(members)])])
+
+    await expect(client.listAccounts()).rejects.toMatchObject({
+      code: 'bad_response',
+      message,
+    })
+  })
+
+  it('names the path, never the value, in a rejection', async () => {
+    const { client } = clientWith([
+      page([
+        accountWith({
+          top: ',"attributes":["fixture-attribute-sentinel",{"fixture":"value-sentinel"}]',
+        }),
+      ]),
+    ])
+
+    const error = await rejection(client.listAccounts())
+
+    expect(error.message).not.toContain('sentinel')
   })
 })
 

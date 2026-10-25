@@ -134,6 +134,27 @@ function optionalText(
 }
 
 /**
+ * Absent or null is an empty list; a list of text is kept in the order sent,
+ * each item verbatim. Anything else, or a list holding anything but text, is
+ * refused. No item's value is checked: the set is Akahu's and open.
+ */
+function optionalTextList(
+  record: JsonRecord,
+  key: string,
+  where: string,
+): string[] {
+  const value = record[key]
+  if (value === undefined || value === null) return []
+  if (
+    !Array.isArray(value) ||
+    !value.every((item): item is string => typeof item === 'string')
+  ) {
+    throw badResponse(`${where}.${key} is not a list of text`)
+  }
+  return [...value]
+}
+
+/**
  * Akahu's decimal dollar text as integer cents (prd-01 Ruling 3).
  * `exactAmountToCents` already returns 0, not -0, for a negative zero.
  */
@@ -193,9 +214,10 @@ const MAX_RATE_LENGTH = 30
 
 /**
  * A conversion rate as Akahu's decimal text (issue #155): a non-negative
- * plain decimal, no sign, exponent or leading zero, so the number sync makes
- * of it is the number Akahu wrote. It is a rate, not money, so it is not
- * cents, and it is never turned into a number here.
+ * plain decimal, no sign, exponent or leading zero. It is a rate, not money,
+ * so it is not cents, and it is never turned into a number here. Sync turns
+ * it into the nearest double to that text, which may not be the decimal
+ * Akahu wrote exactly, but the same text always gives the same double.
  */
 function optionalRate(
   record: JsonRecord,
@@ -234,6 +256,15 @@ function mapAccount(value: unknown): AkahuAccount {
     status: requiredKey(item, 'status', where),
     connection_id: requiredKey(connection, '_id', `${where}.connection`),
     connection_name: requiredText(connection, 'name', `${where}.connection`),
+    connection_type: optionalText(
+      connection,
+      'connection_type',
+      `${where}.connection`,
+    ),
+    connection_logo: optionalText(connection, 'logo', `${where}.connection`),
+    authorisation_id: optionalText(item, '_authorisation', where),
+    credentials_id: optionalText(item, '_credentials', where),
+    attributes: optionalTextList(item, 'attributes', where),
     formatted_account: optionalText(item, 'formatted_account', where),
     currency: optionalText(balance, 'currency', `${where}.balance`),
     balance_current_cents: requiredCents(

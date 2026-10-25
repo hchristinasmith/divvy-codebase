@@ -112,6 +112,12 @@ interface AccountAkahuFields {
   status: string
   connection_id: string
   connection_name: string
+  connection_type: string | null
+  connection_logo: string | null
+  authorisation_id: string | null
+  credentials_id: string | null
+  /** Akahu's attributes as JSON text; never NULL (the column is NOT NULL). */
+  attributes: string
   currency: string | null
   balance_cents: number
   available_balance_cents: number | null
@@ -129,6 +135,11 @@ function accountFields(account: AkahuAccount): AccountAkahuFields {
     status: account.status,
     connection_id: account.connection_id,
     connection_name: account.connection_name,
+    connection_type: account.connection_type,
+    connection_logo: account.connection_logo,
+    authorisation_id: account.authorisation_id,
+    credentials_id: account.credentials_id,
+    attributes: JSON.stringify(account.attributes),
     currency: account.currency,
     balance_cents: account.balance_current_cents,
     available_balance_cents: account.balance_available_cents,

@@ -400,3 +400,171 @@ describe('the fields #155 adds', () => {
     ])
   })
 })
+
+// The account fields #155 adds: attributes, the connection's type and logo,
+// and Akahu's authorisation and credentials ids.
+
+const ACCOUNT_FULL_COLUMNS = [
+  'attributes',
+  'authorisation_id',
+  'connection_logo',
+  'connection_type',
+  'credentials_id',
+] as const
+
+type AccountFullColumns = Record<(typeof ACCOUNT_FULL_COLUMNS)[number], unknown>
+
+/** What a fixture account's connection and authorisation carry. */
+const FIXTURE_CONNECTION = {
+  authorisation_id: 'auth_fixture0001',
+  connection_logo: 'https://example.com/fixture-bank-logo.png',
+  connection_type: 'classic',
+  credentials_id: 'creds_fixture0001',
+}
+
+const FIXTURE_ACCOUNTS: Record<string, AccountFullColumns> = {
+  acc_fixture0001everyday: {
+    attributes:
+      '["PAYMENT_FROM","PAYMENT_TO","TRANSACTIONS","TRANSFER_FROM","TRANSFER_TO"]',
+    ...FIXTURE_CONNECTION,
+  },
+  acc_fixture0002savings: {
+    attributes: '["TRANSACTIONS","TRANSFER_FROM","TRANSFER_TO"]',
+    ...FIXTURE_CONNECTION,
+  },
+  acc_fixture0003credit: {
+    attributes: '["PAYMENT_TO","TRANSACTIONS","TRANSFER_TO"]',
+    ...FIXTURE_CONNECTION,
+  },
+}
+
+const NO_ACCOUNT_FIELDS: AccountFullColumns = {
+  attributes: '[]',
+  authorisation_id: null,
+  connection_logo: null,
+  connection_type: null,
+  credentials_id: null,
+}
+
+async function accountColumns(): Promise<Record<string, AccountFullColumns>> {
+  const rows: (AccountFullColumns & { akahu_id: string })[] = await db(
+    'accounts',
+  )
+    .orderBy('akahu_id')
+    .select('akahu_id', ...ACCOUNT_FULL_COLUMNS)
+  return Object.fromEntries(
+    rows.map(({ akahu_id, ...columns }) => [akahu_id, columns]),
+  )
+}
+
+/**
+ * `text` with every match of `pattern` removed; throws unless there are
+ * exactly `count`, so a fixture edit cannot make the removal a no-op.
+ */
+function withoutEvery(text: string, pattern: RegExp, count: number): string {
+  const found = text.match(pattern)?.length ?? 0
+  if (found !== count) {
+    throw new Error(`expected ${count} of ${String(pattern)}, found ${found}`)
+  }
+  return text.replace(pattern, '')
+}
+
+/** The accounts fixture with none of the fields #155 adds for accounts. */
+function accountsWithoutFullFields(): string {
+  let text = fixture('akahu-accounts.json')
+  const all = 3
+  text = withoutEvery(text, /\s*"_authorisation": "[^"]*",/g, all)
+  text = withoutEvery(text, /\s*"_credentials": "[^"]*",/g, all)
+  text = withoutEvery(text, /\s*"attributes": \[[^\]]*\],/g, all)
+  text = withoutEvery(text, /\s*"connection_type": "[^"]*",/g, all)
+  text = withoutEvery(
+    text,
+    /\s*"logo": "https:\/\/example\.com\/fixture-bank-logo\.png",/g,
+    all,
+  )
+  return text
+}
+
+describe('the account fields #155 adds', () => {
+  it('stores the attributes, connection and authorisation of every fixture account', async () => {
+    const result = await syncAt(0)
+
+    expect(result.outcome).toBe('success')
+    const stored = await accountColumns()
+    for (const columns of Object.values(stored)) {
+      expect(Object.keys(columns).sort()).toEqual(
+        [...ACCOUNT_FULL_COLUMNS].sort(),
+      )
+    }
+    expect(stored).toEqual(FIXTURE_ACCOUNTS)
+  })
+
+  it('stores an empty list and NULLs for an account that carries none of them', async () => {
+    const bare =
+      '{"_id":"acc_fixture_bare","name":"Fixture Bare","type":"SAVINGS","status":"ACTIVE","connection":{"_id":"conn_fixture_bare","name":"Example Bank"},"balance":{"current":10}}'
+    const accounts = replaceOnce(
+      fixture('akahu-accounts.json'),
+      '"items": [',
+      `"items": [${bare},`,
+    )
+
+    const result = await syncAt(0, { accounts })
+
+    expect(result.outcome).toBe('success')
+    expect(await accountColumns()).toEqual({
+      ...FIXTURE_ACCOUNTS,
+      acc_fixture_bare: NO_ACCOUNT_FIELDS,
+    })
+  })
+
+  it('writes nothing to an account on a second run over the same data', async () => {
+    await syncAt(0)
+    const before = await snapshot()
+
+    const second = await syncAt(15)
+
+    expect(second.outcome).toBe('success')
+    expect((await snapshot()).accounts).toEqual(before.accounts)
+  })
+
+  it('writes NULL and an empty list when Akahu stops sending them', async () => {
+    await syncAt(0)
+
+    const second = await syncAt(15, { accounts: accountsWithoutFullFields() })
+
+    expect(second.outcome).toBe('success')
+    expect(await accountColumns()).toEqual({
+      acc_fixture0001everyday: NO_ACCOUNT_FIELDS,
+      acc_fixture0002savings: NO_ACCOUNT_FIELDS,
+      acc_fixture0003credit: NO_ACCOUNT_FIELDS,
+    })
+  })
+
+  it('updates the account and moves updated_at when Akahu changes its attributes', async () => {
+    await syncAt(0)
+    const before = await snapshot()
+    const accounts = replaceOnce(
+      fixture('akahu-accounts.json'),
+      '"attributes": ["PAYMENT_TO", "TRANSACTIONS", "TRANSFER_TO"]',
+      '"attributes": ["TRANSACTIONS", "TRANSFER_TO"]',
+    )
+
+    const second = await syncAt(15, { accounts })
+
+    expect(second.outcome).toBe('success')
+    const after = await snapshot()
+    const credit = (rows: typeof before.accounts) =>
+      rows.find((r) => r.akahu_id === 'acc_fixture0003credit')
+    expect(credit(after.accounts)).toEqual({
+      ...credit(before.accounts),
+      attributes: '["TRANSACTIONS","TRANSFER_TO"]',
+      updated_at: at(15 * MINUTE_MS).toISOString(),
+    })
+    // The other accounts are as they were.
+    expect(
+      after.accounts.filter((r) => r.akahu_id !== 'acc_fixture0003credit'),
+    ).toEqual(
+      before.accounts.filter((r) => r.akahu_id !== 'acc_fixture0003credit'),
+    )
+  })
+})

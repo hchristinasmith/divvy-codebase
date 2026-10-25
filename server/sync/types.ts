@@ -13,9 +13,10 @@
 // it into a number.
 //
 // Only Akahu's own category is carried (`akahu_category`); the user's
-// category is Divvy's and sync never writes it (prd-01 Ruling 4). Akahu's
-// internal bookkeeping fields (`_user`, `_credentials`, `_authorisation`,
-// `_migrated*`, `attributes`) are dropped at the boundary.
+// category is Divvy's and sync never writes it (prd-01 Ruling 4). Of
+// Akahu's internal bookkeeping fields, only `_user` and `_migrated*` are
+// dropped at the boundary; an account's `_authorisation` and `_credentials`
+// ids are carried (issue #155).
 //
 // Settled and pending transactions are separate types with a literal
 // `status`, so one cannot be passed where the other is required. A pending
@@ -32,6 +33,19 @@ export interface AkahuAccount {
   connection_id: string
   /** The bank's name as Akahu labels the connection. */
   connection_name: string
+  /** Akahu's connection type as sent, e.g. `classic` (issue #155). */
+  connection_type: string | null
+  /** The connection's logo URL, verbatim (issue #155). */
+  connection_logo: string | null
+  /** Akahu's `_authorisation` id for the account (issue #155). */
+  authorisation_id: string | null
+  /** Akahu's `_credentials` id for the account (issue #155). */
+  credentials_id: string | null
+  /**
+   * Akahu's account attributes, e.g. `TRANSACTIONS`, in the order sent
+   * (issue #155). An open set, so no value is checked; none sent is `[]`.
+   */
+  attributes: string[]
   formatted_account: string | null
   currency: string | null
   balance_current_cents: number
