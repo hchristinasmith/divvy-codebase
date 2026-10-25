@@ -13,6 +13,7 @@ Steps marked **UNVERIFIED (flyctl -h only)** were written from `fly … -h` outp
 - On `fly machine stop` or a deploy, Fly sends SIGTERM and waits `kill_timeout` (30s). Litestream passes the signal to the app, waits for it, then does a final sync. A write in the last moments before a hard kill can still be lost.
 - What is in the replica is a full off-box copy of the bank data: every account, balance and transaction. Treat the bucket and its credential like the Akahu token.
 - Where the replica lives is not decided yet (no provider is named in this repo, which is public). Whatever it is, it is an S3-compatible bucket, and the credential you make for Litestream should be limited to **one bucket prefix** with list, get, put and delete on it, and nothing else.
+- That credential has to be able to delete, because retention prunes old files, so anyone who holds it can also erase the backup. Turn on bucket versioning or object lock, or keep a second copy of the replica that this credential cannot delete, so a leaked or misused key cannot wipe the only backup. Never share the bucket, or this key, with another service.
 - `scripts/restore.sh` is not in the image. It runs on a laptop (or anywhere with `litestream` on `PATH`). On the machine, use `litestream restore` directly (section 5).
 
 ## 1. Set the secrets
@@ -183,7 +184,7 @@ If the machine came up on an empty volume and the replica was empty or unreachab
 3. Restore it into a side directory on a laptop with `RESTORE_TXID=<that txid> scripts/restore.sh <empty directory>`, and check it with section 4.
 4. Act the same day.
 
-**UNVERIFIED:** putting that file back onto the volume. One route is to stop the machine, run a `fly machine run` on the `divvy_data` volume as in 5a that removes the empty `/data/divvy.sqlite3*` and `/data/.divvy.sqlite3-litestream`, then `litestream restore -txid <that txid> -o /data/divvy.sqlite3 "$LITESTREAM_REPLICA_URL"`, then start the machine. Write the steps you actually ran here.
+**UNVERIFIED:** putting that file back onto the volume. Before any of it, snapshot the live volume, so a wrong delete can be undone: `fly volumes snapshots create <volume id> -a divvy-strawb` (**UNVERIFIED (flyctl -h only)**: the syntax is from `fly volumes snapshots create -h`, flyctl v0.4.122; get the volume id from `fly volumes list -a divvy-strawb`). One route is to stop the machine, run a `fly machine run` on the `divvy_data` volume as in 5a that removes the empty `/data/divvy.sqlite3*` and `/data/.divvy.sqlite3-litestream`, then `litestream restore -txid <that txid> -o /data/divvy.sqlite3 "$LITESTREAM_REPLICA_URL"`, then start the machine. Write the steps you actually ran here.
 
 ## 8. Troubleshooting
 
