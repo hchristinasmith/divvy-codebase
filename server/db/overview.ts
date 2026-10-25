@@ -103,10 +103,9 @@ export class OverviewDataError extends Error {
 // Dates
 // ---------------------------------------------------------------------------
 
-// Stays exported because ./drawings.ts, ./goals.ts and ./subscriptions.ts
-// (and an open PR's spending.ts) import it from here, and ./goals.ts
-// catches its OverviewDataError. #301 moves ./drawings.ts to
-// shared/nz-dates.ts.
+// Stays exported because ./goals.ts and ./subscriptions.ts (and an open
+// PR's spending.ts) import it from here, and ./goals.ts catches its
+// OverviewDataError. #322 retires this wrapper.
 /**
  * The calendar date `at` falls on in Pacific/Auckland (shared/nz-dates.ts),
  * with the shared module's RangeError for an invalid Date turned into the
@@ -124,10 +123,6 @@ export function nzCalendarDate(at: Date): IsoDate {
     throw err
   }
 }
-
-// Stays exported for server/db/__tests__/bills.test.ts until it imports
-// from shared/nz-dates.ts.
-export { billOccurrencesThrough }
 
 // ---------------------------------------------------------------------------
 // Reading

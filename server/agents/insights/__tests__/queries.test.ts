@@ -12,7 +12,6 @@ import {
   lastCompleteWeek,
   loadLedger,
   monthsEnding,
-  nzCalendarDate,
   spendByCategoryPerMonth,
   topMerchants,
   unusualSpends,
@@ -20,6 +19,7 @@ import {
   weekRange,
   type LedgerRow,
 } from '../queries.ts'
+import { nzCalendarDate } from '../../../../shared/nz-dates.ts'
 
 // The insights agent's typed queries (#47; prd-04 Rulings 3, 7 and 8). Each
 // test starts from an empty, freshly migrated in-memory database and inserts
@@ -509,6 +509,22 @@ describe('drawings (prd-02 Ruling 15)', () => {
     expect(a.topMerchants).toStrictEqual([])
   })
 
+  // The other rows the matcher cannot place, beside a real drawing: the run
+  // still resolves, and the real drawing is still dropped. Both dates sort
+  // outside the ledger's SQL bounds, so only the candidate read meets them.
+  it.each([
+    ['a personal inflow whose date is not an instant', 'acc_p1', 'not a date', 31000],
+    ['a strawb outflow whose NZ year is past 9999', 'acc_s1', '+275760-09-13T00:00:00.000Z', -31000],
+  ] as const)('%s is skipped, not thrown on', async (_why, account, at, cents) => {
+    await seedAccounts()
+    await tx({ account, at, cents, merchant: 'Unplaceable Fixture', category: 'Transfers' })
+    await tx({ account: 'acc_s1', at: day('2026-10-20'), cents: -27100, merchant: 'Real Drawing Fixture', category: 'Transfers' })
+    await tx({ at: day('2026-10-21'), cents: 27100, merchant: 'Owner In Fixture' })
+    const a = await collectAggregates('strawb', WEEK)
+    expect(a.topMerchants).toStrictEqual([])
+    expect(a.wow.thisWeekCents).toBe(0)
+  })
+
   it('ledgerRowCount counts drawing rows, as it counts transfer legs', async () => {
     await seedWithDrawings()
     for (const scope of ['personal', 'strawb'] as const) {
@@ -625,6 +641,16 @@ describe('loadLedger', () => {
     await expect(loadLedger('everyone' as 'personal', '2026-10-19', '2026-10-25')).rejects.toThrow(
       'scope must be personal or strawb',
     )
+  })
+
+  // Rolled over, month 13 would read as January 2027 and the read would
+  // return nothing rather than refuse.
+  it('refuses a from that names no calendar date with a RangeError', async () => {
+    await expect(loadLedger('personal', '2026-13-01', '2026-10-25')).rejects.toThrow(RangeError)
+  })
+
+  it('refuses a to that names no calendar date with a RangeError', async () => {
+    await expect(loadLedger('personal', '2026-10-01', '2026-13-01')).rejects.toThrow(RangeError)
   })
 })
 
@@ -949,6 +975,46 @@ describe('dates', () => {
   it('monthsEnding counts back across a year end, ascending', () => {
     expect(monthsEnding('2026-10-25')).toEqual(['2026-05', '2026-06', '2026-07', '2026-08', '2026-09', '2026-10'])
     expect(monthsEnding('2026-02-03', 3)).toEqual(['2025-12', '2026-01', '2026-02'])
+  })
+
+  // The years 0 to 99 are their own years, not 1900 to 1999 (`Date.UTC`'s
+  // reading). 0050-01-01 is a Saturday (2050's weekday, 400 years on), so
+  // W01 starts Monday 0050-01-03 and W24 on 0050-06-13.
+  it('isoWeekOf and weekRange read a two-digit year as itself', () => {
+    expect(isoWeekOf('0050-06-15')).toBe('0050-W24')
+    expect(isoWeekOf('0050-01-04')).toBe('0050-W01')
+    expect(isoWeekOf('0050-01-01')).toBe('0049-W52')
+    expect(weekRange('0050-W24')).toStrictEqual({ label: '0050-W24', start: '0050-06-13', end: '0050-06-19' })
+    expect(isoWeekOf('0050-06-13')).toBe('0050-W24')
+    expect(isoWeekOf('0050-06-19')).toBe('0050-W24')
+  })
+
+  // A Friday: its week's Thursday is 9999-12-30, so nothing on the way
+  // steps into the year 10000.
+  it('isoWeekOf(9999-12-31) is 9999-W52', () => {
+    expect(isoWeekOf('9999-12-31')).toBe('9999-W52')
+  })
+
+  // That week's Sunday is 10000-01-02, which no YYYY-MM-DD names, so the
+  // range is refused rather than returned with a five-digit year.
+  it('weekRange(9999-W52) is a RangeError', () => {
+    expect(() => weekRange('9999-W52')).toThrow(RangeError)
+  })
+
+  // The class only: the refusal's text belongs to whichever parser reads the
+  // date, so it is not pinned.
+  it.each(['2026-02-30', '2026-13-01', 'x'])('isoWeekOf and monthsEnding refuse %j with a RangeError', (date) => {
+    expect(() => isoWeekOf(date)).toThrow(RangeError)
+    expect(() => monthsEnding(date)).toThrow(RangeError)
+  })
+
+  // A Saturday: its week's Thursday is in the year -1, which no YYYY-MM-DD names.
+  it('isoWeekOf(0000-01-01) is a RangeError', () => {
+    expect(() => isoWeekOf('0000-01-01')).toThrow(RangeError)
+  })
+
+  it('lastCompleteWeek refuses an invalid instant', () => {
+    expect(() => lastCompleteWeek(new Date('not a date'))).toThrow('date is not a valid instant')
   })
 })
 

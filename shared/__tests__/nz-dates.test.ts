@@ -171,6 +171,8 @@ describe('addDaysIso', () => {
     ['2026-10-30x', 'text after the date'],
     ['x2026-10-30', 'text before the date'],
     ['2026-4-30', 'a one-digit month'],
+    ['2026-02-29', 'one day past a non-leap February'],
+    ['2026-04-31', 'one day past a 30-day month'],
     ['', 'nothing'],
   ])('refuses %s (%s), echoing no value', (value) => {
     const run = () => addDaysIso(value, 0)

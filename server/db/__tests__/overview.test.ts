@@ -26,9 +26,7 @@ vi.mock('../../../shared/safe-to-spend.ts', async (importOriginal) => {
 
 // The real drawing matcher, behind a spy, so a test can make it throw
 // through the real loader. The spy sits on shared/drawings.ts, not on
-// server/db/drawings.ts: that module and overview.ts import each other, and
-// test-utils/app.ts loads it first, so overview.ts would bind to the real
-// loader and never see a spy placed there.
+// server/db/drawings.ts, so the loader that runs is the real one.
 vi.mock('../../../shared/drawings.ts', async (importOriginal) => {
   const real =
     await importOriginal<typeof import('../../../shared/drawings.ts')>()

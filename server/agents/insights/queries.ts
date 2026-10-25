@@ -15,16 +15,15 @@
 // not categorised by hand, or any row whose category is Drawings. A half she
 // categorised by hand stays and counts under her category. Finding the halves
 // needs both scopes' rows, so a `strawb` run makes one more read: every
-// candidate half, all-time, as server/db/drawings.ts reads them, taking only
-// id, scope, date and amount (so a personal inflow's merchant, category and
-// description are never read). A `personal` run never makes that read and
-// reads no strawb row: a personal half is an inflow, which is never spend.
-// It therefore cannot tell a drawing's in half from any other inflow, so the
-// interim own-account transfer rule (`excludeOwnAccountTransfers`, below)
-// may pair it with a personal outflow of equal cents on another personal
-// account, and that outflow is then not counted as spend. The strawb side
-// has no such gap. server/db/drawings.ts is not imported because it imports
-// server/db/overview.ts, which writes.
+// candidate half, all-time, through `loadDrawingIds` (server/db/drawings.ts,
+// which only reads), taking only id, scope, date and amount (so a personal
+// inflow's merchant, category and description are never read). A `personal`
+// run never makes that read and reads no strawb row: a personal half is an
+// inflow, which is never spend. It therefore cannot tell a drawing's in half
+// from any other inflow, so the interim own-account transfer rule
+// (`excludeOwnAccountTransfers`, below) may pair it with a personal outflow
+// of equal cents on another personal account, and that outflow is then not
+// counted as spend. The strawb side has no such gap.
 //
 // Own-account transfers. How a transfer between the scope's own accounts is
 // told from spending is not set by #47 or prd-04; it is the open question on
@@ -36,8 +35,8 @@
 //
 // Days are Pacific/Auckland calendar days (YYYY-MM-DD), bucketed here in JS:
 // SQL date functions would need raw SQL, which nothing under server/agents/
-// may use. The NZ date code mirrors server/db/overview.ts rather than
-// importing it, because that module writes.
+// may use. Parsing a date, adding days and the NZ calendar date come from
+// shared/nz-dates.ts; the ISO-week arithmetic is here.
 //
 // Money is integer cents. Spend is an outflow's amount made positive;
 // inflows are never netted against spend. Totals go through `sumCents`, and
@@ -48,15 +47,11 @@
 // name the field, never its value.
 import type { InsightScope } from '../../../models/insights.ts'
 import type { CategorySource } from '../../../models/transactions.ts'
-import type { RowScope } from '../../../shared/contracts.ts'
-import {
-  effectiveCategory,
-  findDrawingIds,
-  isDrawingCategory,
-  type DrawingCandidate,
-} from '../../../shared/drawings.ts'
+import { effectiveCategory, isDrawingCategory } from '../../../shared/drawings.ts'
 import { sumCents } from '../../../shared/money.ts'
+import { addDaysIso, nzCalendarDate, parseIsoDate } from '../../../shared/nz-dates.ts'
 import connection from '../../db/connection.ts'
+import { loadDrawingIds } from '../../db/drawings.ts'
 
 /** A Pacific/Auckland calendar date, `YYYY-MM-DD`. */
 export type IsoDate = string
@@ -102,66 +97,10 @@ const SCOPES: Record<InsightScope, true> = { personal: true, strawb: true }
 // Dates
 // ---------------------------------------------------------------------------
 
-// Built once. `formatToParts` is read field by field rather than trusting a
-// locale's string order (as server/db/overview.ts does).
-const NZ_DATE = new Intl.DateTimeFormat('en-NZ', {
-  timeZone: 'Pacific/Auckland',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-})
-
-/** The calendar date `at` falls on in Pacific/Auckland, as `YYYY-MM-DD`. */
-export function nzCalendarDate(at: Date): IsoDate {
-  if (Number.isNaN(at.getTime())) {
-    throw new RangeError('date is not a valid instant')
-  }
-  let year = ''
-  let month = ''
-  let day = ''
-  for (const part of NZ_DATE.formatToParts(at)) {
-    if (part.type === 'year') year = part.value
-    else if (part.type === 'month') month = part.value
-    else if (part.type === 'day') day = part.value
-  }
-  return `${year.padStart(4, '0')}-${month}-${day}`
-}
-
-const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
 const MS_PER_DAY = 86_400_000
-
-interface CivilDate {
-  year: number
-  month: number // 1 to 12
-  day: number
-}
-
-function daysInMonth(year: number, month: number): number {
-  const d = new Date(0)
-  d.setUTCFullYear(year, month, 0)
-  return d.getUTCDate()
-}
-
-function parseIsoDate(value: IsoDate): CivilDate {
-  const match = ISO_DATE.exec(value)
-  if (match) {
-    const [, y, m, d] = match
-    const year = Number(y)
-    const month = Number(m)
-    const day = Number(d)
-    if (month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth(year, month)) {
-      return { year, month, day }
-    }
-  }
-  throw new RangeError('date must be a YYYY-MM-DD calendar date')
-}
 
 function pad(value: number, width: number): string {
   return String(value).padStart(width, '0')
-}
-
-function formatIsoDate({ year, month, day }: CivilDate): IsoDate {
-  return `${pad(year, 4)}-${pad(month, 2)}-${pad(day, 2)}`
 }
 
 // UTC midnight of the civil date. Built with `setUTCFullYear`, never
@@ -178,12 +117,6 @@ function dayIndex(date: IsoDate): number {
   return Math.round(civilInstant(date).getTime() / MS_PER_DAY)
 }
 
-function addDays(date: IsoDate, days: number): IsoDate {
-  const d = civilInstant(date)
-  d.setUTCDate(d.getUTCDate() + days)
-  return formatIsoDate({ year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() })
-}
-
 // 1 for Monday to 7 for Sunday.
 function isoWeekday(date: IsoDate): number {
   return ((civilInstant(date).getUTCDay() + 6) % 7) + 1
@@ -191,7 +124,7 @@ function isoWeekday(date: IsoDate): number {
 
 /** The ISO-8601 week a date falls in, e.g. "2026-W43" (the week's Thursday names the year). */
 export function isoWeekOf(date: IsoDate): string {
-  const thursday = addDays(date, 4 - isoWeekday(date))
+  const thursday = addDaysIso(date, 4 - isoWeekday(date))
   const { year } = parseIsoDate(thursday)
   const week = Math.floor((dayIndex(thursday) - dayIndex(`${pad(year, 4)}-01-01`)) / 7) + 1
   return `${pad(year, 4)}-W${pad(week, 2)}`
@@ -216,19 +149,19 @@ export function weekRange(label: string): WeekRange {
   const week = Number(w)
   if (week < 1) throw refused
   const jan4 = `${y}-01-04`
-  const firstMonday = addDays(jan4, 1 - isoWeekday(jan4))
-  const start = addDays(firstMonday, 7 * (week - 1))
+  const firstMonday = addDaysIso(jan4, 1 - isoWeekday(jan4))
+  const start = addDaysIso(firstMonday, 7 * (week - 1))
   // Week 53 exists only in some years; a label past the year's last week
   // round-trips to the next year's week and is refused.
   if (isoWeekOf(start) !== label) throw refused
-  return { label, start, end: addDays(start, 6) }
+  return { label, start, end: addDaysIso(start, 6) }
 }
 
 /** The last full Monday-to-Sunday NZ week strictly before the NZ week `now` falls in. */
 export function lastCompleteWeek(now: Date): string {
   const today = nzCalendarDate(now)
-  const thisMonday = addDays(today, 1 - isoWeekday(today))
-  return isoWeekOf(addDays(thisMonday, -7))
+  const thisMonday = addDaysIso(today, 1 - isoWeekday(today))
+  return isoWeekOf(addDaysIso(thisMonday, -7))
 }
 
 /** The `n` calendar months ending with the one `end` falls in, ascending, as `YYYY-MM`. */
@@ -355,48 +288,6 @@ export function cleanLabel(text: string | null, fallback: string): string {
 // The one read
 // ---------------------------------------------------------------------------
 
-// The only date shape the shared drawings matcher accepts.
-const NZ_DAY = /^\d{4}-\d{2}-\d{2}$/
-
-interface CandidateRow {
-  id: number
-  scope: RowScope
-  date: string
-  amount_cents: number
-}
-
-// The ids of both halves of every drawing in the database. Mirrors
-// `loadDrawingIds` (server/db/drawings.ts) row for row: all-time, so no
-// window edge changes the greedy pairing; Akahu rows on stored Akahu
-// accounts, settled and pending; strawb outflows and personal inflows. A row
-// the matcher cannot place (an unparseable date, a year past 9999, an amount
-// that is not whole cents) is skipped, as there: `findDrawingIds` throws on
-// a non-integer amount, so that skip is what keeps a run alive. The amount
-// signs only narrow the read: `findDrawingIds` itself ignores any row that
-// is not a strawb outflow or a personal inflow, so they change no result.
-async function readDrawingIds(db: typeof connection): Promise<Set<number>> {
-  const rows: CandidateRow[] = await db('transactions as t')
-    .join('accounts as a', 'a.akahu_id', 't.account_id')
-    .where('t.source', 'akahu')
-    .where('a.source', 'akahu')
-    .whereNotNull('t.date')
-    .where((q) =>
-      q
-        .where((out) => out.where('a.scope', 'strawb').where('t.amount_cents', '<', 0))
-        .orWhere((into) => into.where('a.scope', 'personal').where('t.amount_cents', '>', 0)),
-    )
-    .select('t.id', 'a.scope', 't.date', 't.amount_cents')
-  const candidates: DrawingCandidate[] = []
-  for (const row of rows) {
-    const at = new Date(row.date)
-    if (Number.isNaN(at.getTime())) continue
-    const date = nzCalendarDate(at)
-    if (!NZ_DAY.test(date) || !Number.isSafeInteger(row.amount_cents)) continue
-    candidates.push({ id: row.id, scope: row.scope, date, amountCents: row.amount_cents })
-  }
-  return findDrawingIds(candidates)
-}
-
 interface StoredRow {
   id: number
   account_id: string
@@ -439,12 +330,12 @@ async function readLedger(
   }
   // A personal run never reads the candidates, which hold strawb rows; a
   // hand-set Drawings category still drops a personal row below.
-  const drawingIds = scope === 'strawb' ? await readDrawingIds(db) : new Set<number>()
+  const drawingIds = scope === 'strawb' ? await loadDrawingIds(db) : new Set<number>()
   // `date` is stored as UTC ISO-8601 text. The SQL bounds are whole UTC
   // days padded past the NZ offset either way; the exact NZ day is applied
   // below, after conversion.
-  const lowerDay = addDays(from, -1)
-  const upperDay = addDays(to, 2)
+  const lowerDay = addDaysIso(from, -1)
+  const upperDay = addDaysIso(to, 2)
   const stored: StoredRow[] = await db('transactions as t')
     .join('accounts as a', 't.account_id', 'a.akahu_id')
     .where({ 'a.scope': scope, 'a.source': 'akahu', 't.source': 'akahu', 't.status': 'settled' })
@@ -685,7 +576,7 @@ export interface WeekOverWeek {
 /** Spend in the week against the week before it, in total and per category. */
 export function weekOverWeek(rows: readonly LedgerRow[], week: string): WeekOverWeek {
   const current = weekRange(week)
-  const previous = weekRange(isoWeekOf(addDays(current.start, -7)))
+  const previous = weekRange(isoWeekOf(addDaysIso(current.start, -7)))
   const thisWeek = new Map<string, number[]>()
   const lastWeek = new Map<string, number[]>()
   for (const row of rows) {
@@ -742,8 +633,8 @@ export function unusualSpends(
   limit: number = UNUSUAL_LIMIT,
 ): UnusualSpend[] {
   const { start, end } = weekRange(week)
-  const historyStart = addDays(start, -7 * UNUSUAL_LOOKBACK_WEEKS)
-  const historyEnd = addDays(start, -1)
+  const historyStart = addDaysIso(start, -7 * UNUSUAL_LOOKBACK_WEEKS)
+  const historyEnd = addDaysIso(start, -1)
   const history = new Map<string, number[]>()
   for (const row of rows) {
     const spend = spendIn(row, historyStart, historyEnd)
@@ -820,13 +711,13 @@ export async function collectAggregates(
   const months = monthsEnding(range.end, MONTHLY_MONTHS)
   const [firstMonth] = months
   const monthStart = `${firstMonth}-01`
-  const lookbackStart = addDays(range.start, -7 * UNUSUAL_LOOKBACK_WEEKS)
+  const lookbackStart = addDaysIso(range.start, -7 * UNUSUAL_LOOKBACK_WEEKS)
   const windowStart = monthStart < lookbackStart ? monthStart : lookbackStart
 
   const { rows: loaded, drawingDays } = await readLedger(
     scope,
-    addDays(windowStart, -TRANSFER_WINDOW_DAYS),
-    addDays(range.end, TRANSFER_WINDOW_DAYS),
+    addDaysIso(windowStart, -TRANSFER_WINDOW_DAYS),
+    addDaysIso(range.end, TRANSFER_WINDOW_DAYS),
     db,
   )
   const inWindow = (r: LedgerRow) => inRange(r, windowStart, range.end)
