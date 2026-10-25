@@ -732,6 +732,17 @@ describe('every module under server/agents/db/ touches only the inbox tables', (
     }
   })
 
+  // #358: scrubbed.ts and text-checks.ts say in their headers that they import
+  // nothing. The directory list above would let either one import anything it
+  // allows, so each is held to no specifier and no import problem. Named here
+  // rather than read from the headers, so a rename fails as a missing module.
+  const IMPORTS_NOTHING = ['scrubbed.ts', 'text-checks.ts']
+  it.each(IMPORTS_NOTHING)('%s exists and imports nothing, by any route', (file) => {
+    expect(modules()).toContain(file)
+    const { specifiers, problems: reached } = imports(source(file))
+    expect([...specifiers, ...reached], file).toEqual([])
+  })
+
   it.each(Object.entries(OWN_TABLE))('%s names its own table, %s', (file, table) => {
     expect(strings(source(file))).toContain(table)
   })
