@@ -81,6 +81,17 @@ describe('rankByStartedAt', () => {
     ).toEqual([11, 12])
   })
 
+  it('orders two starts in the same second by their milliseconds, not by id', async () => {
+    // The higher id has the earlier milliseconds, so a ranking that reads
+    // only whole seconds falls through to the id tie-break and inverts them.
+    await insertRuns([
+      { id: 1, started_at: '2026-10-24T08:00:00.900Z', outcome: 'success' },
+      { id: 2, started_at: '2026-10-24T08:00:00.100Z', outcome: 'success' },
+    ])
+
+    expect(await rankByStartedAt(db('sync_runs')).pluck('id')).toEqual([1, 2])
+  })
+
   it('returns no rows when no start is exact ISO text', async () => {
     await insertRuns(MIXED.filter((run) => !run.started_at.endsWith('.000Z')))
 
