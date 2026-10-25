@@ -16,8 +16,11 @@ kill_timeout = "30s"
 [build]
   dockerfile = "Dockerfile"
 
-# There is deliberately no HOST here: the server binds 127.0.0.1 by default
-# (#149), so only `tailscale serve`, in the same machine, can reach it.
+# There is deliberately no HOST here (start.sh refuses one off loopback): the
+# server binds 127.0.0.1 by default (#149), so only tailscaled, in the same
+# machine, can reach it. In userspace mode tailscaled forwards a tailnet
+# connection on any port to loopback, so the tailnet policy must allow only
+# tag:divvy:443 or :3005 answers too, as plain HTTP (docs/deploy.md).
 [env]
   NODE_ENV = "production"
   PORT = "3005"

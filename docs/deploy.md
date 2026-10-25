@@ -8,15 +8,16 @@ The operator runbook for the first deploy (prd-01 w4) and every one after it. Ev
 - The volume `divvy_data`, mounted at `/data`. It holds the database (`/data/divvy.sqlite3`) and Tailscale's state (`/data/tailscale`), so a restart keeps the same tailnet node.
 - No public IP and no Fly service (prd-01 Ruling 7; D4). The only way in is the tailnet.
 - The server binds `127.0.0.1:3005`. `tailscale serve`, in the same machine, proxies the tailnet to it. `fly proxy` and the rest of Fly's private network cannot reach the app, by design.
+- In userspace networking mode, `tailscaled` forwards a tailnet connection on *any* port to the same port on loopback. So the tailnet policy, not the bind address, is what keeps `http://divvy:3005` (plain HTTP, no TLS) closed: it must allow only port 443 (section 2, checked in section 8).
 
-The image's CMD is `scripts/start.sh`. It refuses to start without `TS_AUTHKEY`, starts `tailscaled` in userspace networking mode, joins the tailnet, publishes the app with `tailscale serve`, checks that the serve config proxies to the app with Funnel off, and only then runs `npm start` (migrations, then the server). If any tailnet step fails, the app never starts.
+The image's CMD is `scripts/start.sh`. It refuses to start without `TS_AUTHKEY`, or with `HOST` set to anything but `127.0.0.1`, starts `tailscaled` in userspace networking mode, joins the tailnet, publishes the app with `tailscale serve`, checks that the serve config proxies to the app with Funnel off, and only then runs `npm start` (migrations, then the server). If any tailnet step fails, the app never starts.
 
 ## 2. Prerequisites
 
 - The Fly app exists: `fly apps list` shows `divvy-strawb`.
 - The volume exists in `syd`: `fly volumes list -a divvy-strawb` shows `divvy_data`.
 - On the tailnet admin console's DNS page, **MagicDNS** is on and **HTTPS certificates** are enabled. `tailscale serve --https=443` needs both.
-- The tailnet policy file has a `tagOwners` entry for `tag:divvy`, and an access rule letting your own devices reach `tag:divvy:443`.
+- The tailnet policy file has a `tagOwners` entry for `tag:divvy`, and an access rule letting your own devices reach `tag:divvy:443`. That must be the only rule that reaches `tag:divvy`: the default allow-all rule (`"dst": ["*:*"]`) also opens `tag:divvy:3005` (section 1).
 
 ## 3. The auth key
 
@@ -87,6 +88,7 @@ If a stale node named `divvy` already exists on the tailnet (from an earlier att
 - From a device off the tailnet (the phone on cellular with Tailscale switched off): `https://divvy-strawb.fly.dev` gets no answer.
 - `dig +short divvy-strawb.fly.dev` prints nothing.
 - From that same device, the `.ts.net` name does not load either.
+- From a device on the tailnet: `curl -m 5 http://divvy:3005/` fails to connect, because the policy allows only 443. If it answers, fix the policy (section 2).
 
 ## 9. Facts to record for the prd-03 spike
 
@@ -96,6 +98,7 @@ If a stale node named `divvy` already exists on the tailnet (from an earlier att
 
 ## 10. Troubleshooting
 
+- **`start.sh: ERROR: HOST=... would bind the app off loopback`.** A `HOST` secret is set. Remove it with `fly secrets unset HOST -a divvy-strawb`.
 - **`start.sh: ERROR: TS_AUTHKEY is not set`.** The secret is missing. The machine exits 1, and Fly retries it a limited number of times before giving up. Set the secret (section 4); setting it restarts the machine.
 - **`tailscale up failed or timed out`.** The key is wrong, revoked or expired, or the tag is not in `tagOwners`. Generate a new key (section 3) and set it again.
 - **`tailscale serve failed or timed out`.** Usually HTTPS certificates or MagicDNS are off for the tailnet (section 2).

@@ -13,6 +13,14 @@ authkey="${TS_AUTHKEY:-}"
 unset TS_AUTHKEY
 [ -n "$authkey" ] || die "TS_AUTHKEY is not set. Refusing to start: the app must be reachable only over the tailnet. Set it with: fly secrets set TS_AUTHKEY=<key from admin console>"
 
+# The server binds HOST, else 127.0.0.1 (#149). Any other address would put the
+# app on Fly's private network beside the tailnet, so a stray HOST secret stops
+# the boot rather than being obeyed.
+case "${HOST:-}" in
+  "" | 127.0.0.1) ;;
+  *) die "HOST=$HOST would bind the app off loopback. Refusing to start: only tailscaled, on this machine, may reach it. Unset it with: fly secrets unset HOST" ;;
+esac
+
 state_dir="${TS_STATE_DIR:-/data/tailscale}"
 socket="${TS_SOCKET:-/var/run/tailscale/tailscaled.sock}"
 ts_hostname="${TS_HOSTNAME:-divvy}"
@@ -46,7 +54,8 @@ tailscale --socket="$socket" up \
 unset authkey
 
 # 4. Publish on the tailnet. `serve` can exit 0 having configured nothing when
-#    HTTPS certs are off, so bound it and verify the result.
+#    HTTPS certs are off, so bound it and verify the result. The proxy match
+#    ends at a newline, so a target that merely starts with ours (:30050) fails.
 timeout 30 tailscale --socket="$socket" serve reset \
   || die "tailscale serve reset failed"
 timeout 30 tailscale --socket="$socket" serve --bg --https=443 "$serve_target" \
@@ -56,8 +65,10 @@ status="$(tailscale --socket="$socket" serve status 2>&1)" \
 case "$status" in
   *"Funnel on"*) die "Funnel is on: that would publish the app to the internet" ;;
 esac
-case "$status" in
-  *"$serve_target"*) ;;
+case "$status
+" in
+  *" proxy $serve_target
+"*) ;;
   *) die "serve status does not show a proxy to $serve_target" ;;
 esac
 log "serving $serve_target on the tailnet as $ts_hostname"

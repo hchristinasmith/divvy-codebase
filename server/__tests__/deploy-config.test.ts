@@ -220,10 +220,12 @@ exec "$@"
 const fakeRecorder = (name: string): string => `#!/bin/sh
 echo "${name} $*" >> "$FAKE_DIR/calls.log"
 env > "$FAKE_DIR/${name}.env"
+echo "$$" > "$FAKE_DIR/${name}.pid"
 exit 0
 `
 
 interface Run {
+  pid: number
   status: number | null
   stdout: string
   stderr: string
@@ -307,6 +309,7 @@ function runStart({
   })
   const log = join(fakeDir, 'calls.log')
   return {
+    pid: result.pid,
     status: result.status,
     stdout: result.stdout,
     stderr: result.stderr,
@@ -358,9 +361,24 @@ describe('scripts/start.sh, run', { timeout: 20000 }, () => {
     expect(up).toContain(`--auth-key=${SENTINEL}`)
     expect(up).toContain('--hostname=divvy')
     expect(up).toContain('--accept-dns=false')
+    expect(up).toContain('--reset')
+    expect(up).toMatch(/ --timeout=\d+s( |$)/)
 
     expect(run.stderr).toContain('WARNING: backups are OFF')
     expect(ran(run.calls, 'litestream')).toBe(false)
+    // exec'd, not a child: npm runs in start.sh's own process, so Fly's
+    // SIGTERM to that process reaches it.
+    expect(readFileSync(join(fakeDir, 'npm.pid'), 'utf8').trim()).toBe(
+      String(run.pid),
+    )
+  })
+
+  it('refuses to start anything when HOST names an address other than loopback', () => {
+    const run = runStart({ env: { HOST: '0.0.0.0' } })
+
+    expect(run.status).not.toBe(0)
+    expect(run.stderr).toContain('HOST')
+    expect(run.calls).toEqual([])
   })
 
   it('runs npm start under litestream replicate when the Litestream config exists', () => {
@@ -372,6 +390,9 @@ describe('scripts/start.sh, run', { timeout: 20000 }, () => {
     expect(run.calls.filter((line) => line.startsWith('litestream'))).toEqual([
       `litestream replicate -config ${config} -exec npm start`,
     ])
+    expect(
+      readFileSync(join(fakeDir, 'litestream.pid'), 'utf8').trim(),
+    ).toBe(String(run.pid))
     expect(ran(run.calls, 'npm')).toBe(false)
     expect(run.stderr).not.toContain('WARNING')
   })
@@ -391,6 +412,11 @@ describe('scripts/start.sh, run', { timeout: 20000 }, () => {
     [
       'a proxy to the wrong port',
       '|-- / proxy http://127.0.0.1:9999\n',
+      'does not show a proxy',
+    ],
+    [
+      'a proxy to a port the target is a prefix of',
+      '|-- / proxy http://127.0.0.1:30050\n',
       'does not show a proxy',
     ],
     [
