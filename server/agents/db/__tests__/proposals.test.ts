@@ -225,17 +225,14 @@ describe('insertProposal', () => {
     await expect(attempt).rejects.not.toThrow(SENTINEL)
   })
 
-  // #313 pins today's behaviour: no length cap on reason. The non-BMP run
-  // makes code points and UTF-16 units differ, so a cap counted in either
-  // unit would refuse these strings.
-  it.each([
-    ['2,001 code points', 2_001],
-    ['50,000 code points', 50_000],
-  ])('#313 pins today: accepts a reason of %s and stores it whole', async (_name, codePoints) => {
+  // The reason cap (#313) is counted in code points. The constant is not
+  // exported, so the cap is pinned here as a literal. Non-BMP characters are
+  // two UTF-16 units each, so these strings are over the cap by `.length`.
+  it('accepts a reason of exactly 2000 code points, and stores it whole', async () => {
     const txId = await transaction('a')
-    const reason = '\u{20000}'.repeat(codePoints - 1) + 'a'
-    expect(Array.from(reason)).toHaveLength(codePoints)
-    expect(reason.length).toBeGreaterThan(codePoints)
+    const reason = '\u{20000}'.repeat(2_000)
+    expect(Array.from(reason)).toHaveLength(2_000)
+    expect(reason.length).toBeGreaterThan(2_000)
 
     const result = await insertProposal(proposal(txId, { reason }), NOW)
     expect(result).toStrictEqual({ inserted: true, id: expect.any(Number) })
@@ -244,6 +241,34 @@ describe('insertProposal', () => {
     expect(stored).toHaveLength(1)
     expect(Object.keys(stored[0]).sort()).toEqual([...PROPOSAL_COLUMNS].sort())
     expect(stored[0].reason).toBe(reason)
+  })
+
+  it('counts a reason in code points, not UTF-16 units: 1,001 non-BMP code points (2,002 units) is accepted', async () => {
+    const txId = await transaction('a')
+    const reason = '\u{20000}'.repeat(1_001)
+    expect(Array.from(reason)).toHaveLength(1_001)
+    expect(reason.length).toBe(2_002)
+
+    const result = await insertProposal(proposal(txId, { reason }), NOW)
+    expect(result).toStrictEqual({ inserted: true, id: expect.any(Number) })
+    expect((await rows())[0].reason).toBe(reason)
+  })
+
+  // The refusal names the field and the cap, never the value. The value here
+  // holds a sentinel, so the not.toContain assertion has something to find.
+  it('refuses a reason one code point over the cap, naming the field and the cap but not the value, and writes nothing', async () => {
+    const txId = await transaction('a')
+    const reason = SENTINEL + '\u{20000}'.repeat(2_001 - Array.from(SENTINEL).length)
+    expect(Array.from(reason)).toHaveLength(2_001)
+
+    const error = await insertProposal(proposal(txId, { reason }), NOW).then(
+      () => new Error('expected a refusal'),
+      (e: unknown) => e,
+    )
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toBe('reason must be at most 2000 characters')
+    expect((error as Error).message).not.toContain(SENTINEL)
+    expect(await rows()).toEqual([])
   })
 })
 
