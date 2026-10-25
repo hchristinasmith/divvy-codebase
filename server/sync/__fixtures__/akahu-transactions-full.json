@@ -1,0 +1,71 @@
+{
+  "success": true,
+  "items": [
+    {
+      "_account": "acc_fixture0001everyday",
+      "_connection": "conn_fixture0001",
+      "_id": "trans_fixture_full_a",
+      "_user": "user_fixture0001",
+      "amount": -20.15,
+      "balance": 980.42,
+      "created_at": "2026-10-22T08:00:00.000Z",
+      "date": "2026-10-22T00:00:00.000Z",
+      "description": "EXAMPLE ONLINE STORE USD 12.34",
+      "hash": "hash_fixture_full_a",
+      "merchant": {
+        "_id": "merchant_fixture_full_a",
+        "logo": "https://example.com/fixture-store-logo.png",
+        "name": "Example Online Store",
+        "nzbn": "fixture-nzbn-full-a",
+        "website": "https://example.com/store"
+      },
+      "meta": {
+        "card_suffix": "0042",
+        "conversion": {
+          "amount": 12.34,
+          "currency": "USD",
+          "rate": 0.6123
+        },
+        "particulars": "Example",
+        "reference": "fixture-ref-full-a"
+      },
+      "posted_date": "2026-10-23T00:00:00.000Z",
+      "type": "CREDIT CARD",
+      "updated_at": "2026-10-23T08:00:00.000Z"
+    },
+    {
+      "_account": "acc_fixture0001everyday",
+      "_connection": "conn_fixture0001",
+      "_id": "trans_fixture_full_b",
+      "amount": -7.5,
+      "created_at": "2026-10-22T09:00:00.000Z",
+      "date": "2026-10-22T00:00:00.000Z",
+      "description": "EXAMPLE TRAVEL DESK",
+      "meta": {
+        "conversion": {
+          "currency": "AUD"
+        }
+      },
+      "type": "EFTPOS",
+      "updated_at": "2026-10-22T09:00:00.000Z"
+    },
+    {
+      "_account": "acc_fixture0001everyday",
+      "_connection": "conn_fixture0001",
+      "_id": "trans_fixture_full_c",
+      "amount": -3.2,
+      "created_at": "2026-10-22T10:00:00.000Z",
+      "date": "2026-10-22T00:00:00.000Z",
+      "description": "EXAMPLE CORNER DAIRY",
+      "merchant": {
+        "_id": "merchant_fixture_full_c",
+        "name": "Example Corner Dairy"
+      },
+      "type": "EFTPOS",
+      "updated_at": "2026-10-22T10:00:00.000Z"
+    }
+  ],
+  "cursor": {
+    "next": null
+  }
+}

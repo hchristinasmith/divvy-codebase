@@ -4,6 +4,7 @@ import type {
   PendingTransaction,
   SettledTransaction,
   TransactionAkahuCategory,
+  TransactionConversion,
   TransactionMerchant,
   TransactionMeta,
 } from './types.ts'
@@ -133,6 +134,27 @@ function optionalText(
 }
 
 /**
+ * Absent or null is an empty list; a list of text is kept in the order sent,
+ * each item verbatim. Anything else, or a list holding anything but text, is
+ * refused. No item's value is checked: the set is Akahu's and open.
+ */
+function optionalTextList(
+  record: JsonRecord,
+  key: string,
+  where: string,
+): string[] {
+  const value = record[key]
+  if (value === undefined || value === null) return []
+  if (
+    !Array.isArray(value) ||
+    !value.every((item): item is string => typeof item === 'string')
+  ) {
+    throw badResponse(`${where}.${key} is not a list of text`)
+  }
+  return [...value]
+}
+
+/**
  * Akahu's decimal dollar text as integer cents (prd-01 Ruling 3).
  * `exactAmountToCents` already returns 0, not -0, for a negative zero.
  */
@@ -166,6 +188,54 @@ function optionalCents(
   return toCents(value, `${where}.${key}`)
 }
 
+/**
+ * A currency code: three letters, kept verbatim. Anything else is refused,
+ * not stored: `conversion_currency` is a float column (a 2025 migration), and
+ * SQLite would silently turn text such as `978` or `1e3` into a number.
+ */
+function optionalCurrency(
+  record: JsonRecord,
+  key: string,
+  where: string,
+): string | null {
+  const value = record[key]
+  if (value === undefined || value === null) return null
+  if (typeof value !== 'string' || !/^[A-Za-z]{3}$/.test(value)) {
+    throw badResponse(`${where}.${key} is not a currency code`)
+  }
+  return value
+}
+
+/**
+ * The longest rate text accepted: a bound so an absurd value is refused
+ * rather than stored. A real rate is a handful of digits.
+ */
+const MAX_RATE_LENGTH = 30
+
+/**
+ * A conversion rate as Akahu's decimal text (issue #155): a non-negative
+ * plain decimal, no sign, exponent or leading zero. It is a rate, not money,
+ * so it is not cents, and it is never turned into a number here. Sync turns
+ * it into the nearest double to that text, which may not be the decimal
+ * Akahu wrote exactly, but the same text always gives the same double.
+ */
+function optionalRate(
+  record: JsonRecord,
+  key: string,
+  where: string,
+): string | null {
+  const value = record[key]
+  if (value === undefined || value === null) return null
+  if (
+    typeof value !== 'string' ||
+    value.length > MAX_RATE_LENGTH ||
+    !/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value)
+  ) {
+    throw badResponse(`${where}.${key} is not a rate`)
+  }
+  return value
+}
+
 // ---------------------------------------------------------------------------
 // Mapping Akahu's items to the shapes in types.ts.
 
@@ -186,6 +256,15 @@ function mapAccount(value: unknown): AkahuAccount {
     status: requiredKey(item, 'status', where),
     connection_id: requiredKey(connection, '_id', `${where}.connection`),
     connection_name: requiredText(connection, 'name', `${where}.connection`),
+    connection_type: optionalText(
+      connection,
+      'connection_type',
+      `${where}.connection`,
+    ),
+    connection_logo: optionalText(connection, 'logo', `${where}.connection`),
+    authorisation_id: optionalText(item, '_authorisation', where),
+    credentials_id: optionalText(item, '_credentials', where),
+    attributes: optionalTextList(item, 'attributes', where),
     formatted_account: optionalText(item, 'formatted_account', where),
     currency: optionalText(balance, 'currency', `${where}.balance`),
     balance_current_cents: requiredCents(
@@ -217,6 +296,22 @@ function mapMerchant(
     name: optionalText(merchant, 'name', inner),
     nzbn: optionalText(merchant, 'nzbn', inner),
     website: optionalText(merchant, 'website', inner),
+    logo: optionalText(merchant, 'logo', inner),
+  }
+}
+
+/** A foreign-currency conversion on a card transaction (issue #155). */
+function mapConversion(
+  meta: JsonRecord,
+  where: string,
+): TransactionConversion | null {
+  const conversion = optionalRecord(meta, 'conversion', where)
+  if (conversion === null) return null
+  const inner = `${where}.conversion`
+  return {
+    amount_cents: optionalCents(conversion, 'amount', inner),
+    currency: optionalCurrency(conversion, 'currency', inner),
+    rate: optionalRate(conversion, 'rate', inner),
   }
 }
 
@@ -230,6 +325,8 @@ function mapMeta(item: JsonRecord, where: string): TransactionMeta | null {
     reference: optionalText(meta, 'reference', inner),
     other_account: optionalText(meta, 'other_account', inner),
     logo: optionalText(meta, 'logo', inner),
+    card_suffix: optionalText(meta, 'card_suffix', inner),
+    conversion: mapConversion(meta, inner),
   }
 }
 

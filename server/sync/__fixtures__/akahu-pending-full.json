@@ -1,0 +1,27 @@
+{
+  "success": true,
+  "items": [
+    {
+      "_account": "acc_fixture0003credit",
+      "_connection": "conn_fixture0001",
+      "amount": -9.99,
+      "date": "2026-10-24T11:00:00.000Z",
+      "description": "EXAMPLE STREAMING GBP 4.56",
+      "merchant": {
+        "_id": "merchant_fixture_full_p",
+        "logo": "https://example.com/fixture-streaming-logo.png",
+        "name": "Example Streaming"
+      },
+      "meta": {
+        "card_suffix": "0077",
+        "conversion": {
+          "amount": 4.56,
+          "currency": "GBP",
+          "rate": 0.4565
+        }
+      },
+      "type": "CREDIT CARD",
+      "updated_at": "2026-10-24T11:01:00.000Z"
+    }
+  ]
+}
