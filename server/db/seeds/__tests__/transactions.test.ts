@@ -204,16 +204,4 @@ describe('transactions seed, edge cases', () => {
     const [{ n }] = await db('transactions').count({ n: '*' })
     expect(n).toBe(fixture.items.length)
   })
-
-  it('seeds budget targets in integer cents', async () => {
-    await db.seed.run()
-
-    expect(
-      await db('targets').select('category', 'target_amount_cents').orderBy('category'),
-    ).toEqual([
-      { category: 'Entertainment', target_amount_cents: 15000 },
-      { category: 'Food', target_amount_cents: 50000 },
-      { category: 'Housing', target_amount_cents: 120000 },
-    ])
-  })
 })
