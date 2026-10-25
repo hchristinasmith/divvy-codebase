@@ -86,6 +86,8 @@ Items 1, 3, 4 are tests (the code does what is written). Items 2, 5 need a real-
 - **tax hold**: `max(0, taxRate × profit − taxPotBalance)` in All and Strawb scope; `0` in Personal. `taxRate` and `profit` are settings you type in until Xero lands.
 Why: the handoff's formula (`handoff.md:25`) only works once each term is pinned. Netting the tax pot balance stops money already set aside from being held twice, since the pot is outside liquid. This is a money judgement for you to confirm at blessing.
 
+> Amended 2026-10-25 by Rulings 9, 10 and 11.
+
 ## Ruling 3 — A negative result is shown as $0 plus how short you are
 The function returns the signed value; the hero shows `$0` and a "short by $X" line when it is negative. The design clamps silently (`Divvy.dc.html:426`), which would hide an overspend and contradicts "never flattering" (`handoff.md:42`).
 
@@ -103,6 +105,19 @@ Outfit, DM Sans and DM Mono ship from the app, not Google Fonts (`handoff.md:71`
 
 ## Ruling 8 — Old pages are removed last, from the nav first
 The shell stops linking Transactions, Targets, Subscriptions and Challenges immediately; their files are deleted in the final sweep. Wishlist stays until D11.
+
+## Ruling 9 — Payday is weekly, on a weekday (operator amendment, 2026-10-25; amends Ruling 2)
+Payday is one weekday, every week; Hannah's is Tuesday. The setting is `payday_weekday` (0 = Sunday … 6 = Saturday), replacing a day of the month. The last payday is the most recent payday weekday on or before today (today itself when today is payday); the next payday is seven days after it. So "unpaid bills due on or before the next payday" covers at most the next seven days plus anything overdue, "spent since the last payday" covers at most the last seven days, and every budget `limit` is a weekly amount. Why: Hannah pays herself weekly on Tuesday (2026-10-25); a monthly window would hold a month of bills against one week's pay. Extends to: every consumer of `lastPayday`/`nextPayday`, the settings panel (#46) and prd-03's `get_safe_to_spend`. Monthly paydays are not supported; adding them later is a new ruling.
+
+## Ruling 10 — What is owed on a credit card is subtracted (operator amendment, 2026-10-25; amends Ruling 2)
+`account_settings.role` gains `credit card`. A credit-card account is never liquid. What is owed on it, `max(0, −balance)` in integer cents under Akahu's sign convention (owed is a negative balance; confirm against live data before merge), is a new term **card debt**, subtracted from safe-to-spend in every scope the account belongs to: `safe = liquid − unpaid bills − remaining budget − tax hold − card debt`. A card in credit contributes 0. Why: Hannah's card is personal debt she means to pay off (2026-10-25); leaving it out would show money as spendable that is already spent. Extends to: the ledger shows card debt as its own line; prd-03 reports it as a part of the number.
+
+## Ruling 11 — Each scope holds its own tax, against its own pot (operator amendment, 2026-10-25; amends Ruling 2)
+There is a tax pot per scope, marked by role `tax pot` on an account of that scope; neither is liquid.
+- **Strawb tax hold**: `max(0, taxRate × profit − Strawb tax pot balance)`, as Ruling 2 had it, netting only Strawb-scope tax pots.
+- **Personal tax hold**: `max(0, personalTaxOwed − personal tax pot balance)`. `personal_tax_owed_cents` is a setting Hannah types in: what she owes Inland Revenue in personal income tax. No rate is applied.
+- Personal scope uses the personal hold; Strawb scope the Strawb hold; All the sum of both.
+Why: Hannah owes substantial personal income tax and is setting a personal account aside for it (2026-10-25); Ruling 2's "0 in Personal" would show that money as owed nowhere. Strawb's whole business account is its tax pot for now, which is a role setting (#30), not a rule. Extends to: the settings panel (#46) gains the owed amount; prd-05's Xero profit feeds only the Strawb hold.
 
 ## Sequencing
 
