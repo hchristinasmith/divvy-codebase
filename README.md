@@ -9,7 +9,7 @@ It is an early prototype. [docs/audit-2026-10-23.md](docs/audit-2026-10-23.md) r
 - The Overview (`/`) shows your safe-to-spend, the account cards, Strawb's tax set-aside, alerts you can dismiss and recent activity, for the scope you pick: All, Personal or Strawb.
 - The Dashboard (the old page, at `/dashboard`) lists your accounts and shows a spending breakdown from the transactions the last sync stored.
 - The sync is the only code that calls Akahu. It uses one token from `.env`.
-- `GET /api/v1/transactions?description=` searches the local SQLite `transactions` table, and `PATCH /api/v1/transactions/:id` sets your category on a row (a row still pending is refused with 409 until it settles).
+- `GET /api/v1/transactions?description=` searches the Akahu rows of the local SQLite `transactions` table, and `PATCH /api/v1/transactions/:id` sets your category on a row (a row still pending is refused with 409 until it settles).
 - The Subscriptions screen finds subscriptions from your settled transactions and shows regular charges, totals, an "Is this a subscription?" question and cancel. Cancelling records a date only; nothing is sent to the merchant or the bank.
 - The Settings page is real. It sets the tax rate, Strawb's profit, payday, personal tax owed and currency, and each account's role and scope (Personal or Business).
 - The Transactions, Targets, Wishlist and Challenges pages are shells. The old Subscriptions page at `/manage-subscriptions` shows mock data.

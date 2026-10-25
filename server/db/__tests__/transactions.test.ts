@@ -4,6 +4,7 @@ import { assertInMemory } from '../../test-utils/app.ts'
 import {
   getTransactionCategory,
   getTransactionRow,
+  getTxns,
   searchTxns,
   setUserCategory,
 } from '../transactions.ts'
@@ -558,6 +559,24 @@ describe('searchTxns', () => {
 
     expect(rows.map((r) => r.id).sort((a, b) => a - b)).toEqual(akahuIds)
     expect(rows.map((r) => r.akahu_id)).not.toContain('trans_fixture_002')
+    for (const row of rows) {
+      expect(Object.keys(row).sort()).toEqual([...ROW_KEYS].sort())
+    }
+  })
+})
+
+describe('getTxns', () => {
+  it('returns every row with exactly the listed columns, never one outside the list', async () => {
+    const { id } = await rowFor('trans_fixture_002')
+    await connection('transactions')
+      .where({ id })
+      .update({ merchant_nzbn: 'invented-nzbn', posted_date: '2026-01-02' })
+
+    const rows = await getTxns(connection)
+
+    expect(rows.map((r) => r.id).sort((a, b) => a - b)).toEqual(
+      (await allRows()).map((r) => r.id),
+    )
     for (const row of rows) {
       expect(Object.keys(row).sort()).toEqual([...ROW_KEYS].sort())
     }
