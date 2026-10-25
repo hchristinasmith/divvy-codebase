@@ -349,8 +349,8 @@ describe('exactAmountToCents', () => {
   })
 
   it('throws on an amount too large for integer cents instead of rounding it', () => {
-    expect(() => exactAmountToCents('90071992547409.92')).toThrow()
-    expect(() => exactAmountToCents('123456789012345678.99')).toThrow()
+    expect(() => exactAmountToCents('90071992547409.92')).toThrow(TypeError)
+    expect(() => exactAmountToCents('123456789012345678.99')).toThrow(TypeError)
   })
 
   it('accepts only text that JSON.parse also reads as a number', () => {
