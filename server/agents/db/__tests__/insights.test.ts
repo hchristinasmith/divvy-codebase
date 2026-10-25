@@ -257,6 +257,24 @@ describe('insertInsight', () => {
     expect((error as Error).message).toBe(`${field} must be at most ${max} characters`)
     expect((error as Error).message).not.toContain(sentinel)
   })
+
+  // #330 regression: pins old behaviour; the build replaces this. A title,
+  // body_md or period made only of invisible characters passes the blank check
+  // and is stored.
+  const INVISIBLE_ONLY: [field: 'title' | 'body_md' | 'period', name: string, text: string][] = (
+    ['title', 'body_md', 'period'] as const
+  ).flatMap((field): [typeof field, string, string][] => [
+    [field, 'U+3164', '\u3164'],
+    [field, 'U+200B', '\u200b'],
+  ])
+
+  it.each(INVISIBLE_ONLY)('stores a %s made only of %s', async (field, _, text) => {
+    const result = await insertInsight(insight({ [field]: text }), NOW)
+    expect(result).toStrictEqual({ ok: true, id: expect.any(Number) })
+
+    const [stored] = await storedRows()
+    expect(stored[field]).toBe(text)
+  })
 })
 
 describe('reading re-validates the stored chart (Ruling 8)', () => {
