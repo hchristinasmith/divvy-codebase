@@ -119,6 +119,11 @@ describe('the hero shows exactly the safeCents the server sent', () => {
     setup('all', { all: { safeToSpend: { safeCents: 123457 } } })
 
     expect(await hero()).toBe('$1,234.57')
+    // perDayCents stays the fixture's 92500; a client that divided
+    // safeCents by the days itself would show $205.76.
+    expect(screen.getByTestId('hero-per-day').textContent).toBe(
+      '$925.00 a day for the next 6 days',
+    )
   })
 
   it('shows the per-day line and the payday when the result is positive', async () => {
@@ -169,15 +174,17 @@ describe('the hero shows exactly the safeCents the server sent', () => {
 
 describe('a negative result shows $0 and a short-by line (Ruling 3)', () => {
   it('clamps the hero and says how short it is', async () => {
+    // shortByCents deliberately differs from −safeCents: a client that
+    // worked the shortfall out from safeCents would show $42.50.
     setup('all', {
       all: {
-        safeToSpend: { safeCents: -4250, shortByCents: 4250, perDayCents: -709 },
+        safeToSpend: { safeCents: -4250, shortByCents: 4321, perDayCents: -709 },
       },
     })
 
     expect(await hero()).toBe('$0.00')
     expect(screen.getByTestId('hero-short-by').textContent).toBe(
-      'short by $42.50',
+      'short by $43.21',
     )
     expect(screen.queryByTestId('hero-per-day')).toBeNull()
     expect(document.body.textContent).not.toContain('-$7.09')
@@ -388,7 +395,13 @@ describe('the account and tax cards', () => {
   })
 
   it('shows the pot, what is owed, the shortfall and the rate', async () => {
-    setup('strawb')
+    // A bills buffer makes the server's hold 250000 − (150000 − 20000), not
+    // owed − pot: a client that subtracted the two itself would show $1,000.00.
+    setup('strawb', {
+      strawb: {
+        safeToSpend: { strawbBillsBufferCents: 20000, strawbTaxHoldCents: 120000 },
+      },
+    })
     await hero()
     const card = screen.getByTestId('tax-card')
 
@@ -397,7 +410,7 @@ describe('the account and tax cards', () => {
       'of $2,500.00 owed so far',
     )
     expect(within(card).getByTestId('tax-short').textContent).toBe(
-      '$1,000.00 short',
+      '$1,200.00 short',
     )
     expect((await within(card).findByTestId('tax-rate')).textContent).toBe(
       '25% of profit',
@@ -520,6 +533,40 @@ describe('alerts: dot, text, link, dismiss, badge and empty state', () => {
     )
     expect(alertRow(OVER_BUDGET.id)).not.toBeNull()
     expect(fx.callsTo('GET', '/api/v1/overview')).toHaveLength(1)
+  })
+
+  it("drops a failed dismissal's message when the scope changes", async () => {
+    const { fx } = setup('all')
+    await hero()
+    // Load Strawb once, so the switch back renders from the cache and the
+    // alerts card would stay mounted without its scope key.
+    fireEvent.click(scopeToggle('Strawb'))
+    await waitFor(() =>
+      expect(screen.getByTestId('hero-amount').textContent).toBe('$5,000.00'),
+    )
+    fireEvent.click(scopeToggle('All'))
+    await waitFor(() =>
+      expect(screen.getByTestId('hero-amount').textContent).toBe('$5,550.00'),
+    )
+    fx.handlers.dismiss = () => ({
+      status: 404,
+      body: { error: 'Alert not found' },
+    })
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Dismiss: Cafes and restaurants is $30.00 over budget.',
+      }),
+    )
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'Alert not found',
+    )
+
+    fireEvent.click(scopeToggle('Strawb'))
+
+    await waitFor(() =>
+      expect(screen.getByTestId('hero-amount').textContent).toBe('$5,000.00'),
+    )
+    expect(screen.queryByRole('alert')?.textContent ?? null).toBeNull()
   })
 
   it('says all clear when there are none', async () => {

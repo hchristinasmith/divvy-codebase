@@ -88,8 +88,14 @@ function OverviewBody({
         {scope !== 'personal' && <TaxCard result={data.safeToSpend} />}
       </div>
       <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] items-start gap-4.5">
-        <AlertsCard alerts={data.alerts} />
-        <ActivityCard key={scope} rows={data.recentActivity} scope={scope} />
+        {/* Keyed by scope, so a switch drops a failed request's message and
+            the sub-filter rather than carrying them into the new scope. */}
+        <AlertsCard key={`alerts-${scope}`} alerts={data.alerts} />
+        <ActivityCard
+          key={`activity-${scope}`}
+          rows={data.recentActivity}
+          scope={scope}
+        />
       </div>
       <MoreLinks />
     </section>
