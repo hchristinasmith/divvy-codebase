@@ -363,6 +363,10 @@ export interface BillResponse {
   repeat: BillRepeat
   /** The anchor every occurrence is computed from. */
   firstDueDate: IsoDate
+  /**
+   * Only a one-off is ever paid: a repeating bill moves on to its next
+   * unpaid occurrence (#35).
+   */
   paid: boolean
   /** When "Mark paid" was pressed for this occurrence; null if unpaid. */
   paidAt: IsoTimestamp | null
@@ -373,8 +377,18 @@ export interface BillResponse {
 /** GET /api/v1/bills?scope= */
 export interface BillsResponse {
   items: BillResponse[]
-  /** Unpaid, due on or before the next payday (the same rule as the hero). */
+  /**
+   * Unpaid occurrences due on or before the next payday, gross: before the
+   * Strawb tax-pot buffer, so it equals the hero's
+   * `unpaidBillsCents + strawbBillsBufferCents`.
+   */
   dueBeforePaydayCents: Cents
+  /** The earliest unpaid bill in scope, overdue included; null when none. */
+  nextBill: BillResponse | null
+  /**
+   * Sum of the amounts of payments whose paid-at instant falls in the current
+   * Pacific/Auckland calendar month.
+   */
   paidThisMonthCents: Cents
 }
 
