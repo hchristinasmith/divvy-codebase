@@ -357,6 +357,19 @@ describe('Mark paid', () => {
     expect(fx.callsTo('POST', payPath('12'))).toHaveLength(1)
   })
 
+  it('pays once for two clicks that land before the pill re-renders', async () => {
+    const { fx } = setup(response({ items: [POWER] }))
+    await loaded()
+    fx.handlers.pay = () => ({ status: 201, body: { bill: POWER } })
+
+    // Both in one task: React has not yet drawn the pill disabled.
+    fireEvent.click(payButton('Invented Power Co'))
+    fireEvent.click(payButton('Invented Power Co'))
+
+    await waitFor(() => expect(fx.callsTo('GET', LIST)).toHaveLength(2))
+    expect(fx.callsTo('POST', payPath('12'))).toHaveLength(1)
+  })
+
   it('shows a repeating bill on its next due date, still to pay', async () => {
     const { fx } = setup(response({ items: [POWER] }))
     await loaded()
@@ -610,11 +623,14 @@ describe('the edit form', () => {
     expect(optionTexts(control(f, 'Paid from'))).toEqual(['No account', 'Test Trading'])
   })
 
-  it('sends only the amount when only the amount changed', async () => {
-    const { fx } = setup(FOUR)
-    fx.handlers.update = () => ({ body: { ...POWER, amountCents: 125000 } })
+  it('sends only the amount when only the amount changed, then refetches the bills and the overview', async () => {
+    const edited = { ...POWER, amountCents: 125000 }
+    const { fx } = setup(FOUR, { probe: true })
+    fx.handlers.update = () => ({ body: edited })
     await loaded()
+    await waitFor(() => expect(fx.callsTo('GET', OVERVIEW)).toHaveLength(1))
     const f = await openEdit('Invented Power Co')
+    fx.handlers.list = serve(response({ items: [edited, HOSTING, WATER, RATES] }))
 
     type(f, 'Amount ($)', '1250.00')
     fireEvent.click(within(f).getByRole('button', { name: 'Save' }))
@@ -626,6 +642,9 @@ describe('the edit form', () => {
     await waitFor(() =>
       expect(screen.queryByRole('form', { name: 'Edit Invented Power Co' })).toBeNull(),
     )
+    expect(fx.callsTo('GET', LIST)).toHaveLength(2)
+    expect(fx.callsTo('GET', OVERVIEW)).toHaveLength(2)
+    expect(within(row('12')).getByTestId('bill-amount').textContent).toBe('$1,250.00')
   })
 
   it.each([

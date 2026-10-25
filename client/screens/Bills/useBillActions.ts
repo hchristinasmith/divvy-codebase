@@ -47,7 +47,12 @@ export function usePayBill(): PayBill {
   })
   const { mutate } = write
   return {
-    pay: (id) => mutate(id),
+    // The disabled pill renders a tick after the click, so a second click in
+    // that gap would still land. The mutation cache knows at once.
+    pay: (id) => {
+      if (client.isMutating({ mutationKey: BILL_WRITES }) > 0) return
+      mutate(id)
+    },
     error: write.error?.message ?? null,
   }
 }
