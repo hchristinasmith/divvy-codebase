@@ -357,6 +357,10 @@ afterEach(async () => {
 describe('schema (Done-when 1, 4)', () => {
   it('creates exactly the seven tables', async () => {
     expect(NEW_TABLES).toHaveLength(7)
+    // At prd-02's own migration, not latest: undo whatever later migrations
+    // latest applied, so their tables never enter this list.
+    expect(await applied()).toContain(OURS)
+    while ((await applied()).slice(-1)[0] !== OURS) await db.migrate.down()
     const expected = [...tablesBefore.filter((t) => t !== 'targets'), ...NEW_TABLES].sort()
     expect(await tables()).toEqual(expected)
   })
@@ -1002,6 +1006,9 @@ describe('targets and rollback (Ruling 6, Done-when 2)', () => {
     expect(await db('targets').pluck('target_amount')).toEqual([4.35])
 
     await db.migrate.latest()
+    // Compared at prd-02's own migration, as in the schema test above.
+    expect(await applied()).toContain(OURS)
+    while ((await applied()).slice(-1)[0] !== OURS) await db.migrate.down()
     expect(await tables()).toEqual(
       [...tablesBefore.filter((t) => t !== 'targets'), ...NEW_TABLES].sort(),
     )
