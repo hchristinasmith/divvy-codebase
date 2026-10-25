@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import knex, { Knex } from 'knex'
 import config from '../../db/knexfile.js'
 import { migrateToJustBefore } from '../../db/__tests__/migrateToJustBefore.ts'
+import { omit } from '../../db/__tests__/omit.ts'
 import type {
   XeroBill,
   XeroInvoice,
@@ -207,13 +208,6 @@ const VALID: Record<string, () => Row> = {
   xero_bills: () => bill(),
   xero_pay_runs: () => payRun(),
   xero_profit_loss: () => profitLoss(),
-}
-
-// `row` without `column`, so the insert leaves it out. Not `{ column: undefined }`:
-// with `useNullAsDefault` knex binds that as NULL, which a column default
-// never sees, so it could not catch a default creeping in.
-function omit(row: Row, column: string): Row {
-  return Object.fromEntries(Object.entries(row).filter(([key]) => key !== column))
 }
 
 const refusedBy = (check: string) => new RegExp(`CHECK constraint failed: ${check}$`)
