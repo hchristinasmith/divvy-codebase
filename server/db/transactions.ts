@@ -10,6 +10,14 @@ import type {
 } from '../../models/sync.ts'
 import connection from './connection.ts'
 
+// The pattern for a LIKE that finds `term` anywhere (#299). `%` and `_` in the
+// term are escaped so they match themselves, and so is `\`, the escape
+// character `searchTxns` declares. One replace pass, so the backslashes it adds
+// are never escaped again.
+function containsPattern(term: string): string {
+  return `%${term.replace(/[\\%_]/g, (c) => `\\${c}`)}%`
+}
+
 // Akahu rows only (prd-02 Ruling 4): a Xero row has no place in these answers.
 export async function searchTxns(
   description?: string,
@@ -20,7 +28,11 @@ export async function searchTxns(
     .where({ source: 'akahu' })
 
   if (description) {
-    query = query.where('description', 'like', `%${description}%`)
+    // The pattern is a bound parameter; the ESCAPE clause names the character
+    // containsPattern escapes with.
+    query = query.whereRaw("description like ? escape '\\'", [
+      containsPattern(description),
+    ])
   }
 
   return query

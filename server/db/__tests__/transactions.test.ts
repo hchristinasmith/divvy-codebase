@@ -568,9 +568,8 @@ describe('searchTxns', () => {
     }
   })
 
-  // #299 pins. searchTxns puts the term inside `%…%` with LIKE and no ESCAPE
-  // clause, so `%` and `_` are wildcards today. The build that escapes them
-  // flips the first two; the backslash pin holds today and must hold after.
+  // #299 pins. searchTxns escapes `\`, `%` and `_` in the term and declares
+  // the escape character, so each of the three matches itself.
   describe('LIKE wildcards in the term', () => {
     async function setDescription(akahuId: string, description: string) {
       await connection('transactions').where({ akahu_id: akahuId }).update({ description })
@@ -583,31 +582,31 @@ describe('searchTxns', () => {
         .map((r) => r.id)
         .sort((a, b) => a - b)
 
-    it('today: a % in the term is a wildcard, so it returns every akahu row, not only the one with 50% off', async () => {
+    it('a % in the term matches itself, so it returns only the row with 50% off', async () => {
       await setDescription('trans_fixture_001', '50% off')
       await setDescription('trans_fixture_002', 'a_b')
       await setDescription('trans_fixture_003', 'plainword')
-      const everyAkahuRow = await akahuRowsWhere(() => true)()
+      const withPercent = await akahuRowsWhere((d) => d.includes('%'))()
 
       const rows = await searchTxns('%', connection)
 
-      expect(rows.map((r) => r.id).sort((a, b) => a - b)).toEqual(everyAkahuRow)
-      expect(rows.map((r) => r.akahu_id)).toContain('trans_fixture_003')
+      expect(rows.map((r) => r.id).sort((a, b) => a - b)).toEqual(withPercent)
+      expect(rows.map((r) => r.akahu_id)).toEqual(['trans_fixture_001'])
     })
 
-    it('today: a _ in the term is a wildcard, so it returns every akahu row with a non-empty description, not only a_b', async () => {
+    it('a _ in the term matches itself, so it returns only the row with a_b', async () => {
       await setDescription('trans_fixture_001', '50% off')
       await setDescription('trans_fixture_002', 'a_b')
       await setDescription('trans_fixture_003', 'plainword')
-      const nonEmptyAkahuRows = await akahuRowsWhere((d) => d.length > 0)()
+      const withUnderscore = await akahuRowsWhere((d) => d.includes('_'))()
 
       const rows = await searchTxns('_', connection)
 
-      expect(rows.map((r) => r.id).sort((a, b) => a - b)).toEqual(nonEmptyAkahuRows)
-      expect(rows.map((r) => r.akahu_id)).toContain('trans_fixture_001')
+      expect(rows.map((r) => r.id).sort((a, b) => a - b)).toEqual(withUnderscore)
+      expect(rows.map((r) => r.akahu_id)).toEqual(['trans_fixture_002'])
     })
 
-    it('today: a backslash in the term is an ordinary character, so a\\b matches only a literal a\\b', async () => {
+    it('a backslash in the term is an ordinary character, so a\\b matches only a literal a\\b', async () => {
       await setDescription('trans_fixture_001', 'x a\\b y')
       await setDescription('trans_fixture_002', 'a_b')
       await setDescription('trans_fixture_003', 'ab')
