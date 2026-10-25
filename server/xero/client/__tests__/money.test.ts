@@ -38,10 +38,28 @@ describe('xeroAmountToCents', () => {
 
   // "$5" and "1,000" are accepted by shared parseDollars (what a person
   // types); only this guard refuses them, so these rows go red without it.
-  it.each(['1e2', '$5', '1,000', '19.999', '', 'abc', '1.', '.5', '+5', ' 5'])(
-    'refuses %j, which is not an amount Xero sends',
-    (raw) => {
-      expect(() => xeroAmountToCents(raw)).toThrow(/is not a Xero amount/)
-    },
-  )
+  // Leading zeros: the old loose pattern let these through to parseDollars.
+  it.each([
+    '1e2',
+    '$5',
+    '1,000',
+    '19.999',
+    '',
+    'abc',
+    '1.',
+    '.5',
+    '+5',
+    ' 5',
+    '007.50',
+    '0019.99',
+  ])('refuses %j, which is not an amount Xero sends', (raw) => {
+    expect(() => xeroAmountToCents(raw)).toThrow(/is not a Xero amount/)
+  })
+
+  // Out of range is not a shape: the shared reader throws a TypeError from
+  // parseDollars (the class shared's own test pins; the wording is shared's),
+  // not this file's shape RangeError, and nothing rounds or zeroes it.
+  it('throws for an amount too large to be exact in cents, rather than zeroing it', () => {
+    expect(() => xeroAmountToCents('123456789012345678.99')).toThrow(TypeError)
+  })
 })

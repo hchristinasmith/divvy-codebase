@@ -154,6 +154,24 @@ describe('getReceivableInvoices', () => {
       message: 'AmountDue is not an amount in cents',
     })
   })
+
+  it('rejects an amount too large for integer cents, rather than zeroing it', async () => {
+    // Bare number literal in the body: the reader must keep its text, so the
+    // out-of-range amount reaches the conversion and is refused.
+    const page = fixture('invoices-accrec-page1.json').replace(
+      '"AmountDue": 1150.00',
+      '"AmountDue": 123456789012345678.99',
+    )
+    const { client } = clientWith([page, fixture('invoices-empty.json')])
+
+    const error = await client.getReceivableInvoices().catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(XeroClientError)
+    expect(error).toMatchObject({
+      code: 'bad_response',
+      message: 'AmountDue is not an amount in cents',
+    })
+  })
 })
 
 describe('getPayableBills', () => {
