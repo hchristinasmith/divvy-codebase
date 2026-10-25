@@ -217,6 +217,22 @@ describe('setUserCategory corrections and pending rows', () => {
     expect(correction.corrected_at <= new Date().toISOString()).toBe(true)
   })
 
+  it('appends a correction even when the category is unchanged, from and to the same category', async () => {
+    const before = await rowFor('trans_fixture_002')
+    expect(before.category).toBe('Supermarkets and grocery stores')
+
+    updatedRow(await setUserCategory(before.id, before.category, connection))
+
+    const corrections = await allCorrections()
+    expect(corrections).toHaveLength(1)
+    expect(corrections[0]).toMatchObject({
+      transaction_id: before.id,
+      from_category: 'Supermarkets and grocery stores',
+      to_category: 'Supermarkets and grocery stores',
+      source: 'user',
+    })
+  })
+
   it('writes no correction for an id no transaction has', async () => {
     expect(await setUserCategory(999_999, 'Bakeries', connection)).toBeUndefined()
 
@@ -247,6 +263,25 @@ describe('setUserCategory corrections and pending rows', () => {
 
     await expect(setUserCategory(id, 'Bakeries', connection)).rejects.toThrow(
       'invented correction failure',
+    )
+
+    expect(await allRows()).toEqual(before)
+    expect(await allCorrections()).toEqual([])
+  })
+
+  // The mirror of the test above: it fails an implementation that writes the
+  // correction first and the category second outside one transaction.
+  it('writes no correction when the category write fails', async () => {
+    const { id } = await rowFor('trans_fixture_002')
+    const before = await allRows()
+    // Dropped with the table by the next beforeEach's rollback.
+    await connection.raw(`
+      CREATE TRIGGER refuse_category_writes BEFORE UPDATE ON transactions
+      BEGIN SELECT RAISE(ABORT, 'invented category write failure'); END
+    `)
+
+    await expect(setUserCategory(id, 'Bakeries', connection)).rejects.toThrow(
+      'invented category write failure',
     )
 
     expect(await allRows()).toEqual(before)
