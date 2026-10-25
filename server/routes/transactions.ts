@@ -5,6 +5,13 @@ import type { UpdateTransactionCategoryResponse } from '../../models/transaction
 
 const router = express.Router()
 
+// What a 500 logs: the error's class only, as routes/accounts.ts does. Never
+// the error, its message or its stack: knex puts the SQL and its bound values
+// into the message, the stack repeats it, and a search string is one of them.
+function errorClass(err: unknown): string {
+  return err instanceof Error ? err.constructor.name : typeof err
+}
+
 // GET /api/v1/transactions?description=
 router.get('/', async (req, res) => {
   const { description } = req.query
@@ -12,8 +19,8 @@ router.get('/', async (req, res) => {
     const txns = await db.searchTxns(description as string)
     res.json({ txns })
   } catch (error) {
-    console.error(error)
-    res.status(500).send("Couldn't search products")
+    console.error('Error searching transactions:', errorClass(error))
+    res.status(500).send("Couldn't search transactions")
   }
 })
 
@@ -51,7 +58,7 @@ router.patch('/:id', async (req, res) => {
     const body: UpdateTransactionCategoryResponse = { transaction }
     res.json(body)
   } catch (error) {
-    console.error('Error setting transaction category:', error)
+    console.error('Error setting transaction category:', errorClass(error))
     return res.status(500).json({ error: 'Internal server error' })
   }
 })

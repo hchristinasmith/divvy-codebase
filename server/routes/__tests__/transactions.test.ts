@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import server from '../../server.ts'
 import connection from '../../db/connection.ts'
 import { serveOnLoopback, type LoopbackApi } from '../../test-utils/app.ts'
@@ -72,6 +72,30 @@ describe('GET /api/v1/transactions', () => {
     expect(row.balance_cents).toBe(dollarsToCents(source.balance))
     expect(Number.isInteger(row.amount_cents)).toBe(true)
     expect(Object.keys(row).sort()).toEqual([...TRANSACTION_COLUMNS].sort())
+  })
+
+  it("answers 500 with a fixed text and logs the error's class, never the search string", async () => {
+    const SEARCH = 'Sample Superette'
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await connection.schema.renameTable('transactions', 'transactions_aside')
+    try {
+      const res = await api
+        .get('/api/v1/transactions')
+        .query({ description: SEARCH })
+
+      expect(res.status).toBe(500)
+      expect(res.text).toBe("Couldn't search transactions")
+      // The error's class only: knex's message, and so its stack, carries the
+      // SQL and its bound values, and the search string is one of them.
+      expect(logged.mock.calls).toStrictEqual([
+        ['Error searching transactions:', 'Error'],
+      ])
+      // String(), not JSON.stringify: an Error object stringifies to `{}`.
+      expect(logged.mock.calls.flat().map(String).join('\n')).not.toContain(SEARCH)
+    } finally {
+      await connection.schema.renameTable('transactions_aside', 'transactions')
+      logged.mockRestore()
+    }
   })
 })
 
@@ -265,6 +289,27 @@ describe('PATCH /api/v1/transactions/:id', () => {
     for (const [i, row] of after.entries()) {
       if (row.id === target.id) continue
       expect(row).toEqual(before[i])
+    }
+  })
+
+  it("answers 500 with a fixed error and logs the error's class under its label", async () => {
+    const { id } = await rowFor('trans_fixture_002')
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await connection.schema.renameTable('transactions', 'transactions_aside')
+    try {
+      const res = await api
+        .patch(`/api/v1/transactions/${id}`)
+        .send({ category: 'Bakeries' })
+
+      expect(res.status).toBe(500)
+      expect(res.body).toStrictEqual({ error: 'Internal server error' })
+      // The error's class only: never the error object, its message or stack.
+      expect(logged.mock.calls).toStrictEqual([
+        ['Error setting transaction category:', 'Error'],
+      ])
+    } finally {
+      await connection.schema.renameTable('transactions_aside', 'transactions')
+      logged.mockRestore()
     }
   })
 
