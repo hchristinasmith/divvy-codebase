@@ -10,6 +10,7 @@ import overview from './overview.ts'
 import settings from './settings.ts'
 import sync from './sync.ts'
 import transactions from './transactions.ts'
+import xero from '../xero/routes/read.ts'
 
 // The /api/v1 route barrel (prd-02 Sequencing, wave 1). `server.ts` mounts
 // this router once at /api/v1; every API router is mounted here, at a path
@@ -23,6 +24,7 @@ router.use('/accounts', accounts)
 router.use('/categories', categories)
 router.use('/transactions', transactions)
 router.use('/sync', sync)
+router.use('/xero', xero)
 
 router.use('/overview', overview)
 router.use('/settings', settings)
