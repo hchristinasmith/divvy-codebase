@@ -8,7 +8,10 @@ import {
 } from '../contracts.ts'
 import { getProposal, listProposals, setStatus } from '../db/proposals.ts'
 import connection from '../../db/connection.ts'
-import { setUserCategory } from '../../db/transactions.ts'
+import {
+  getTransactionCategory,
+  setUserCategory,
+} from '../../db/transactions.ts'
 import type { Transaction } from '../../../models/transactions.ts'
 
 // /api/v1/agents/proposals (prd-04 Rulings 2 and 7, #51), mounted by
@@ -21,6 +24,11 @@ import type { Transaction } from '../../../models/transactions.ts'
 // Everything accept does runs in one database transaction, decision first:
 // a refusal at any later step throws `AcceptRefused`, which rolls back the
 // decision with it, so a refused proposal is still pending.
+//
+// A proposal is stale, and refused, once the transaction's category is no
+// longer the one it was proposed against, or once the user has set the
+// category by hand, even to that same value (decision 70b41742 on #51): a
+// hand-set category is never overwritten by a rule.
 //
 // Rejecting needs no other write: a rejected row is what stops the
 // (transaction, category) pair from being proposed again (#31).
@@ -129,7 +137,22 @@ router.post('/:id/accept', async (req, res) => {
           )
         }
 
-        // #51: stale check (decision pending)
+        // 4. The transaction as it is now.
+        const tx = await getTransactionCategory(proposal.transaction_id, trx)
+        if (tx === undefined) {
+          throw new AcceptRefused(404, 'Transaction not found')
+        }
+        // 5. Stale: the category moved, or the user set it by hand. One text
+        //    for both; the client recovers the same way.
+        if (
+          tx.category_source === 'user' ||
+          (tx.category ?? null) !== (proposal.current_category ?? null)
+        ) {
+          throw new AcceptRefused(
+            409,
+            'Transaction category has changed since this was proposed',
+          )
+        }
 
         // 6. The category, `rule` in both columns, and a correction.
         const transaction = await setUserCategory(

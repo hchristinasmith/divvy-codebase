@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import connection from '../connection.ts'
 import { assertInMemory } from '../../test-utils/app.ts'
-import { setUserCategory } from '../transactions.ts'
+import { getTransactionCategory, setUserCategory } from '../transactions.ts'
 import { TRANSACTION_COLUMNS } from './transactionColumns.ts'
 import type { Transaction } from '../../../models/transactions.ts'
 
@@ -455,5 +455,31 @@ describe('setUserCategory source', () => {
     expect(await allRows()).toEqual(before)
     expect((await rowFor('trans_fixture_002')).category_source).toBe('akahu')
     expect(await allCorrections()).toEqual([])
+  })
+})
+
+describe('getTransactionCategory', () => {
+  it('a known id gives exactly the category and who set it', async () => {
+    const { id } = await rowFor('trans_fixture_002')
+    await setUserCategory(id, 'Bakeries', connection)
+
+    const got = await getTransactionCategory(id, connection)
+
+    expect(got).toBeDefined()
+    expect(Object.keys(got ?? {}).sort()).toEqual(['category', 'category_source'])
+    expect(got).toEqual({ category: 'Bakeries', category_source: 'user' })
+  })
+
+  it('a null category gives category null', async () => {
+    const { id } = await rowFor('trans_fixture_002')
+    await connection('transactions').where({ id }).update({ category: null })
+
+    const got = await getTransactionCategory(id, connection)
+
+    expect(got).toStrictEqual({ category: null, category_source: 'akahu' })
+  })
+
+  it('an unknown id gives undefined', async () => {
+    expect(await getTransactionCategory(999_999, connection)).toBeUndefined()
   })
 })

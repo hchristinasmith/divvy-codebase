@@ -24,6 +24,19 @@ export async function searchTxns(
 }
 
 /**
+ * A transaction's effective category and who set it, or undefined when no
+ * transaction has that id. For the agent accept route's stale check (#51,
+ * decision 70b41742): a proposal is refused once the category has moved, or
+ * once the user has set it by hand, even to the same value.
+ */
+export async function getTransactionCategory(
+  id: number,
+  db = connection,
+): Promise<Pick<Transaction, 'category' | 'category_source'> | undefined> {
+  return db('transactions').where({ id }).first('category', 'category_source')
+}
+
+/**
  * Sets the user's category on a transaction (prd-01 Ruling 4): writes the
  * effective `category`, marks `category_source` with `source` so sync never
  * overwrites it, and appends a `category_corrections` row recording the

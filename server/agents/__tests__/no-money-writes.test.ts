@@ -101,7 +101,8 @@ const ADMIN = new Set(['schema', 'migrate', 'seed'])
 const EXEMPTION = {
   file: 'server/agents/routes/proposals.ts',
   module: 'server/db/transactions.ts',
-  names: ['setUserCategory'],
+  // getTransactionCategory only reads: the stale check (decision 70b41742).
+  names: ['setUserCategory', 'getTransactionCategory'],
 } as const
 
 interface Context {
@@ -600,6 +601,15 @@ describe('planted violations', () => {
       expect(accept([allowed])).toEqual([])
     })
 
+    it('importing the stale-check reader beside it passes', () => {
+      expect(
+        accept([
+          "import { getTransactionCategory, setUserCategory } from '../../db/transactions.ts'",
+          'const tx = await getTransactionCategory(1, trx)',
+        ]),
+      ).toEqual([])
+    })
+
     it.each([
       ['a second binding', "import { setUserCategory, getTxns } from '../../db/transactions.ts'"],
       ['a namespace import', "import * as t from '../../db/transactions.ts'"],
@@ -633,6 +643,14 @@ describe('planted violations', () => {
         "import { setUserCategory, setUserCategory as write } from '../../db/transactions.ts'",
       ],
       ['a reference held in a const', allowed + '\nconst f = setUserCategory'],
+      [
+        'the writer under the reader’s name',
+        "import { setUserCategory as getTransactionCategory } from '../../db/transactions.ts'",
+      ],
+      [
+        'the reader under the writer’s name',
+        "import { getTransactionCategory as setUserCategory } from '../../db/transactions.ts'",
+      ],
     ])('%s is flagged', (_why, lines) => {
       expect(accept([lines])).toContain('setUserCategory used other than by a direct call')
     })

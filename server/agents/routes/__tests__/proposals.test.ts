@@ -346,7 +346,9 @@ describe('POST /api/v1/agents/proposals/:id/accept', () => {
 
   // The proposal's foreign key cascades, so the only way to a proposal whose
   // transaction is gone is with the key off. The pool holds one connection,
-  // so the pragma applies to the app's queries too.
+  // so the pragma applies to the app's queries too. The stale check's read
+  // (step 4) is what refuses it: nothing between that read and
+  // setUserCategory's own can remove the row inside the same transaction.
   it('a transaction that is gone is 404, and the proposal is left pending', async () => {
     const { target, targetProposal } = await seedMain()
     await connection.raw('PRAGMA foreign_keys = OFF')
@@ -365,6 +367,109 @@ describe('POST /api/v1/agents/proposals/:id/accept', () => {
       await connection.raw('PRAGMA foreign_keys = ON')
     }
     expect(await connection.raw('PRAGMA foreign_keys')).toEqual([{ foreign_keys: 1 }])
+  })
+
+  describe('a stale proposal is refused', () => {
+    const STALE = { error: 'Transaction category has changed since this was proposed' }
+    const patch = (id: number, category: string) =>
+      api.patch(`/api/v1/transactions/${id}`).send({ category })
+
+    it('when the user changed the category: 409, pending, the user’s category and correction stand', async () => {
+      const { target, targetProposal } = await seedMain()
+      const before = await snapshotTables()
+      expect((await patch(target, 'Convenience stores')).status).toBe(200)
+      const afterPatch = await snapshotTables()
+
+      const res = await accept(targetProposal)
+
+      expect(res.status).toBe(409)
+      expect(res.body).toStrictEqual(STALE)
+      expect(await snapshotTables()).toEqual(afterPatch)
+      expect((await proposalRow(targetProposal)).status).toBe('pending')
+      expect(await transactionRow(target)).toMatchObject({
+        category: 'Convenience stores',
+        category_source: 'user',
+      })
+      // Exactly the PATCH's correction, nothing from accept.
+      expect(afterPatch.category_corrections.slice(0, -1)).toEqual(before.category_corrections)
+      const ours = await connection('category_corrections').where({ transaction_id: target })
+      expect(ours).toHaveLength(1)
+      expect(ours[0]).toMatchObject({
+        from_category: 'Supermarkets and grocery stores',
+        to_category: 'Convenience stores',
+        source: 'user',
+      })
+    })
+
+    it('when the user re-set the same category by hand: 409, nothing written', async () => {
+      const { target, targetProposal } = await seedMain()
+      expect((await patch(target, 'Supermarkets and grocery stores')).status).toBe(200)
+      // The category is still the one proposed against; only its source moved.
+      expect(await transactionRow(target)).toMatchObject({
+        category: (await proposalRow(targetProposal)).current_category,
+        category_source: 'user',
+      })
+      const afterPatch = await snapshotTables()
+
+      const res = await accept(targetProposal)
+
+      expect(res.status).toBe(409)
+      expect(res.body).toStrictEqual(STALE)
+      expect(await snapshotTables()).toEqual(afterPatch)
+      expect((await proposalRow(targetProposal)).status).toBe('pending')
+    })
+
+    it('a proposal against no category, on a transaction with none, is accepted', async () => {
+      await seedMain()
+      const bare = await seedTransaction('bare', { category: null })
+      const id = await seedProposal(proposal(bare, { current_category: null }))
+
+      const res = await accept(id)
+
+      expect(res.status).toBe(200)
+      expect(await transactionRow(bare)).toMatchObject({
+        category: 'Bakeries',
+        category_source: 'rule',
+      })
+      const ours = await connection('category_corrections').where({ transaction_id: bare })
+      expect(ours).toHaveLength(1)
+      expect(ours[0]).toMatchObject({ from_category: null, to_category: 'Bakeries', source: 'rule' })
+    })
+
+    it.each([
+      ['against no category, on a transaction with one', null, 'Supermarkets and grocery stores'],
+      ['against a category, on a transaction with none', 'Supermarkets and grocery stores', null],
+    ])('a proposal %s: 409, pending, nothing written', async (_why, current, category) => {
+      await seedMain()
+      const tx = await seedTransaction('drifted', { category })
+      const id = await seedProposal(proposal(tx, { current_category: current }))
+      const before = await snapshotTables()
+
+      const res = await accept(id)
+
+      expect(res.status).toBe(409)
+      expect(res.body).toStrictEqual(STALE)
+      expect(await snapshotTables()).toEqual(before)
+      expect((await proposalRow(id)).status).toBe('pending')
+    })
+
+    it('a stale proposal can still be rejected', async () => {
+      const { target, targetProposal } = await seedMain()
+      expect((await patch(target, 'Convenience stores')).status).toBe(200)
+      const afterPatch = await snapshotTables()
+
+      const res = await reject(targetProposal)
+
+      expect(res.status).toBe(200)
+      expect(res.body.proposal).toMatchObject({ id: targetProposal, status: 'rejected' })
+      const after = await snapshotTables()
+      expect({
+        ...after,
+        category_proposals: after.category_proposals.map((r) =>
+          r.id === targetProposal ? { ...r, status: 'pending' } : r,
+        ),
+      }).toEqual(afterPatch)
+    })
   })
 
   describe('a failed write rolls back the decision with it', () => {
