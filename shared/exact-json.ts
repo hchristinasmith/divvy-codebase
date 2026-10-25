@@ -8,16 +8,19 @@ import { parseDollars } from './money.ts'
 // string into a string literal holding the same characters, then parses. The
 // result has no numbers in it at all: an amount arrives as the decimal text
 // the bank sent and becomes integer cents through `exactAmountToCents`, which
-// is string arithmetic. Nothing on this path calls a float parser on a
-// decimal, multiplies or divides by 100, or rounds.
+// is string arithmetic: the whole dollars and the cents are read as separate
+// integers. Nothing on this path calls a float parser on a decimal, scales a
+// fraction by 100, or rounds.
 //
 // The rewrite is one regular expression, one token at a time: a whole string
 // literal (escapes included, so `\"` does not end it), or a JSON number
 // literal.
 // - A number is matched by JSON's own grammar, so `01` splits into `0` and
 //   `1` and the quoted result fails to parse, as `JSON.parse` would.
-// - A number followed by `:` is left bare, so an invalid numeric key stays
-//   invalid instead of becoming a quoted one.
+// - A number followed by `:` is never quoted whole, so an invalid numeric
+//   key stays invalid instead of becoming a quoted one. (Backtracking may
+//   quote a prefix, `10:` → `"1"0:`; a string followed by more of the number
+//   is still invalid.)
 // - An escape may stop at its backslash (`\\[\s\S]?`) and a string may end at
 //   the end of the text (`(?:"|$)`), so a string with no closing quote is
 //   consumed once (still invalid) rather than rescanned from every quote in

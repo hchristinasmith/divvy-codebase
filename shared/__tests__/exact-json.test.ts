@@ -147,17 +147,25 @@ describe('parseExactJson', () => {
     },
   )
 
-  it('rejects an unterminated string of escaped quotes in one pass', () => {
-    // A string pattern whose escape is `\\.` and that must end at a quote
-    // rescans this body from every quote in it: measured at about seven
-    // seconds, against well under a millisecond for the shipped pattern. The
-    // limit is far from both so a slow CI machine cannot flip it.
-    const body = `{"success":true,"items":["${'\\"'.repeat(100_000)}`
+  it.each([
+    ['', ''],
+    [' ending in a lone backslash', '\\'],
+  ])(
+    'rejects an unterminated string of escaped quotes%s in one pass',
+    (_label, tail) => {
+      // A string pattern that must end at a quote rescans this body from
+      // every quote in it, and so does one whose escape needs a character
+      // after the backslash when the body ends in a lone one: each measured
+      // at about seven seconds, against well under a millisecond for the
+      // shipped pattern. The limit is far from both so a slow CI machine
+      // cannot flip it.
+      const body = `{"success":true,"items":["${'\\"'.repeat(100_000)}${tail}`
 
-    const started = performance.now()
-    expect(() => parseExactJson(body)).toThrow(SyntaxError)
-    expect(performance.now() - started).toBeLessThan(1_000)
-  })
+      const started = performance.now()
+      expect(() => parseExactJson(body)).toThrow(SyntaxError)
+      expect(performance.now() - started).toBeLessThan(1_000)
+    },
+  )
 })
 
 describe('parseExactJson against the oracle', () => {
