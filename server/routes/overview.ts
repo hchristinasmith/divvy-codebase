@@ -17,12 +17,12 @@ import {
 // arithmetic and never reads Xero.
 //
 // POST /alerts/:id/dismiss stores a dismissal for an alert that is
-// currently derived and answers `DismissAlertResponse`. The contract's
-// comment names /api/v1/alerts/:id/dismiss; it is served here, under the
-// overview mount, because the barrel is not this route's to edit. The id's
-// shape is checked before anything is read. A page on another site must not
-// be able to dismiss from Hannah's browser, so the same check as POST
-// /api/v1/sync/run comes first (see `fromThisSite`).
+// currently derived and answers `DismissAlertResponse`. It is served here,
+// under the overview mount, and shared/contracts.ts names the path
+// /api/v1/overview/alerts/:id/dismiss. The id's shape is checked before
+// anything is read. A page on another site must not be able to dismiss
+// from Hannah's browser, so the same check as POST /api/v1/sync/run comes
+// first (see `fromThisSite`).
 //
 // Errors are fixed text. An `OverviewDataError` carries one of its own
 // constant messages, which name no id or value; anything else is a generic
