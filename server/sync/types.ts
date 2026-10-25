@@ -7,6 +7,11 @@
 // may omit is `null` here, never `undefined`, so a consumer cannot mistake a
 // missing key for a missing value.
 //
+// A foreign-currency conversion's `rate` (issue #155) is a number that is
+// not money, so it is not cents either. It stays the exact decimal text
+// Akahu sent, because this client converts no number by float; sync turns
+// it into a number.
+//
 // Only Akahu's own category is carried (`akahu_category`); the user's
 // category is Divvy's and sync never writes it (prd-01 Ruling 4). Akahu's
 // internal bookkeeping fields (`_user`, `_credentials`, `_authorisation`,
@@ -45,6 +50,25 @@ export interface TransactionMerchant {
   name: string | null
   nzbn: string | null
   website: string | null
+  /** The merchant's logo URL, verbatim (issue #155). */
+  logo: string | null
+}
+
+/**
+ * A card transaction's conversion from a foreign currency (issue #155).
+ * Akahu may send any subset of these fields.
+ */
+export interface TransactionConversion {
+  /**
+   * The foreign amount in hundredths of its currency's unit, read with the
+   * same exact cents conversion as every other amount (prd-01 Ruling 3).
+   * A currency with no minor unit (JPY) is still hundredths: 1500 is 150000.
+   */
+  amount_cents: number | null
+  /** A three-letter currency code, e.g. `USD`, verbatim. */
+  currency: string | null
+  /** The rate as Akahu's decimal text, e.g. `'0.6123'`; not money. */
+  rate: string | null
 }
 
 /** A transaction's bank-statement detail. Any subset may be present. */
@@ -54,6 +78,9 @@ export interface TransactionMeta {
   reference: string | null
   other_account: string | null
   logo: string | null
+  /** The card's last digits, as text so a leading zero survives (#155). */
+  card_suffix: string | null
+  conversion: TransactionConversion | null
 }
 
 /**

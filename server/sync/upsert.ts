@@ -25,7 +25,12 @@ import type {
 //   `server/sync/`, and it can only reach `status = 'pending'` rows.
 //
 // Money arrives from the client as integer cents (Ruling 3) and is stored
-// as it arrives; nothing here converts it.
+// as it arrives; nothing here converts it. A foreign-currency
+// `conversion_rate` (issue #155) is converted here because it is a rate, not
+// money: the client hands it over as Akahu's decimal text, and it becomes a
+// number before it is compared or written. Left to SQLite's float column,
+// the stored number would never equal the incoming text, and every run would
+// rewrite every converted row.
 
 // SQLite refuses a statement with more bound variables than this, so a
 // multi-row insert is split to stay under it.
@@ -181,8 +186,36 @@ export async function upsertAccounts(
 // ---------------------------------------------------------------------------
 // Settled transactions.
 
+/**
+ * The columns a settled and a pending row share for the merchant's logo,
+ * the card and a foreign-currency conversion (issue #155). A field Akahu
+ * does not send is NULL, so a field Akahu stops sending is cleared.
+ */
+interface DetailFields {
+  merchant_logo: string | null
+  card_suffix: string | null
+  conversion_amount_cents: number | null
+  conversion_currency: string | null
+  conversion_rate: number | null
+}
+
+function detailFields(
+  tx: SettledTransaction | PendingTransaction,
+): DetailFields {
+  const conversion = tx.meta?.conversion ?? null
+  const rate = conversion?.rate ?? null
+  return {
+    merchant_logo: tx.merchant?.logo ?? null,
+    card_suffix: tx.meta?.card_suffix ?? null,
+    conversion_amount_cents: conversion?.amount_cents ?? null,
+    conversion_currency: conversion?.currency ?? null,
+    // A rate, not money: the client checked it is plain decimal text.
+    conversion_rate: rate === null ? null : Number(rate),
+  }
+}
+
 /** Every `transactions` column Akahu owns on a settled row. */
-interface SettledAkahuFields {
+interface SettledAkahuFields extends DetailFields {
   account_id: string
   connection_id: string | null
   // Akahu's own timestamps for the transaction, not Divvy's.
@@ -228,6 +261,7 @@ function settledFields(tx: SettledTransaction): SettledAkahuFields {
     merchant_id: tx.merchant?.id ?? null,
     merchant_name: tx.merchant?.name ?? null,
     merchant_website: tx.merchant?.website ?? null,
+    ...detailFields(tx),
     akahu_category_id: tx.akahu_category?.id ?? null,
     akahu_category_name: tx.akahu_category?.name ?? null,
     akahu_category_group_id: tx.akahu_category?.group_id ?? null,
@@ -307,7 +341,7 @@ export async function upsertSettled(
 // The pending mirror.
 
 /** A pending row. Akahu gives it no id, hash, balance or category. */
-interface PendingInsert {
+interface PendingInsert extends DetailFields {
   akahu_id: null
   status: 'pending'
   source: 'akahu'
@@ -365,6 +399,7 @@ function pendingRow(tx: PendingTransaction): PendingInsert {
     merchant_id: tx.merchant?.id ?? null,
     merchant_name: tx.merchant?.name ?? null,
     merchant_website: tx.merchant?.website ?? null,
+    ...detailFields(tx),
     category: null,
     category_source: 'akahu',
     akahu_category_id: null,

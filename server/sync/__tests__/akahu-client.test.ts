@@ -157,6 +157,20 @@ const PENDING_KEYS = [
   'updated_at',
 ]
 
+const MERCHANT_KEYS = ['id', 'logo', 'name', 'nzbn', 'website']
+
+const META_KEYS = [
+  'card_suffix',
+  'code',
+  'conversion',
+  'logo',
+  'other_account',
+  'particulars',
+  'reference',
+]
+
+const CONVERSION_KEYS = ['amount_cents', 'currency', 'rate']
+
 const ACCOUNT_KEYS = [
   'balance_available_cents',
   'balance_current_cents',
@@ -317,9 +331,23 @@ describe('dollars to integer cents (prd-01 Ruling 3)', () => {
     const pending = await clientWith([
       fixture('akahu-pending.json'),
     ]).client.listPendingTransactions()
+    const settledFull = await clientWith([
+      fixture('akahu-transactions-full.json'),
+    ]).client.listTransactions(WINDOW)
+    const pendingFull = await clientWith([
+      fixture('akahu-pending-full.json'),
+    ]).client.listPendingTransactions()
 
-    const values = [...accounts, ...settled, ...pending].flatMap(centsValues)
+    const values = [
+      ...accounts,
+      ...settled,
+      ...pending,
+      ...settledFull,
+      ...pendingFull,
+    ].flatMap(centsValues)
     expect(values.length).toBeGreaterThan(0)
+    // The conversion amounts, nested two objects deep, are among them.
+    expect(values).toEqual(expect.arrayContaining([1234, 456]))
     for (const value of values) {
       expect(value === null || Number.isInteger(value)).toBe(true)
     }
@@ -547,6 +575,7 @@ describe('settled transactions', () => {
         name: 'Example Cafe',
         nzbn: 'fixture-nzbn-0001',
         website: 'https://example.com/cafe',
+        logo: null,
       },
       meta: {
         code: 'FIXTURE',
@@ -554,6 +583,8 @@ describe('settled transactions', () => {
         reference: 'fixture-ref-0001',
         other_account: 'XX-XXXX-XXXXXXX-XX',
         logo: 'https://example.com/fixture-cafe-logo.png',
+        card_suffix: null,
+        conversion: null,
       },
       akahu_category: {
         id: 'nzfcc_fixture0001',
@@ -563,11 +594,9 @@ describe('settled transactions', () => {
       },
     })
     expect(Object.keys(first.merchant ?? {}).sort()).toEqual(
-      ['id', 'name', 'nzbn', 'website'].sort(),
+      [...MERCHANT_KEYS].sort(),
     )
-    expect(Object.keys(first.meta ?? {}).sort()).toEqual(
-      ['code', 'logo', 'other_account', 'particulars', 'reference'].sort(),
-    )
+    expect(Object.keys(first.meta ?? {}).sort()).toEqual([...META_KEYS].sort())
     expect(Object.keys(first.akahu_category ?? {}).sort()).toEqual(
       ['group_id', 'group_name', 'id', 'name'].sort(),
     )
@@ -599,6 +628,7 @@ describe('settled transactions', () => {
       name: 'Example Bakery',
       nzbn: null,
       website: null,
+      logo: null,
     })
     expect(byId.get('trans_fixture0008')?.akahu_category).toEqual({
       id: 'nzfcc_fixture0007',
@@ -744,6 +774,7 @@ describe('pending transactions', () => {
         name: 'Example Fuel',
         nzbn: 'fixture-nzbn-0004',
         website: 'https://example.com/fuel',
+        logo: null,
       },
       meta: {
         code: 'FIXTURE',
@@ -751,6 +782,8 @@ describe('pending transactions', () => {
         reference: 'fixture-ref-pending',
         other_account: 'XX-XXXX-XXXXXXX-XX',
         logo: 'https://example.com/fixture-fuel-logo.png',
+        card_suffix: null,
+        conversion: null,
       },
       akahu_category: {
         id: 'nzfcc_fixture0004',
@@ -863,6 +896,234 @@ describe('pending transactions', () => {
 
     expect(pendingAsSettled.status).toBe('pending')
     expect(settledAsPending.status).toBe('settled')
+  })
+})
+
+describe('full fields (#155, prd-01 Ruling 4)', () => {
+  /** A minimal settled item carrying `extra` raw JSON members. */
+  function itemWith(extra: string): string {
+    return settledItem('trans_fixture_full_inline', '-1.00', extra)
+  }
+
+  async function onlySettled(extra: string): Promise<SettledTransaction> {
+    const [txn] = await clientWith([page([itemWith(extra)])]).client.listTransactions(
+      WINDOW,
+    )
+    return txn
+  }
+
+  it('maps the card suffix, conversion and merchant logo of a full item', async () => {
+    const { client } = clientWith([fixture('akahu-transactions-full.json')])
+
+    const [full] = await client.listTransactions(WINDOW)
+
+    expect(Object.keys(full).sort()).toEqual([...SETTLED_KEYS].sort())
+    expect(full.merchant).toEqual({
+      id: 'merchant_fixture_full_a',
+      name: 'Example Online Store',
+      nzbn: 'fixture-nzbn-full-a',
+      website: 'https://example.com/store',
+      logo: 'https://example.com/fixture-store-logo.png',
+    })
+    expect(full.meta).toEqual({
+      code: null,
+      particulars: 'Example',
+      reference: 'fixture-ref-full-a',
+      other_account: null,
+      logo: null,
+      card_suffix: '0042',
+      conversion: { amount_cents: 1234, currency: 'USD', rate: '0.6123' },
+    })
+    expect(Object.keys(full.merchant ?? {}).sort()).toEqual(
+      [...MERCHANT_KEYS].sort(),
+    )
+    expect(Object.keys(full.meta ?? {}).sort()).toEqual([...META_KEYS].sort())
+    expect(Object.keys(full.meta?.conversion ?? {}).sort()).toEqual(
+      [...CONVERSION_KEYS].sort(),
+    )
+  })
+
+  it('gives null for the parts of a conversion Akahu leaves out, and for no meta', async () => {
+    const { client } = clientWith([fixture('akahu-transactions-full.json')])
+
+    const [, currencyOnly, bare] = await client.listTransactions(WINDOW)
+
+    expect(currencyOnly.meta?.conversion).toEqual({
+      amount_cents: null,
+      currency: 'AUD',
+      rate: null,
+    })
+    expect(currencyOnly.meta?.card_suffix).toBeNull()
+    expect(currencyOnly.merchant).toBeNull()
+    expect(bare.meta).toBeNull()
+    expect(bare.merchant?.logo).toBeNull()
+  })
+
+  it.each([
+    ['an empty conversion', '{"conversion":{}}', { amount_cents: null, currency: null, rate: null }],
+    ['a null conversion', '{"conversion":null}', null],
+    ['no conversion', '{"code":"FIXTURE"}', null],
+  ])('maps %s', async (_label, meta, conversion) => {
+    const txn = await onlySettled(`,"meta":${meta}`)
+
+    expect(txn.meta?.conversion).toEqual(conversion)
+  })
+
+  it('keeps a card suffix with a leading zero as text', async () => {
+    const txn = await onlySettled(',"meta":{"card_suffix":"0123"}')
+
+    expect(txn.meta?.card_suffix).toBe('0123')
+  })
+
+  it.each([
+    ['a bare number', '0.6123', '0.6123'],
+    ['quoted text', '"0.6123"', '0.6123'],
+    ['zero', '0', '0'],
+    ['a whole number', '2', '2'],
+    ['the longest accepted text', `0.${'1'.repeat(28)}`, `0.${'1'.repeat(28)}`],
+  ])('keeps a rate written as %s as its exact text', async (_label, raw, text) => {
+    const txn = await onlySettled(`,"meta":{"conversion":{"rate":${raw}}}`)
+
+    expect(txn.meta?.conversion?.rate).toBe(text)
+  })
+
+  it('reads a conversion amount in hundredths of the unit, even for a currency with none', async () => {
+    // JPY has no minor unit, but conversion_amount_cents is hundredths of
+    // whatever currency is named: 1500 yen is stored as 150000, the same
+    // exact text-to-cents reading as every other amount. Pinned so a change
+    // to per-currency scaling is a deliberate one.
+    const txn = await onlySettled(
+      ',"meta":{"conversion":{"amount":1500,"currency":"JPY","rate":0.0103}}',
+    )
+
+    expect(txn.meta?.conversion).toEqual({
+      amount_cents: 150000,
+      currency: 'JPY',
+      rate: '0.0103',
+    })
+  })
+
+  it('carries the same fields on a pending item', async () => {
+    const { client } = clientWith([fixture('akahu-pending-full.json')])
+
+    const [pending] = await client.listPendingTransactions()
+
+    expect(Object.keys(pending).sort()).toEqual([...PENDING_KEYS].sort())
+    expect(pending.merchant).toEqual({
+      id: 'merchant_fixture_full_p',
+      name: 'Example Streaming',
+      nzbn: null,
+      website: null,
+      logo: 'https://example.com/fixture-streaming-logo.png',
+    })
+    expect(pending.meta).toEqual({
+      code: null,
+      particulars: null,
+      reference: null,
+      other_account: null,
+      logo: null,
+      card_suffix: '0077',
+      conversion: { amount_cents: 456, currency: 'GBP', rate: '0.4565' },
+    })
+  })
+
+  it.each([
+    ['text', '"USD 12.34"'],
+    ['a list', '[]'],
+  ])('rejects a conversion that is %s, naming the field', async (_label, conversion) => {
+    const { client } = clientWith([
+      page([itemWith(`,"meta":{"conversion":${conversion}}`)]),
+    ])
+
+    await expect(client.listTransactions(WINDOW)).rejects.toMatchObject({
+      code: 'bad_response',
+      message: 'transaction.meta.conversion is not an object',
+    })
+  })
+
+  it.each([
+    // A bare 978 or 1e3 would be stored as a number by the float column.
+    ['a bare number', '978'],
+    ['a number as text', '"978"'],
+    ['an exponent', '1e3'],
+    ['two letters', '"us"'],
+    ['four letters', '"USDX"'],
+    ['empty text', '""'],
+    ['padded text', '" USD"'],
+    // `true` is refused by the letters pattern too, so this pins wording,
+    // not the type guard.
+    ['a boolean', 'true'],
+  ])('rejects a currency that is %s, naming the field', async (_label, currency) => {
+    const { client } = clientWith([
+      page([itemWith(`,"meta":{"conversion":{"currency":${currency}}}`)]),
+    ])
+
+    await expect(client.listTransactions(WINDOW)).rejects.toMatchObject({
+      code: 'bad_response',
+      message: 'transaction.meta.conversion.currency is not a currency code',
+    })
+  })
+
+  it.each([
+    ['an exponent', '1e-7'],
+    ['a quoted exponent', '"1e-7"'],
+    ['a negative rate', '-0.5'],
+    ['a leading zero', '"01.5"'],
+    ['a trailing point', '"1."'],
+    ['words', '"abc"'],
+    ['empty text', '""'],
+    ['text one past the longest accepted', `0.${'1'.repeat(29)}`],
+    ['a list', '[1]'],
+  ])('rejects a rate that is %s, naming the field', async (_label, rate) => {
+    const { client } = clientWith([
+      page([itemWith(`,"meta":{"conversion":{"rate":${rate}}}`)]),
+    ])
+
+    await expect(client.listTransactions(WINDOW)).rejects.toMatchObject({
+      code: 'bad_response',
+      message: 'transaction.meta.conversion.rate is not a rate',
+    })
+  })
+
+  it('rejects a conversion amount with a third decimal place, as for any amount', async () => {
+    const { client } = clientWith([
+      page([itemWith(',"meta":{"conversion":{"amount":1.005}}')]),
+    ])
+
+    await expect(client.listTransactions(WINDOW)).rejects.toMatchObject({
+      code: 'bad_response',
+      message: 'transaction.meta.conversion.amount is missing or not an amount',
+    })
+  })
+
+  // A bare number reaches the client as its text and is kept verbatim, as
+  // for every optional text field; only a value that is not text is refused.
+  it.each([
+    ['card_suffix', ',"meta":{"card_suffix":true}', 'transaction.meta.card_suffix is not text'],
+    ['card_suffix', ',"meta":{"card_suffix":{}}', 'transaction.meta.card_suffix is not text'],
+    ['merchant.logo', ',"merchant":{"logo":true}', 'transaction.merchant.logo is not text'],
+    ['merchant.logo', ',"merchant":{"logo":{}}', 'transaction.merchant.logo is not text'],
+  ])('rejects a %s that is not text', async (_label, extra, message) => {
+    const { client } = clientWith([page([itemWith(extra)])])
+
+    await expect(client.listTransactions(WINDOW)).rejects.toMatchObject({
+      code: 'bad_response',
+      message,
+    })
+  })
+
+  it('rejects a malformed conversion on a pending item, naming the field', async () => {
+    const { client } = clientWith([
+      page([
+        '{"_account":"acc_fixture_inline","date":"2026-10-24T00:00:00.000Z","amount":-1,"meta":{"conversion":{"currency":"978"}}}',
+      ]),
+    ])
+
+    await expect(client.listPendingTransactions()).rejects.toMatchObject({
+      code: 'bad_response',
+      message:
+        'pending transaction.meta.conversion.currency is not a currency code',
+    })
   })
 })
 
@@ -1542,7 +1803,9 @@ describe('the fixtures are scrubbed (this repository is public)', () => {
     expect(files.sort()).toEqual(
       [
         'akahu-accounts.json',
+        'akahu-pending-full.json',
         'akahu-pending.json',
+        'akahu-transactions-full.json',
         'akahu-transactions.json',
       ].sort(),
     )
