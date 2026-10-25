@@ -65,10 +65,19 @@ export interface Transaction {
   akahu_category_group_name?: string | null
 }
 
-// A `transactions` row as GET and PATCH /api/v1/transactions answer it (#212).
-// An explicit column list, so a column added to the table stays out of these
-// responses until it is named here. Legacy category_*, Akahu's akahu_category_*,
+// A `transactions` row as GET and PATCH /api/v1/transactions answer it (#212),
+// and as the agent accept route answers it (#297). An explicit column list, so
+// a column added to the table stays out of these responses until it is named
+// in TRANSACTION_ROW_COLUMNS below. Legacy category_*, Akahu's akahu_category_*,
 // conversion_*, source, posted_date and merchant_nzbn are deliberately absent.
+//
+// Nullability follows the migrations, not the Transaction interface above:
+// every column the original table created is nullable, and a pending row
+// (prd-01 Ruling 1) has NULL `akahu_id`, `hash`, `created_at`, `balance_cents`
+// and `category`. The conversion_* columns are absent because the Dashboard's
+// envelope does not carry them; the legacy category_* and Akahu's
+// akahu_category_* are absent because the response carries the effective
+// `category` and its `category_source` (Ruling 4).
 export interface TransactionRow {
   id: number
   akahu_id: string | null
@@ -97,6 +106,46 @@ export interface TransactionRow {
   category_source: CategorySource
   status: TransactionStatus
 }
+
+// The select list for a TransactionRow, in the interface's order. Every reader
+// of `transactions` that answers or returns a row takes its columns from here
+// (server/db/synced.ts, server/db/transactions.ts), so there is one list to
+// keep in step with the interface. `satisfies` refuses a name the interface
+// lacks; a name the interface has and the list lacks is caught by the
+// key-set pins in the tests.
+//
+// It lives here rather than in server/db/ because this file is the one both
+// server/ and mcp/ may import (mcp/ never imports server/**), and beside the
+// interface it is typed against. models/insights.ts keeps a runtime const for
+// the same reason.
+export const TRANSACTION_ROW_COLUMNS = [
+  'id',
+  'akahu_id',
+  'account_id',
+  'user_id',
+  'connection_id',
+  'created_at',
+  'updated_at',
+  'date',
+  'description',
+  'amount_cents',
+  'balance_cents',
+  'type',
+  'hash',
+  'particulars',
+  'code',
+  'reference',
+  'other_account',
+  'logo',
+  'card_suffix',
+  'merchant_id',
+  'merchant_name',
+  'merchant_website',
+  'merchant_logo',
+  'category',
+  'category_source',
+  'status',
+] as const satisfies readonly (keyof TransactionRow)[]
 
 // Body of PATCH /api/v1/transactions/:id, the one category-edit route.
 // Sets the effective category with category_source 'user'; Akahu's
