@@ -8,6 +8,7 @@ import goals from './goals.ts'
 import habits from './habits.ts'
 import overview from './overview.ts'
 import settings from './settings.ts'
+import subscriptions from './subscriptions.ts'
 import sync from './sync.ts'
 import transactions from './transactions.ts'
 import xero from '../xero/routes/read.ts'
@@ -32,5 +33,6 @@ router.use('/budgets', budgets)
 router.use('/bills', bills)
 router.use('/goals', goals)
 router.use('/habits', habits)
+router.use('/subscriptions', subscriptions)
 
 export default router

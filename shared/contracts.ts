@@ -482,3 +482,111 @@ export interface HabitsResponse {
 export interface SetVerdictRequest {
   verdict: Verdict | null
 }
+
+// ---------------------------------------------------------------------------
+// Subscriptions
+// ---------------------------------------------------------------------------
+
+/** How often a subscription charges, from the gaps between its charges. */
+export type SubscriptionCadence = 'weekly' | 'monthly' | 'yearly'
+
+/**
+ * Hannah's answer about a merchant (prd-02 Ruling 14). It wins over
+ * detection both ways; no answer leaves detection and the name-hint
+ * question to decide.
+ */
+export type SubscriptionAnswer = 'subscription' | 'not_subscription'
+
+/**
+ * `cancelled` once Hannah marks it cancelled, until a charge lands after
+ * the cancel date; then `active` again.
+ */
+export type SubscriptionStatus = 'active' | 'cancelled'
+
+/** A merchant in one scope, as its settled charges show it. */
+export interface SubscriptionMerchant {
+  /**
+   * Opaque: send it back unchanged to mark, cancel or uncancel. One
+   * merchant paid from both scopes is a separate merchant in each.
+   */
+  merchantKey: string
+  scope: RowScope
+  /** From the latest charge. */
+  name: string
+  chargeCount: number
+  lastChargedOn: IsoDate
+  /** The latest charge, as a positive amount. */
+  amountCents: Cents
+}
+
+export interface SubscriptionRow extends SubscriptionMerchant {
+  /** Null when Hannah marked it but its charges show no single cadence. */
+  cadence: SubscriptionCadence | null
+  /** Its charges alone make it a subscription. */
+  detected: boolean
+  /** Hannah said it is one. */
+  marked: boolean
+  status: SubscriptionStatus
+  cancelledOn: IsoDate | null
+  /** The first charge after `cancelledOn`, which makes it active again. */
+  chargedAgainOn: IsoDate | null
+  /** Null exactly when `cadence` is null. */
+  perMonthCents: Cents | null
+  perYearCents: Cents | null
+}
+
+/**
+ * Over active rows with a cadence. Cancelled rows, questions and
+ * not-a-subscription merchants are never in a total.
+ */
+export interface SubscriptionTotals {
+  perMonthCents: Cents
+  /** 12 × `perMonthCents`. */
+  perYearCents: Cents
+  /** Active rows summed. */
+  countedCount: number
+  /** Active rows left out because their cadence is null. */
+  uncountedCount: number
+}
+
+/** GET /api/v1/subscriptions?scope= */
+export interface SubscriptionsResponse {
+  subscriptions: SubscriptionRow[]
+  /** "Is this a subscription?": a name that looks like one, too few charges. */
+  questions: SubscriptionMerchant[]
+  /** Merchants Hannah said are not subscriptions, so she can undo it. */
+  notSubscriptions: SubscriptionMerchant[]
+  totals: SubscriptionTotals
+}
+
+/** PUT /api/v1/subscriptions/mark. A null answer clears hers. */
+export interface MarkSubscriptionRequest {
+  scope: RowScope
+  merchantKey: string
+  answer: SubscriptionAnswer | null
+}
+
+/**
+ * POST /api/v1/subscriptions/cancel. Records the date only; nothing is sent
+ * to the merchant or the bank. `on` defaults to today in NZ and may not be
+ * in the future.
+ */
+export interface CancelSubscriptionRequest {
+  scope: RowScope
+  merchantKey: string
+  on?: IsoDate
+}
+
+/** POST /api/v1/subscriptions/uncancel */
+export interface UncancelSubscriptionRequest {
+  scope: RowScope
+  merchantKey: string
+}
+
+/** What is stored for the merchant after a write to the three above. */
+export interface SubscriptionMarkResponse {
+  scope: RowScope
+  merchantKey: string
+  answer: SubscriptionAnswer | null
+  cancelledOn: IsoDate | null
+}
