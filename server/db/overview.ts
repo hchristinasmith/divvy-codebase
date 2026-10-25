@@ -182,12 +182,11 @@ const WHOLE_NUMBER = /^-?\d+$/
 
 /**
  * The settings safe-to-spend needs. `settings` has a UNIQUE `key`
- * (migration 20261025150000, #46), so each key has one row, and the ordering
- * in the query (newest `updated_at`, then higher integer `id`) only matters
- * if that constraint fails; it is kept as a guard, not needed while the
- * constraint holds. An absent key takes its default; a present one must be a
- * whole number. `value` is NOT NULL, so the NULL check in the loop is
- * unreachable while that constraint holds. Range is left to the shared module.
+ * (migration 20261025150000, #46), so a key has at most one row; the query's
+ * ordering (newest `updated_at`, then higher integer `id`) picks between rows
+ * only on a table without that constraint, and is kept as a guard. An absent
+ * key takes its default; a present one must be a whole number. Range is left
+ * to the shared module.
  */
 async function readSettings(db: Db): Promise<Settings> {
   const rows: { key: string; value: unknown }[] = await db('settings')
@@ -215,7 +214,8 @@ async function readSettings(db: Db): Promise<Settings> {
     const key = SETTING_KEYS[field]
     if (!newest.has(key)) continue
     const value = newest.get(key)
-    // NULL cannot be stored (`value` is NOT NULL, #46); this check is a guard.
+    // `value` is NOT NULL (#46), so the type test is a guard; the whole-number
+    // test is live, since stored text such as a blank or a decimal reaches it.
     if (typeof value !== 'string' || !WHOLE_NUMBER.test(value)) {
       throw new OverviewDataError('a stored setting is not valid')
     }
