@@ -202,7 +202,7 @@ function setting(
   value: string | null,
   updatedAt = STAMP,
 ): Row {
-  return { id, user_id: 1, key, value, updated_at: updatedAt }
+  return { key, value, updated_at: updatedAt }
 }
 
 async function insertUser() {
@@ -720,35 +720,28 @@ describe('readOverview: settings', () => {
     expect(input.personalTaxOwedCents).toBe(4321)
   })
 
-  it('with several rows for one key, the newest updated_at wins, then the higher id', async () => {
-    await connection('settings').insert([
+  it('the table refuses a second row for one key, so there is never a newest to pick', async () => {
+    // #46: 20261025150000_settings_drop_user_id.js made settings.key UNIQUE.
+    await connection('settings').insert(
       setting('p-1', 'profit_cents', '111', '2026-10-01T00:00:00.000Z'),
-      setting('p-2', 'profit_cents', '222', '2026-10-20T00:00:00.000Z'),
-      setting('p-0', 'profit_cents', '333', '2026-10-05T00:00:00.000Z'),
-      setting(
-        't-1',
-        'personal_tax_owed_cents',
-        '10',
-        '2026-10-20T00:00:00.000Z',
-      ),
-      setting(
-        't-2',
-        'personal_tax_owed_cents',
-        '20',
-        '2026-10-20T00:00:00.000Z',
-      ),
-    ])
+    )
 
-    await readOverview('all', NOW, connection)
-    const input = lastInput()
+    await expect(
+      connection('settings').insert(
+        setting('p-2', 'profit_cents', '222', '2026-10-20T00:00:00.000Z'),
+      ),
+    ).rejects.toThrow('UNIQUE constraint failed: settings.key')
+  })
 
-    expect(input.profitCents).toBe(222)
-    expect(input.personalTaxOwedCents).toBe(20)
+  it('the table refuses a NULL value, so there is never one to default', async () => {
+    // #46: 20261025150000_settings_drop_user_id.js made settings.value NOT NULL.
+    await expect(
+      connection('settings').insert(setting('x', 'profit_cents', null)),
+    ).rejects.toThrow('NOT NULL constraint failed: settings.value')
   })
 
   it.each([
     ['not a number', 'sentinel-bad-1234'],
-    ['NULL', null],
     ['a decimal', '12.5'],
     ['beyond a safe integer', '9007199254740993'],
     ['blank', ''],
