@@ -1,5 +1,5 @@
 import { formatCents } from '../../../shared/money.ts'
-import type { ActivityRow, CategorySource } from '../../../shared/contracts.ts'
+import type { ActivityRow, CategorySource, IsoDate } from '../../../shared/contracts.ts'
 import type { CategoryGroup } from '../../../models/categories.ts'
 import CategoryPicker from './CategoryPicker.tsx'
 import { formatDay } from './format.ts'
@@ -31,6 +31,7 @@ export default function ActivityRowItem({
   groups,
   saving,
   error,
+  today,
   onCategory,
 }: {
   row: ActivityRow
@@ -39,6 +40,8 @@ export default function ActivityRowItem({
   saving: boolean
   /** The server's message for this row's last failed edit. */
   error: string | null
+  /** The server's NZ date today, so the row's date shows its year only when it is not this year. */
+  today: IsoDate
   onCategory: (category: string) => void
 }) {
   const tag = TAGS[row.scope]
@@ -89,7 +92,7 @@ export default function ActivityRowItem({
             <span>·</span>
             <span>{row.accountName}</span>
             <span>·</span>
-            <span>{formatDay(row.date)}</span>
+            <span>{formatDay(row.date, today)}</span>
             {pending && (
               <span className="rounded-pill bg-canvas px-1.5 font-semibold">
                 Pending

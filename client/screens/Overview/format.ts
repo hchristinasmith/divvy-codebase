@@ -20,17 +20,21 @@ const MONTHS = [
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
 
 /**
- * "2026-11-28" → "28 Nov". Read from the string's parts, never through
- * `Date`, so the browser's timezone cannot move the day. Anything that is
- * not a calendar date comes back unchanged.
+ * "2026-11-28" → "28 Nov" when `today` is in the same year, and "28 Nov
+ * 2026" when it is not. Read from the string's parts, never through `Date`,
+ * so the browser's timezone cannot move the day or the year. `today` is
+ * passed in, never read here, and a `today` that is not a calendar date
+ * shows the year. Anything that is not a calendar date comes back unchanged.
  */
-export function formatDay(iso: string): string {
+export function formatDay(iso: string, today: string): string {
   const match = ISO_DATE.exec(iso)
   if (!match) return iso
   const month = MONTHS[Number(match[2]) - 1]
   const day = Number(match[3])
   if (month === undefined || day < 1 || day > 31) return iso
-  return `${day} ${month}`
+  const label = `${day} ${month}`
+  const todayYear = ISO_DATE.exec(today)?.[1]
+  return todayYear === match[1] ? label : `${label} ${match[1]}`
 }
 
 /** Basis points as a percentage label: 2500 → "25%", 1050 → "10.5%". */

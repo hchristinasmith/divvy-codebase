@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   act,
   cleanup,
@@ -28,8 +28,17 @@ import {
 // stub (./fixtures.ts). The sync pill's fetch never settles. Every value is
 // invented.
 
+// The screen reads today from the clock, in Auckland. 23:00 UTC on 27 Oct is
+// 12:00 on 28 Oct there, so the screen's today is 28 Oct 2026. Only Date is
+// faked, so react-query and waitFor keep real timers.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2026-10-27T23:00:00Z'))
+})
+
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
@@ -858,6 +867,86 @@ describe('the screen states', () => {
     ).not.toBeNull()
     expect(screen.getByTestId('total-month').textContent).toBe('$0.00')
     expect(screen.getByTestId('total-year').textContent).toBe('$0.00')
+  })
+})
+
+describe("a date from another year than today's shows its year", () => {
+  it('shows the year on a last charge, a cancel and a charge after cancelling', async () => {
+    setup(
+      response({
+        subscriptions: [
+          row({
+            status: 'cancelled',
+            lastChargedOn: '2025-10-13',
+            cancelledOn: '2025-11-02',
+            chargedAgainOn: '2025-12-01',
+          }),
+        ],
+      }),
+    )
+    await loaded()
+
+    const stream = item('personal', STREAM)
+    expect(meta(stream)).toContain('Last charged 13 Oct 2025')
+    expect(meta(stream)).toContain('Cancelled 2 Nov 2025')
+    expect(
+      within(stream).getByText(
+        'Charged again on 1 Dec 2025 after you cancelled',
+      ),
+    ).not.toBeNull()
+  })
+
+  it('shows the year on a merchant in each card, and not on this year', async () => {
+    setup(
+      response({
+        subscriptions: [],
+        questions: [merchant({ lastChargedOn: '2025-09-04' })],
+        notSubscriptions: [
+          merchant({
+            merchantKey: 'd:invented demo notes',
+            scope: 'strawb',
+            name: 'Demo Notes',
+            lastChargedOn: '2026-10-03',
+          }),
+          merchant({
+            merchantKey: 'd:invented old notes',
+            scope: 'strawb',
+            name: 'Old Notes',
+            lastChargedOn: '2025-02-14',
+          }),
+        ],
+      }),
+    )
+    await loaded()
+
+    const questions = screen.getByRole('region', {
+      name: 'Is this a subscription?',
+    })
+    expect(questions.textContent).toContain(
+      'Last charged 4 Sep 2025 · 2 charges',
+    )
+    const notSubscriptions = screen.getByRole('region', {
+      name: 'Not subscriptions',
+    })
+    expect(notSubscriptions.textContent).toContain(
+      'Last charged 3 Oct · 2 charges',
+    )
+    expect(notSubscriptions.textContent).toContain(
+      'Last charged 14 Feb 2025 · 2 charges',
+    )
+  })
+
+  it('takes the year from the NZ calendar, not UTC: 1 Jan in Auckland is next year', async () => {
+    // 12:00 UTC on 31 Dec is 01:00 on 1 Jan in Auckland (NZDT), so the
+    // screen's today is in 2027 and a charge on 31 Dec 2026 shows its year.
+    // A screen that read UTC would say 31 Dec.
+    vi.setSystemTime(new Date('2026-12-31T12:00:00Z'))
+    setup(response({ subscriptions: [row({ lastChargedOn: '2026-12-31' })] }))
+    await loaded()
+
+    expect(meta(item('personal', STREAM))).toContain(
+      'Last charged 31 Dec 2026',
+    )
   })
 })
 
