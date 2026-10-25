@@ -77,6 +77,14 @@ describe('existing routes answer as before', () => {
     expect(res.body).toStrictEqual({ error: 'Transaction not found' })
   })
 
+  it('GET /api/v1/agents/proposals reaches the agents router', async () => {
+    const res = await api.get('/api/v1/agents/proposals')
+
+    // The router's own envelope, not Express's 404: the mount reached it.
+    expect(res.status).toBe(200)
+    expect(res.body).toStrictEqual({ items: [] })
+  })
+
   it('an unknown /api/v1 path is still a 404', async () => {
     const res = await api.get('/api/v1/nope')
 
@@ -85,7 +93,7 @@ describe('existing routes answer as before', () => {
 })
 
 const PLACEHOLDERS = ['budgets', 'goals', 'habits']
-const EXISTING = ['accounts', 'categories', 'transactions', 'sync', 'xero', 'overview', 'settings', 'subscriptions', 'bills']
+const EXISTING = ['accounts', 'categories', 'transactions', 'sync', 'xero', 'overview', 'settings', 'subscriptions', 'bills', 'agents']
 
 describe('placeholder routes', () => {
   it.each(PLACEHOLDERS)('GET /api/v1/%s answers 501 with a JSON error', async (name) => {
