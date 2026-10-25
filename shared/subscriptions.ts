@@ -43,6 +43,13 @@
 // before the cancel. A cancelled row is listed and is not in the totals:
 // the totals are what she still pays.
 //
+// A charge after the cancel rarely keeps the old rhythm, so with a cancel
+// date the charges up to and including it can stand for all of them. When
+// all of them show no cadence, the cadence is the one those show; when
+// those alone make a detection, the merchant is detected. The later charge
+// then shows as charged again, and the amount is still the latest charge.
+// Without a cancel date this never applies.
+//
 // Totals are integer cents (M1 #8). Per month, each subscription is rounded
 // half-up once: monthly is the amount, weekly is amount × 52 ÷ 12, yearly is
 // amount ÷ 12. Per year is 12 × the per-month figure, never amount × 52, so
@@ -255,7 +262,10 @@ export function merchantKeyOf(tx: {
   if (id !== '' && 2 + id.length <= MAX_MERCHANT_KEY_LENGTH) return `m:${id}`
   const normalised = normaliseDescription(tx.description ?? '')
   if (normalised === '') return null
-  return `d:${normalised.slice(0, MAX_MERCHANT_KEY_LENGTH - 2)}`
+  const cut = normalised.slice(0, MAX_MERCHANT_KEY_LENGTH - 2)
+  // Never cut between the halves of a surrogate pair (a letter beyond U+FFFF):
+  // SQLite stores a lone half as U+FFFD, so the stored key would match nothing.
+  return `d:${/[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut}`
 }
 
 function displayName(tx: SubscriptionTransaction): string {
@@ -455,15 +465,24 @@ export function subscriptions(
       amountCents: latest.amountCents,
     }
 
-    const cadence = classifyGaps(dates)
-    const detected = charges.length >= MIN_CHARGES && cadence !== null
     const mark = marks.get(key)
     const answer = mark?.answer ?? null
+    const cancelledOn = mark?.cancelledOn ?? null
+    // With a cancel date, the charges up to it can stand for the merchant
+    // when all of them cannot: a charge-again off the cadence must not hide
+    // the row (see the header).
+    const upToCancel =
+      cancelledOn === null ? [] : dates.filter((d) => d <= cancelledOn)
+    const cadenceAll = classifyGaps(dates)
+    const cadenceUpToCancel = classifyGaps(upToCancel)
+    const cadence = cadenceAll ?? cadenceUpToCancel
+    const detected =
+      (dates.length >= MIN_CHARGES && cadenceAll !== null) ||
+      (upToCancel.length >= MIN_CHARGES && cadenceUpToCancel !== null)
 
     if (answer === 'not_subscription') {
       notSubscriptions.push(merchant)
     } else if (answer === 'subscription' || detected) {
-      const cancelledOn = mark?.cancelledOn ?? null
       const chargedAgainOn =
         cancelledOn === null
           ? null

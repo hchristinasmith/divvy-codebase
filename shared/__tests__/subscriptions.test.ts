@@ -281,6 +281,18 @@ describe('normaliseDescription and merchantKeyOf (a stored contract)', () => {
       'a'.repeat(300),
       `d:${'a'.repeat(253)}`,
     ],
+    [
+      'a cut never splits a letter beyond U+FFFF',
+      null,
+      `${'a'.repeat(252)}${'\u{1D400}'.repeat(5)}`,
+      `d:${'a'.repeat(252)}`,
+    ],
+    [
+      'a letter beyond U+FFFF that fits whole is kept',
+      null,
+      `${'a'.repeat(251)}${'\u{1D400}'.repeat(5)}`,
+      `d:${'a'.repeat(251)}\u{1D400}`,
+    ],
     ['a digits-only description has no key', null, '0000 1111', null],
     ['nothing at all has no key', null, null, null],
   ])('%s', (_why, merchantId, description, expected) => {
@@ -917,6 +929,101 @@ describe('cancel marks, it never acts', () => {
     expect(
       result.subscriptions.map((r) => [r.status, r.chargedAgainOn]),
     ).toStrictEqual([['cancelled', null]])
+  })
+
+  describe('a charge-again off the cadence (Done-when 4)', () => {
+    // Gaps 31 and 28 are monthly; the 92-day gap to the charge-again is not.
+    const BEFORE = ['2026-01-05', '2026-02-05', '2026-03-05']
+    const AGAIN = '2026-06-05'
+    const CANCEL = '2026-03-10'
+
+    it('is detected from the charges up to the cancel: active, charged again, monthly, counted at the latest amount', () => {
+      const result = run(
+        [...charges(BEFORE), tx({ date: AGAIN, amountCents: -1799 })],
+        [mark({ cancelledOn: CANCEL })],
+      )
+
+      expect(result.subscriptions).toHaveLength(1)
+      const [row] = result.subscriptions
+      expect(keys(row)).toStrictEqual(keys(ROW_KEYS))
+      expect(row).toStrictEqual({
+        merchantKey: STREAM,
+        scope: 'personal',
+        name: 'Example Stream',
+        chargeCount: 4,
+        lastChargedOn: AGAIN,
+        amountCents: 1799,
+        cadence: 'monthly',
+        detected: true,
+        marked: false,
+        status: 'active',
+        cancelledOn: CANCEL,
+        chargedAgainOn: AGAIN,
+        perMonthCents: 1799,
+        perYearCents: 21588,
+      })
+      expect(result.totals).toStrictEqual({
+        perMonthCents: 1799,
+        perYearCents: 21588,
+        countedCount: 1,
+        uncountedCount: 0,
+      })
+    })
+
+    it('a charge on the cancel date counts as before the cancel', () => {
+      const result = run(charges([...BEFORE, AGAIN]), [
+        mark({ cancelledOn: BEFORE[BEFORE.length - 1] }),
+      ])
+
+      expect(
+        result.subscriptions.map((r) => [r.status, r.chargedAgainOn]),
+      ).toStrictEqual([['active', AGAIN]])
+    })
+
+    it('the same dates with no cancel date are not detected', () => {
+      expect(run(charges([...BEFORE, AGAIN]))).toStrictEqual(NOTHING)
+      expect(
+        run(charges([...BEFORE, AGAIN]), [mark({ cancelledOn: null })]),
+      ).toStrictEqual(NOTHING)
+    })
+
+    it('fewer than MIN_CHARGES charges up to the cancel are not detected', () => {
+      const upToCancel = BEFORE.slice(0, MIN_CHARGES - 1)
+      expect(upToCancel.length).toBeLessThan(MIN_CHARGES)
+      const result = run(
+        [...charges(upToCancel), tx({ date: AGAIN })],
+        [mark({ cancelledOn: '2026-02-10' })],
+      )
+
+      expect(result).toStrictEqual(NOTHING)
+    })
+
+    it('a cancel date that cuts the off-cadence gap out still needs the charges up to it to fit one band', () => {
+      // 2026-01-05 → 2026-01-08 is a three-day gap: no band.
+      const result = run(
+        charges(['2026-01-05', '2026-01-08', '2026-02-05', AGAIN]),
+        [mark({ cancelledOn: CANCEL })],
+      )
+
+      expect(result).toStrictEqual(NOTHING)
+    })
+
+    it('a marked subscription takes the cadence up to the cancel when all its charges show none', () => {
+      const result = run(charges(['2026-01-05', '2026-02-05', AGAIN]), [
+        mark({ answer: 'subscription', cancelledOn: CANCEL }),
+      ])
+
+      expect(
+        result.subscriptions.map((r) => [
+          r.detected,
+          r.cadence,
+          r.status,
+          r.chargedAgainOn,
+          r.perMonthCents,
+        ]),
+      ).toStrictEqual([[false, 'monthly', 'active', AGAIN, 1599]])
+      expect(result.totals.countedCount).toBe(1)
+    })
   })
 
   it('a cancelled row with no cadence is in neither count', () => {

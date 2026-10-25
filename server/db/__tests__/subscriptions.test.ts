@@ -590,6 +590,54 @@ describe('writes', () => {
     ).toStrictEqual([['active', null, null]])
   })
 
+  it('a charge-again off the cadence after a cancel shows as charged again; uncancelled, the merchant is no longer detected', async () => {
+    await cancelSubscription(target, '2026-09-01', NOW)
+    // 51 days after the last charge: no band.
+    await insertTxs([tx(EVERYDAY, '2026-10-20T00:00:00.000Z', -1799)])
+
+    const read = await readSubscriptions('personal')
+    expect(
+      read.subscriptions.map((r) => [
+        r.merchantKey,
+        r.status,
+        r.cadence,
+        r.cancelledOn,
+        r.chargedAgainOn,
+        r.perMonthCents,
+      ]),
+    ).toStrictEqual([
+      [STREAM, 'active', 'monthly', '2026-09-01', '2026-10-20', 1799],
+    ])
+    expect(read.totals.perMonthCents).toBe(1799)
+
+    await uncancelSubscription(target, LATER)
+    expect((await readSubscriptions('personal')).subscriptions).toStrictEqual(
+      [],
+    )
+  })
+
+  it('a cancel on a long description key with letters beyond U+FFFF is read back', async () => {
+    // The key is cut to fit the column; a cut inside a surrogate pair was
+    // stored as U+FFFD and the read then matched no mark.
+    await seedStream(EVERYDAY, {
+      merchant_id: null,
+      description: `${'a'.repeat(252)}${'\u{1D400}'.repeat(5)}`,
+    })
+    const sent = (await readSubscriptions('personal')).subscriptions.find((r) =>
+      r.merchantKey.startsWith('d:'),
+    )?.merchantKey
+    expect(sent).toBe(`d:${'a'.repeat(252)}`)
+    const longTarget = { scope: 'personal' as const, merchantKey: sent ?? '' }
+    await cancelSubscription(longTarget, '2026-09-01', NOW)
+
+    expect((await marks()).map((m) => m.merchant_key)).toContain(sent)
+    expect(
+      (await readSubscriptions('personal')).subscriptions
+        .filter((r) => r.merchantKey === sent)
+        .map((r) => [r.status, r.cancelledOn]),
+    ).toStrictEqual([['cancelled', '2026-09-01']])
+  })
+
   it('a write in one scope never marks the same key in the other', async () => {
     await seedStream(TRADING)
     await setAnswer(target, 'not_subscription', NOW)
