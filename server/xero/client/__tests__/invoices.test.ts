@@ -303,7 +303,7 @@ describe('sumAmountDueCents (prd-05 Ruling 7)', () => {
     expect(Object.keys(sum.otherCurrencies)).toEqual(['AUD'])
   })
 
-  it.each(['nzd', '', 'NZ', '__proto__'])(
+  it.each(['nzd', '', 'NZ', 'NZDX', 'XNZD', ' NZD', '__proto__'])(
     'refuses a currency code that is not three capital letters (%j)',
     (currency) => {
       const sum = () =>
