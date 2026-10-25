@@ -21,10 +21,13 @@ import { parseDollars } from './money.ts'
 //   key stays invalid instead of becoming a quoted one. (Backtracking may
 //   quote a prefix, `10:` → `"1"0:`; a string followed by more of the number
 //   is still invalid.)
-// - An escape may stop at its backslash (`\\[\s\S]?`) and a string may end at
-//   the end of the text (`(?:"|$)`), so a string with no closing quote is
-//   consumed once (still invalid) rather than rescanned from every quote in
-//   it.
+// - A string may end at the end of the text (`(?:"|$)`), so a string with no
+//   closing quote is one token. Without that, a number after a backslash
+//   inside it is quoted as if it stood outside a string, and the text can
+//   turn valid (`["{\1]` would read as `['{"1']`). The end-of-text ending also
+//   keeps the match from splitting a run of backslashes into escapes in every
+//   way, which a quote-only ending does (`\\[\s\S]?` lets an escape stop at
+//   its backslash).
 //
 // The amount pattern is JSON's number grammar too (no leading zero, no
 // exponent) with at most two decimal places, so a quoted amount cannot slip
