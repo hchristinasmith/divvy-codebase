@@ -1,5 +1,6 @@
 import { inspect } from 'node:util'
 import type { Express } from 'express'
+import type { Response as TestResponse } from 'supertest'
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -37,6 +38,12 @@ const SQLITE_CODE = 'SQLITE_CONSTRAINT'
 const raised = vi.hoisted(() => ({
   coded: undefined as Error | undefined,
   knex: undefined as unknown,
+}))
+// What the `/__test/coded-case` routes hand to next(): a test sets `make`,
+// which is given a fresh Error(CODED_SECRET) and returns what to raise, so
+// one route serves every shape of `code` (#354).
+const codeCase = vi.hoisted(() => ({
+  make: undefined as ((err: Error) => unknown) | undefined,
 }))
 
 vi.mock('../routes/index.ts', async (importOriginal) => {
@@ -220,6 +227,34 @@ vi.mock('../routes/index.ts', async (importOriginal) => {
     raised.coded = Object.assign(new Error(CODED_SECRET), { code: SQLITE_CODE })
     next(raised.coded)
   })
+  router.get('/__test/coded-case', (req, res, next) => {
+    if (codeCase.make === undefined) throw new Error('codeCase.make is unset')
+    raised.coded = new Error(CODED_SECRET)
+    next(codeCase.make(raised.coded))
+  })
+  router.get('/__test/after-headers-coded-case', (req, res, next) => {
+    if (codeCase.make === undefined) throw new Error('codeCase.make is unset')
+    res.status(200).write('partial')
+    raised.coded = new Error(CODED_SECRET)
+    next(codeCase.make(raised.coded))
+  })
+  // A real UNIQUE violation: the same invented value inserted twice into a
+  // table no migration owns, so freshApp() never drops it; it is dropped
+  // here first, so every request starts with it empty (#354).
+  router.get('/__test/knex-unique', async (req, res, next) => {
+    try {
+      await connection.schema.dropTableIfExists('test_354_unique')
+      await connection.schema.createTable('test_354_unique', (table) => {
+        table.text('a').unique()
+      })
+      await connection('test_354_unique').insert({ a: BOUND_VALUE })
+      await connection('test_354_unique').insert({ a: BOUND_VALUE })
+      res.status(204).end()
+    } catch (err) {
+      raised.knex = err
+      next(err)
+    }
+  })
   router.get('/__test/knex-insert', async (req, res, next) => {
     try {
       await connection('nonexistent_table').insert({ a: BOUND_VALUE })
@@ -240,6 +275,7 @@ let app: Express
 beforeEach(async () => {
   raised.coded = undefined
   raised.knex = undefined
+  codeCase.make = undefined
   app = await freshApp()
   served = await serveOnLoopback(app)
   api = served.api
@@ -638,9 +674,9 @@ describe('#203: an upstream 4xx on AkahuError or XeroClientError answers its sta
 // A 500's log is `err.name` and the stack frames, never the stack's first
 // line, which is `name: message` (#204). Knex puts the SQL and its bound values
 // in the message. node-sqlite3 raises its error from native code, so it has no
-// JavaScript frames and logs as its name alone.
+// JavaScript frames and logs as its name and its constant-shaped code (#354).
 describe('#204: a 500 on /api logs the error name and stack frames, never the message', () => {
-  it('a failing Knex query answers a fixed 500 and logs only `Error`, not its bound value', async () => {
+  it('a failing Knex query answers a fixed 500 and logs only `Error SQLITE_ERROR`, not its bound value', async () => {
     const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     const res = await api
@@ -653,7 +689,7 @@ describe('#204: a 500 on /api logs the error name and stack frames, never the me
     expect(Object.keys(res.body)).toEqual(['error'])
     expectNoLeak(res.text)
     expect(res.text).not.toContain(BOUND_VALUE)
-    expect(the500Log(errorLog.mock.calls)).toBe('Error')
+    expect(the500Log(errorLog.mock.calls)).toBe('Error SQLITE_ERROR')
     expectNoLogLeak(errorLog.mock.calls)
   })
 
@@ -798,70 +834,261 @@ function framesOfCoded(): string[] {
   return frames
 }
 
-// #354, before the change: what a 500 carrying an `err.code` logs today. The
-// whole log is pinned, so a code appearing in it, or anything else changing,
-// turns these red. The coded tests are expected to flip once the handler logs
-// a constant-shaped `err.code`; the message must stay out either way.
-describe('#354 before the change: a 500 carrying err.code logs the name and frames only, not the code', () => {
-  it('a failing Knex insert carries code SQLITE_ERROR and logs exactly `Error`, no code and no bound value', async () => {
+// The fixed JSON 500 every coded error below answers, whatever its code.
+function expectFixed500(res: TestResponse): void {
+  expect(res.status).toBe(500)
+  expect(res.headers['content-type']).toMatch(/^application\/json/)
+  expect(res.body).toStrictEqual({ error: 'Internal server error' })
+  expect(Object.keys(res.body)).toEqual(['error'])
+  expectNoLeak(res.text)
+}
+
+// A request whose route writes part of a response before raising. As in the
+// #204 headers-sent tests above, the app runs as production so Express's
+// default handler would log the stack if the error reached it.
+async function requestAfterHeaders(path: string): Promise<void> {
+  const env: unknown = app.get('env')
+  app.set('env', 'production')
+  try {
+    await expect(
+      api.get(path).set('X-Divvy-Test', HEADER_SECRET),
+    ).rejects.toMatchObject({ code: 'ECONNRESET' })
+    // Express's default handler logs on the next turn.
+    await new Promise((resolve) => setImmediate(resolve))
+  } finally {
+    app.set('env', env)
+  }
+}
+
+// Leaves the Error without a `code` property at all.
+const NO_CODE = Symbol('no code property')
+
+function withCode(code: unknown): (err: Error) => unknown {
+  return (err) => (code === NO_CODE ? err : Object.assign(err, { code }))
+}
+
+// Codes that are constant-shaped: capital letters, digits and underscores,
+// starting with a letter, up to the longest the handler accepts.
+const LOGGED_CODES = [
+  ['SQLITE_CONSTRAINT', SQLITE_CODE],
+  ['a single capital letter', 'E'],
+  ['digits after the first letter', 'E2BIG'],
+  ['the longest accepted, 64 characters', 'A'.repeat(64)],
+] as const
+
+// Codes that are not constant-shaped, or are not strings: each logs exactly
+// what an Error with no code logs.
+const UNLOGGED_CODES: ReadonlyArray<readonly [string, unknown]> = [
+  ['no code property', NO_CODE],
+  ['undefined', undefined],
+  ['null', null],
+  ['a number (SQLite errno 19)', 19],
+  ['a String object', new String(SQLITE_CODE)],
+  ['an empty string', ''],
+  ['lowercase', 'sqlite_constraint'],
+  ['mixed case', 'SQLITE_Constraint'],
+  ['65 characters', 'A'.repeat(65)],
+  ['a leading digit', '1SQLITE'],
+  ['a leading underscore', '_SQLITE'],
+  ['a space', 'SQLITE CONSTRAINT'],
+  ['a hyphen', 'SQLITE-CONSTRAINT'],
+  ['a colon', 'SQLITE:CONSTRAINT'],
+  ['a trailing newline', `${SQLITE_CODE}\n`],
+  ['a newline between two codes', `SQLITE_ERROR\n${SQLITE_CODE}`],
+  ['a marker value', CODED_SECRET],
+  ['`SQLITE_ERROR: <bound value>`', `SQLITE_ERROR: ${BOUND_VALUE}`],
+]
+
+// Reading `code` throws, so it is as if there were none; the error is
+// otherwise readable, so its frames are still logged.
+const THROWING_CODES: ReadonlyArray<readonly [string, (err: Error) => unknown]> = [
+  [
+    'a code getter that throws',
+    (err) =>
+      Object.defineProperty(err, 'code', {
+        get() {
+          throw new Error(FIELD_SECRET)
+        },
+      }),
+  ],
+  [
+    'a Proxy whose get trap throws only for code',
+    (err) =>
+      new Proxy(Object.assign(err, { code: SQLITE_CODE }), {
+        get(target, prop) {
+          if (prop === 'code') throw new Error(FIELD_SECRET)
+          return Reflect.get(target, prop) as unknown
+        },
+      }),
+  ],
+  // The get trap reads from the target: read through the Proxy, V8's `stack`
+  // is not a string, which would drop the frames for a reason not under test.
+  [
+    'a Proxy whose has trap throws only for code',
+    (err) =>
+      new Proxy(Object.assign(err, { code: SQLITE_CODE }), {
+        get(target, prop) {
+          return Reflect.get(target, prop) as unknown
+        },
+        has(target, prop) {
+          if (prop === 'code') throw new Error(FIELD_SECRET)
+          return Reflect.has(target, prop)
+        },
+      }),
+  ],
+]
+
+// #354: a 500 from an Error also logs `err.code` when it is a constant-shaped
+// string, after the name on the same line, never the message. The whole log is
+// pinned, so a code appearing where it must not, or missing where it must,
+// turns these red.
+describe('#354: a 500 carrying a constant-shaped err.code logs the name, the code and the frames, never the message', () => {
+  it('a failing Knex insert carries code SQLITE_ERROR and logs exactly `Error SQLITE_ERROR`, no bound value', async () => {
     const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     const res = await api
       .get('/api/v1/__test/knex-insert')
       .set('X-Divvy-Test', HEADER_SECRET)
 
-    expect(res.status).toBe(500)
-    expect(res.body).toStrictEqual({ error: 'Internal server error' })
+    expectFixed500(res)
+    expect(res.text).not.toContain(BOUND_VALUE)
     // The premise #354 rests on: node-sqlite3 sets a constant-shaped code, and
     // the message holds the bound value.
     expect(raised.knex).toBeInstanceOf(Error)
     expect((raised.knex as Error & { code?: unknown }).code).toBe('SQLITE_ERROR')
     expect((raised.knex as Error).message).toContain(BOUND_VALUE)
-    expect(errorLog.mock.calls).toStrictEqual([['Unhandled /api error:', 'Error']])
+    expect(errorLog.mock.calls).toStrictEqual([
+      ['Unhandled /api error:', 'Error SQLITE_ERROR'],
+    ])
     expectNoLogLeak(errorLog.mock.calls)
   })
 
-  it('today: a route Error with code SQLITE_CONSTRAINT logs `Error` and its frames, without the code', async () => {
+  it('a real UNIQUE violation logs exactly `Error SQLITE_CONSTRAINT`, not the duplicated value', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const res = await api
+      .get('/api/v1/__test/knex-unique')
+      .set('X-Divvy-Test', HEADER_SECRET)
+
+    expectFixed500(res)
+    expect(res.text).not.toContain(BOUND_VALUE)
+    expect(raised.knex).toBeInstanceOf(Error)
+    expect((raised.knex as Error & { code?: unknown }).code).toBe(SQLITE_CODE)
+    expect((raised.knex as Error).message).toContain(BOUND_VALUE)
+    expect(errorLog.mock.calls).toStrictEqual([
+      ['Unhandled /api error:', `Error ${SQLITE_CODE}`],
+    ])
+    expectNoLogLeak(errorLog.mock.calls)
+  })
+
+  it('a route Error with code SQLITE_CONSTRAINT logs `Error SQLITE_CONSTRAINT` and its frames', async () => {
     const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     const res = await api
       .get('/api/v1/__test/coded-error')
       .set('X-Divvy-Test', HEADER_SECRET)
 
-    expect(res.status).toBe(500)
-    expect(res.body).toStrictEqual({ error: 'Internal server error' })
-    expect(Object.keys(res.body)).toEqual(['error'])
-    expectNoLeak(res.text)
-    expect(errorLog.mock.calls).toStrictEqual([
-      ['Unhandled /api error:', ['Error', ...framesOfCoded()].join('\n')],
-    ])
-    expectNoLogLeak(errorLog.mock.calls)
-  })
-
-  // As in the #204 headers-sent tests above, the app runs as production so
-  // Express's default handler would log the stack if the error reached it.
-  it('today: the same coded Error after the response started logs `Error` and its frames, without the code', async () => {
-    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const env: unknown = app.get('env')
-    app.set('env', 'production')
-    try {
-      await expect(
-        api
-          .get('/api/v1/__test/after-headers-coded')
-          .set('X-Divvy-Test', HEADER_SECRET),
-      ).rejects.toMatchObject({ code: 'ECONNRESET' })
-      // Express's default handler logs on the next turn.
-      await new Promise((resolve) => setImmediate(resolve))
-    } finally {
-      app.set('env', env)
-    }
-
+    expectFixed500(res)
     expect(errorLog.mock.calls).toStrictEqual([
       [
-        'Unhandled /api error after the response started:',
-        ['Error', ...framesOfCoded()].join('\n'),
+        'Unhandled /api error:',
+        [`Error ${SQLITE_CODE}`, ...framesOfCoded()].join('\n'),
       ],
     ])
     expectNoLogLeak(errorLog.mock.calls)
   })
+
+  it.each(LOGGED_CODES)(
+    'a code that is %s is logged after the name',
+    async (_what, code) => {
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      codeCase.make = withCode(code)
+
+      const res = await api
+        .get('/api/v1/__test/coded-case')
+        .set('X-Divvy-Test', HEADER_SECRET)
+
+      expectFixed500(res)
+      expect(errorLog.mock.calls).toStrictEqual([
+        [
+          'Unhandled /api error:',
+          [`Error ${code}`, ...framesOfCoded()].join('\n'),
+        ],
+      ])
+      expectNoLogLeak(errorLog.mock.calls)
+    },
+  )
+
+  it.each(UNLOGGED_CODES)(
+    'a code that is %s logs nothing extra: `Error` and its frames',
+    async (_what, code) => {
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      codeCase.make = withCode(code)
+
+      const res = await api
+        .get('/api/v1/__test/coded-case')
+        .set('X-Divvy-Test', HEADER_SECRET)
+
+      expectFixed500(res)
+      expect(errorLog.mock.calls).toStrictEqual([
+        ['Unhandled /api error:', ['Error', ...framesOfCoded()].join('\n')],
+      ])
+      expectNoLogLeak(errorLog.mock.calls)
+    },
+  )
+
+  it.each(THROWING_CODES)(
+    '%s answers the same fixed 500 and logs `Error` and its frames',
+    async (_what, make) => {
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      codeCase.make = make
+
+      const res = await api
+        .get('/api/v1/__test/coded-case')
+        .set('X-Divvy-Test', HEADER_SECRET)
+
+      expectFixed500(res)
+      expect(errorLog.mock.calls).toStrictEqual([
+        ['Unhandled /api error:', ['Error', ...framesOfCoded()].join('\n')],
+      ])
+      expectNoLogLeak(errorLog.mock.calls)
+    },
+  )
+
+  it('the coded Error after the response started logs `Error SQLITE_CONSTRAINT` and its frames on its own line', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await requestAfterHeaders('/api/v1/__test/after-headers-coded')
+
+    expect(errorLog.mock.calls).toStrictEqual([
+      [
+        'Unhandled /api error after the response started:',
+        [`Error ${SQLITE_CODE}`, ...framesOfCoded()].join('\n'),
+      ],
+    ])
+    expectNoLogLeak(errorLog.mock.calls)
+  })
+
+  // The headers-sent line follows the same rule as the 500 line.
+  it.each([
+    ['`SQLITE_ERROR: <bound value>`', withCode(`SQLITE_ERROR: ${BOUND_VALUE}`)],
+    ['a trailing newline', withCode(`${SQLITE_CODE}\n`)],
+    ...THROWING_CODES,
+  ] as const)(
+    'after the response started, a code that is %s logs `Error` and its frames',
+    async (_what, make) => {
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      codeCase.make = make
+
+      await requestAfterHeaders('/api/v1/__test/after-headers-coded-case')
+
+      expect(errorLog.mock.calls).toStrictEqual([
+        [
+          'Unhandled /api error after the response started:',
+          ['Error', ...framesOfCoded()].join('\n'),
+        ],
+      ])
+      expectNoLogLeak(errorLog.mock.calls)
+    },
+  )
 })
