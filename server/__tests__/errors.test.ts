@@ -19,6 +19,10 @@ const FIELD_SECRET = 'raw request text in a field'
 // Sent as a request header on every request below: it must reach neither the
 // response nor the log.
 const HEADER_SECRET = 'header secret marker 5a1e0c'
+// The message on an upstream AkahuError or XeroClientError (#203).
+const UPSTREAM_SECRET = 'upstream refusal marker 7c2d'
+// A value bound into a failing Knex insert; Knex puts it in err.message (#204).
+const BOUND_VALUE = 'BINDING_VALUE_42'
 
 vi.mock('../routes/index.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../routes/index.ts')>()
@@ -64,6 +68,26 @@ vi.mock('../routes/index.ts', async (importOriginal) => {
     next(
       Object.assign(new Error(SECRET), { body: FIELD_SECRET, statusCode: 404.5 }),
     )
+  })
+  // #203, #204: errors from the real classes and a real failing Knex query.
+  // These modules only declare classes and constants on import; nothing reads
+  // the environment, opens a socket or calls an API.
+  const { AkahuError } = await import('../sync/akahu-client.ts')
+  const { XeroClientError } = await import('../xero/client/errors.ts')
+  const { default: connection } = await import('../db/connection.ts')
+  router.get('/__test/akahu-401', (req, res, next) => {
+    next(new AkahuError('unauthorized', UPSTREAM_SECRET, 401))
+  })
+  router.get('/__test/xero-429', (req, res, next) => {
+    next(new XeroClientError('rate_limited', UPSTREAM_SECRET, 429, 30))
+  })
+  router.get('/__test/knex-insert', async (req, res, next) => {
+    try {
+      await connection('nonexistent_table').insert({ a: BOUND_VALUE })
+      res.status(204).end()
+    } catch (err) {
+      next(err)
+    }
   })
   router.use(actual.default)
   return { default: router }
@@ -282,4 +306,68 @@ describe('a non-/api error is not converted', () => {
       expect(res.headers['content-type']).toMatch(/^text\/html/)
     },
   )
+})
+
+// PRE-FIX BEHAVIOUR, pinned before #203 changes it. An upstream 4xx carried on
+// AkahuError or XeroClientError (an expired token, a revoked app, a rate
+// limit) is read as the caller's fault: it answers that status and nothing is
+// logged. #203's fix will flip the "not logged" assertion.
+describe('#203 pre-fix: an upstream 4xx on AkahuError or XeroClientError answers as a client error and is not logged', () => {
+  it.each([
+    ['an AkahuError with status 401', '/api/v1/__test/akahu-401', 401],
+    ['a XeroClientError with status 429', '/api/v1/__test/xero-429', 429],
+  ] as const)(
+    '%s answers that status with { error: "Client error" } and no log',
+    async (_what, path, status) => {
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+      const res = await api.get(path).set('X-Divvy-Test', HEADER_SECRET)
+
+      expect(res.status).toBe(status)
+      expect(res.headers['content-type']).toMatch(/^application\/json/)
+      expect(res.body).toStrictEqual({ error: 'Client error' })
+      expect(Object.keys(res.body)).toEqual(['error'])
+      expectNoLeak(res.text)
+      expect(res.text).not.toContain(UPSTREAM_SECRET)
+      expect(errorLog).not.toHaveBeenCalled()
+    },
+  )
+})
+
+// PRE-FIX BEHAVIOUR, pinned before #204 changes it. The 500 log is err.stack,
+// whose first line is `name: message`, and Knex puts the SQL and its bound
+// values in the message, so a row value reaches the log. #204's fix will flip
+// the BOUND_VALUE assertion on the log.
+//
+// The error is node-sqlite3's, raised from native code, so its stack has no
+// JavaScript frames at all: today the logged stack is the message line alone.
+// A fix that logs `err.name` plus the frames would log only `Error` here.
+describe('#204 pre-fix: a failing Knex query on /api logs its bound values in the 500 stack', () => {
+  it('answers a fixed 500 and logs a stack that is only the message line, bound value included', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const res = await api
+      .get('/api/v1/__test/knex-insert')
+      .set('X-Divvy-Test', HEADER_SECRET)
+
+    expect(res.status).toBe(500)
+    expect(res.headers['content-type']).toMatch(/^application\/json/)
+    expect(res.body).toStrictEqual({ error: 'Internal server error' })
+    expect(Object.keys(res.body)).toEqual(['error'])
+    expectNoLeak(res.text)
+    expect(res.text).not.toContain(BOUND_VALUE)
+    expect(errorLog).toHaveBeenCalledTimes(1)
+    const [call] = errorLog.mock.calls
+    expect(call).toHaveLength(2)
+    expect(call[0]).toBe('Unhandled /api error:')
+    const stack: unknown = call[1]
+    if (typeof stack !== 'string') throw new Error('expected a logged stack')
+    // The query's bound value is in the logged message line: the #204 leak.
+    expect(stack).toMatch(/^Error: insert into /)
+    expect(stack).toContain(BOUND_VALUE)
+    // One line, no stack frames.
+    expect(stack).not.toContain('\n')
+    expect(stack).not.toMatch(/\bat /)
+    expect(inspect(errorLog.mock.calls)).not.toContain(HEADER_SECRET)
+  })
 })
