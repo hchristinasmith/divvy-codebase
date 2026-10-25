@@ -64,11 +64,16 @@ server.get('*', (req, res, next) => {
 //   so it logs this line too.
 // - A 500 from an Error: `err.name` and the stack frames, without the stack's
 //   first line, which is `name: message`. When the stack does not start with
-//   that line, or a line after it is not a frame, only `err.name` is logged.
+//   that line, or a line after it is not a frame, no frames are logged.
 //   A message shortened after its stack was formatted is not caught: any
 //   frame-shaped lines it lost are logged as frames. An error raised from
-//   native code (node-sqlite3, under Knex) has no frames, so it logs as its
-//   name alone.
+//   native code (node-sqlite3, under Knex) has no frames, so it would log as
+//   its name alone; its `err.code` (`SQLITE_CONSTRAINT`) says what failed
+//   (#354). So when `err.code` is a short string of capital letters, digits
+//   and underscores that starts with a letter (`CONSTANT_CODE` below), it
+//   follows the name on the same line, after a space, and the frames follow
+//   as before. Any other `code`, or one that cannot be read (a getter or Proxy
+//   trap that throws), adds nothing; the answer is the same either way.
 // - A 500 from anything that is not an Error: its `typeof`.
 // - An error after the response started: the same as a 500, on its own line,
 //   whatever its status; the socket is destroyed.
@@ -135,35 +140,59 @@ function constructorName(err: object): string {
 
 const FRAME = /^ {4}at \S/
 
+// A constant-shaped error code, such as node-sqlite3's `SQLITE_CONSTRAINT` or
+// Node's `ECONNRESET`: never a message, so never a bound value (#354). `$`
+// without the `m` flag matches only at the end of the string.
+const CONSTANT_CODE = /^[A-Z][A-Z0-9_]{0,63}$/
+
 /**
- * `err.name` and the stack frames, never the message (#204). V8 writes the
- * stack as a header, which is `Error.prototype.toString` of the error (`name:
- * message`, and the message can span lines), then one line per frame. The
- * header is cut off by its exact text, not by counting lines, so a message
- * that contains a line shaped like a frame goes with it. If the stack does not
- * start with that header (it was formatted before the message changed, or it
- * was replaced), or anything after it is not a frame line, the frames are
- * dropped and only the name is logged. A message cut down to a prefix of
- * itself after formatting still matches, and its lost lines that look like
- * frames pass as frames.
+ * `err.code` if it is constant-shaped, or undefined. Reading it may run a
+ * getter or a Proxy trap; one that throws gives undefined (#354).
+ */
+function constantCode(err: Error): string | undefined {
+  let code: unknown
+  try {
+    code = 'code' in err ? err.code : undefined
+  } catch {
+    return undefined
+  }
+  return typeof code === 'string' && CONSTANT_CODE.test(code) ? code : undefined
+}
+
+/**
+ * `err.name`, its constant-shaped `err.code` if any (#354), and the stack
+ * frames, never the message (#204). V8 writes the stack as a header, which is
+ * `Error.prototype.toString` of the error (`name: message`, and the message
+ * can span lines), then one line per frame. The header is cut off by its exact
+ * text, not by counting lines, so a message that contains a line shaped like a
+ * frame goes with it. If the stack does not start with that header (it was
+ * formatted before the message changed, or it was replaced), or anything after
+ * it is not a frame line, the frames are dropped and only the name, and the
+ * code if there is one, are logged. A message cut down to a prefix of itself
+ * after formatting still matches, and its lost lines that look like frames
+ * pass as frames.
  */
 function nameAndFrames(err: Error): string {
-  const name = typeof err.name === 'string' ? err.name : 'Error'
+  const code = constantCode(err)
+  // The first line logged: the name, then the code if there is one.
+  const head =
+    (typeof err.name === 'string' ? err.name : 'Error') +
+    (code === undefined ? '' : ` ${code}`)
   let stack: unknown
   let header: string
   try {
     stack = err.stack
     header = Error.prototype.toString.call(err)
   } catch {
-    return name
+    return head
   }
   if (typeof stack !== 'string' || !stack.startsWith(`${header}\n`)) {
-    return name
+    return head
   }
   const frames = stack.slice(header.length + 1).split('\n')
   return frames.every((line) => FRAME.test(line))
-    ? [name, ...frames].join('\n')
-    : name
+    ? [head, ...frames].join('\n')
+    : head
 }
 
 server.use(

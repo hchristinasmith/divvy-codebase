@@ -741,6 +741,63 @@ describe('a refused spec', () => {
     expect(logged).not.toContain('alert')
     expect(logged).not.toContain('scatter')
   })
+
+  // Merchant text can sit in a value, a key or a title. The log names only the
+  // validator's closed reason and its path, and the path is built from schema
+  // keys and indices, so a marker placed in any of these positions must stop at
+  // the schema key before it. Each row is the reason and path the validator
+  // produces for that position, found by running it.
+  const MARKER = 'INVENTED_MERCHANT_7Q'
+  const ENC_Y = { field: 'spend_cents', type: 'quantitative' }
+  it.each([
+    [
+      'a merchant value that is a URL',
+      bar({ data: { values: [{ merchant: `${MARKER} https://x`, spend_cents: 100 }] } }),
+      'url_in_string',
+      '$.data.values[0]',
+    ],
+    [
+      'an unrecognised key on a data row',
+      bar({ data: { values: [{ merchant: 'Invented Shop', spend_cents: 100, [`${MARKER} https://x`]: 1 }] } }),
+      'unknown_key',
+      '$.data.values[0]',
+    ],
+    [
+      'an unrecognised key on encoding.x',
+      bar({ encoding: { x: { field: 'merchant', type: 'nominal', [MARKER]: 'v' }, y: ENC_Y } }),
+      'unknown_key',
+      '$.encoding.x',
+    ],
+    ['an unrecognised key at the root', bar({ [MARKER]: 'v' }), 'unknown_key', '$'],
+    [
+      'a channel title that is a URL',
+      bar({ encoding: { x: { field: 'merchant', type: 'nominal', title: `${MARKER} https://x` }, y: ENC_Y } }),
+      'url_in_string',
+      '$.encoding.x.title',
+    ],
+    [
+      'a key under an unknown key, with a URL title below it',
+      bar({ notes: { [MARKER]: { title: `${MARKER} https://x` } } }),
+      'unknown_key',
+      '$',
+    ],
+    [
+      'a long marker value under an unknown key, refused before the schema walk',
+      bar({ notes: { [MARKER]: { note: `${MARKER}${'x'.repeat(200)}` } } }),
+      'string_too_long',
+      '$',
+    ],
+  ])('%s: the log and the rejection carry the reason and path, never the marker', async (_why, spec, reason, path) => {
+    await seedLedger()
+    hooks.drafts = swapPattern(spec)
+    const result = await runInsightsAgent('personal', {}, clockAt(NOW))
+
+    expect(result).toMatchObject({ outcome: 'failed', written: 2 })
+    expect(result.rejected).toStrictEqual([{ kind: 'pattern', reason, path }])
+    expect(JSON.stringify(result.rejected)).not.toContain(MARKER)
+    expect(errors.mock.calls).toStrictEqual([['insights agent: spec rejected', 'pattern', reason, path]])
+    expect(JSON.stringify(errors.mock.calls)).not.toContain(MARKER)
+  })
 })
 
 describe('failure and repeat', () => {
