@@ -1251,6 +1251,21 @@ describe('markBillPaid', () => {
     expect(await connection('bill_payments').select()).toStrictEqual([])
   })
 
+  it('a paid one-off answers already paid before too far ahead', async () => {
+    const id = await insertBill({
+      repeat: 'none',
+      first_due_date: '2100-01-01',
+    })
+    await insertPayments(id, ['2100-01-01'])
+    const before = await snapshot()
+
+    expect(await markBillPaid(id, NOW)).toStrictEqual({
+      ok: false,
+      refusal: 'already_paid',
+    })
+    expect(await snapshot()).toStrictEqual(before)
+  })
+
   it('a yearly bill paid ahead to 2099 still lists', async () => {
     const id = await insertBill({
       repeat: 'yearly',

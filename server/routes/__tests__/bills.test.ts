@@ -1076,6 +1076,43 @@ describe('a stored payday that is not valid', () => {
   })
 })
 
+describe('a failure that is not a BillsDataError', () => {
+  // The table is set aside so the query fails with SQLite's own message,
+  // which names it; that text must reach neither the client nor the log.
+  it.each([
+    ['GET /', 'bill_payments', 'list bills', () => getBills('all')],
+    ['POST /', 'bills', 'create bill', () => postBill(VALID)],
+    [
+      'PATCH /1',
+      'bill_payments',
+      'update bill',
+      () => patchBill(1, { name: 'Renamed' }),
+    ],
+    ['DELETE /1', 'bill_payments', 'delete bill', () => deleteBill(1)],
+    ['POST /1/payments', 'bill_payments', 'mark bill paid', () => pay(1)],
+  ])(
+    '%s answers the generic 500 and logs only the class',
+    async (_route, table, what, send) => {
+      await connection('bills').insert(
+        bill(1, 'personal', 'Invented gym', 'weekly', 1500, '2026-10-21'),
+      )
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+      await connection.schema.renameTable(table, `${table}_aside`)
+      try {
+        const res = await send()
+
+        expect(res.status).toBe(500)
+        expect(res.body).toStrictEqual({ error: 'Internal server error' })
+        expect(logged.mock.calls).toStrictEqual([
+          [`bills: could not ${what}`, 'Error'],
+        ])
+      } finally {
+        await connection.schema.renameTable(`${table}_aside`, table)
+      }
+    },
+  )
+})
+
 describe('paths this router does not serve', () => {
   it.each([
     ['GET /1', () => api.get('/api/v1/bills/1')],
