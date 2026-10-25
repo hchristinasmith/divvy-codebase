@@ -102,12 +102,12 @@ log "serving $serve_target on the tailnet as $ts_hostname"
 #    Litestream, they would create an empty database on a fresh volume and
 #    the backup would never be restored. start.sh execs Litestream, or the
 #    app when backups are off, so Fly's SIGTERM lands on this process. In the
-#    app each step execs (sh, then node), so the server is the process
-#    Litestream passes the signal to, or the one Fly signals directly. Under
-#    npm, node got SIGTERM only if npm's script shell had exec'd it, as dash
-#    does and bash does not (#255). The -exec string is split by Litestream's
-#    shellwords, not a shell: everything sh must see is inside the single
-#    quotes, and nothing outside them is special to either.
+#    app each step execs (sh, a second sh, then node), so the server is the
+#    process Litestream passes the signal to, or the one Fly signals directly.
+#    Under npm, node got SIGTERM only if npm's script shell had exec'd it, as
+#    dash does and bash does not (#255). The -exec string is split by
+#    Litestream's shellwords, not a shell: everything sh must see is inside
+#    the single quotes, and nothing outside them is special to either.
 #
 #    The scrub keeps the backup credential, which can delete every backup, out
 #    of the app in both branches (#254). It runs inside the command, so after
@@ -118,19 +118,24 @@ log "serving $serve_target on the tailnet as $ts_hostname"
 #    PATH line (so env did not show the environment), or if env fails. A value
 #    holding a newline can show a line that looks like a variable: removing
 #    that name is harmless, and the check refusing on it is the safe misreading.
-#    A name that is not an identifier cannot be unset, so it is left to the
-#    check, which refuses it. The scrub sets what npm and node inherit; the
-#    shell's own /proc/<pid>/environ keeps the originals, as Litestream's does.
-#    Its working variables are unset first, so one that arrived exported
-#    cannot carry the env dump into the app. The newline is made without a
-#    backslash, so an echo of the -exec string cannot turn it into a line break.
+#    A name that is not an identifier cannot be unset: dash (the image's sh)
+#    never passes one on, and a shell that does, as bash does, is refused by
+#    the check. The scrub sets what its children inherit, but a shell's own
+#    /proc/<pid>/environ keeps what it started with, so the scrubbed shell
+#    execs a fresh sh for the app: the shell that runs npm, and node after
+#    it, start from the scrubbed environment. Litestream's own environ still
+#    holds its keys. The scrub's working variables are unset first, so one
+#    that arrived exported cannot carry the env dump into the app. The
+#    newline is made without a backslash, so an echo of the -exec string
+#    cannot turn it into a line break.
 fail='fail() { echo "start.sh: ERROR: $* Refusing to start the app." >&2; exit 1; }'
 # shellcheck disable=SC2016 # sh -c expands these, not start.sh
 scrub='unset scrub_nl scrub_env scrub_line scrub_name; scrub_nl=$(echo; echo x); scrub_nl=${scrub_nl%x}; IFS=$scrub_nl; set -f; scrub_env=$(env) || fail "env failed, so the LITESTREAM_ and AWS_ variables were not removed."; for scrub_line in $scrub_env; do scrub_name=${scrub_line%%=*}; case $scrub_name in *[!A-Za-z0-9_]*) ;; LITESTREAM_* | AWS_*) unset "$scrub_name" || fail "unset failed on a LITESTREAM_ or AWS_ variable."; esac; done'
 # shellcheck disable=SC2016 # sh -c expands these, not start.sh
 check='scrub_env=$(env) || fail "env failed, so the scrub was not checked."; case "$scrub_nl$scrub_env" in *"${scrub_nl}LITESTREAM_"* | *"${scrub_nl}AWS_"*) fail "a LITESTREAM_ or AWS_ variable is still set after the scrub." ;; *"${scrub_nl}PATH="*) ;; *) fail "env showed no PATH, so the scrub was not checked." ;; esac'
 app='npm run migrate:latest && exec node dist/server.js'
-cmd="$fail; $scrub; $check; $app"
+# $app holds no ", $, ` or \, so double quotes pass it through unchanged.
+cmd="$fail; $scrub; $check; exec sh -c \"$app\""
 if [ -f "$litestream_config" ]; then
   log "backups ON (litestream, $litestream_config)"
   exec litestream replicate -config "$litestream_config" -exec "sh -c '$cmd'"

@@ -596,6 +596,7 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
     const serving = 'start.sh: serving http://127.0.0.1:3005 on the tailnet as divvy'
     expect(deployMd).toContain(serving)
     expect(lines).toContain(serving)
+    expect(deployMd).toContain('start.sh: WARNING: backups are OFF')
     const warning = lines.findIndex((line) =>
       line.startsWith('start.sh: WARNING: backups are OFF'),
     )
@@ -979,23 +980,41 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
     },
   )
 
+  const hasPs =
+    spawnSync('ps', ['-o', 'comm=', '-p', String(process.pid)]).status === 0
+
   // The image's /bin/sh is dash; this machine's may be bash. start.sh runs
   // under dash here, and an `sh` in fakeDir puts dash behind the command's own
   // `sh -c` too. The wrapper records its pid and execs dash, which keeps it,
-  // so npm's parent being one of those pids shows dash ran the scrub. Skipped
+  // so npm's parent being one of those pids shows dash ran the scrub. It also
+  // dumps the environment it was started with, which is what that process's
+  // /proc/<pid>/environ shows; the last dump is the sh that runs npm, so the
+  // scrubbed shell must exec a fresh one rather than run npm itself. Skipped
   // where there is no /bin/dash: the tests above then run under whatever sh
-  // the host has.
-  it.skipIf(!existsSync('/bin/dash')).each([
+  // the host has. start.sh's own shell is checked by the tailscale fake, which
+  // start.sh runs directly: it records the command name of its parent (ps),
+  // so a run that left start.sh to the host's sh fails here. (A bare 'sh'
+  // would still be dash: spawnSync finds the wrapper on the run's PATH.)
+  // Skipped too where there is no ps.
+  it.skipIf(!existsSync('/bin/dash') || !hasPs).each([
     ['under litestream', true],
     ['backups OFF', false],
   ])(
     'scrubs the same way with dash as every shell, %s',
     (_label, backups) => {
       writeExecutable(
+        join(fakeDir, 'tailscale'),
+        FAKE_TAILSCALE.replace(
+          '#!/bin/sh\n',
+          '#!/bin/sh\nps -o comm= -p "$PPID" >>"$FAKE_DIR/start-sh.comm"\n',
+        ),
+      )
+      writeExecutable(
         join(fakeDir, 'sh'),
         [
           '#!/bin/dash',
           `echo "$$" >>"${fakeDir}/dash.pids"`,
+          `/usr/bin/env >"${fakeDir}/sh.env"`,
           'exec /bin/dash "$@"',
           '',
         ].join('\n'),
@@ -1013,6 +1032,14 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
       expect(dashPids).toContain(
         backups ? recorded('litestream.child.pid') : String(run.pid),
       )
+      // start.sh's own process, and any subshell it forked for a tailscale
+      // call: dash every time (macOS prints the path, Linux the name).
+      const startShells = recorded('start-sh.comm').split('\n')
+      expect(startShells.length).toBeGreaterThan(0)
+      for (const comm of startShells) expect(comm).toMatch(/(^|\/)dash$/)
+      const npmShellEnv = dump('sh')
+      expect(npmShellEnv).toMatch(/^PATH=/m)
+      expect(npmShellEnv).not.toMatch(/^(LITESTREAM|AWS)_/m)
     },
   )
 
@@ -1032,6 +1059,7 @@ case "$FAKE_ENV" in
     exec /usr/bin/env ;;
   empty) exit 0 ;;
   leftover) /usr/bin/env; echo "AWS_NOT_REMOVABLE=not-a-real-leftover" ;;
+  leftover-first) echo "AWS_NOT_REMOVABLE=not-a-real-leftover"; /usr/bin/env ;;
 esac
 `
   const failures: [string, string, string][] = [
@@ -1047,6 +1075,11 @@ esac
     ],
     ['env prints nothing', 'empty', 'env showed no PATH'],
     ['a name stays after its unset', 'leftover', 'is still set after the scrub'],
+    [
+      'a name stays on the first line of env',
+      'leftover-first',
+      'is still set after the scrub',
+    ],
   ]
   type FailureRow = [string, string, string, string, boolean]
   it.each(
