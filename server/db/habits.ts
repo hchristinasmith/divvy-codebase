@@ -1,5 +1,6 @@
 import type { Knex } from 'knex'
 
+import type { CategorySource } from '../../models/transactions.ts'
 import type {
   AccountRole,
   HabitsResponse,
@@ -10,6 +11,7 @@ import type {
   Verdict,
   VerdictRow,
 } from '../../shared/contracts.ts'
+import { effectiveCategory } from '../../shared/drawings.ts'
 import {
   habitStreaks,
   habitsReadFrom,
@@ -20,6 +22,7 @@ import {
   type HabitsInput,
 } from '../../shared/habits.ts'
 import connection from './connection.ts'
+import { loadDrawingIds } from './drawings.ts'
 import { OverviewDataError, nzCalendarDate } from './overview.ts'
 import { listAccounts } from './synced.ts'
 
@@ -41,14 +44,24 @@ import { listAccounts } from './synced.ts'
 // and every settled row of a `current` account, for the overdraft streak.
 // A row in that read with no date or amount is an error, never skipped.
 //
+// Drawings (prd-02 Ruling 15): each row is handed over with its effective
+// category, Drawings on a half of a drawing unless Hannah set the row's
+// category by hand, as ./overview.ts hands rows to safe-to-spend. The
+// drawing ids come from `loadDrawingIds` (./drawings.ts), once per read. It
+// loads its own candidates, all-time, from the same stored-account join as
+// this module, so a half whose partner is older than this read is still
+// found. shared/habits.ts leaves every drawing out of spend and the
+// verdict list.
+//
 // Writes go to `habit_verdicts` only (20261025180000_prd02_habit_verdicts.js),
 // one row per transaction, inside one database transaction with the checks
 // that allow them: the row is an Akahu row on a stored account, settled,
 // and money out. Clearing deletes the row.
 //
 // Errors the client may see are `HabitsDataError`s with a fixed text; the
-// shared module's RangeError and TypeError, whose messages name values, and
-// `OverviewDataError` from `nzCalendarDate`, are turned into one of those.
+// shared modules' RangeError and TypeError (habits and the drawing matcher),
+// whose messages name values, and `OverviewDataError` from
+// `nzCalendarDate`, are turned into one of those.
 
 /**
  * A `habit_verdicts` row. It lives here rather than in `models/` because
@@ -110,6 +123,22 @@ function nzDate(instant: string | null): IsoDate {
   }
 }
 
+/**
+ * The drawing ids, with the shared matcher's RangeError or TypeError (whose
+ * messages name ids and values) turned into the fixed text. A copy of
+ * `loadDrawings` in ./overview.ts; change both together.
+ */
+async function loadDrawings(db: Db): Promise<Set<number>> {
+  try {
+    return await loadDrawingIds(db)
+  } catch (err) {
+    if (err instanceof RangeError || err instanceof TypeError) {
+      throw new HabitsDataError('habits input invalid')
+    }
+    throw err
+  }
+}
+
 /** The UTC date string a stored instant on NZ date `from` is never before. */
 function utcDayBefore(from: IsoDate): string {
   return new Date(Date.parse(`${from}T00:00:00.000Z`) - 86_400_000)
@@ -128,6 +157,8 @@ interface HabitQueryRow {
   amount_cents: number | null
   status: TransactionStatus
   balance_cents: number | null
+  category: string | null
+  category_source: CategorySource
 }
 
 interface VerdictQueryRow {
@@ -177,6 +208,7 @@ async function loadAccounts(db: Db): Promise<HabitAccount[]> {
 async function loadTransactions(
   today: IsoDate,
   currentAccountIds: readonly number[],
+  drawingIds: ReadonlySet<number>,
   db: Db,
 ): Promise<HabitTransaction[]> {
   const from = utcDayBefore(guard(() => habitsReadFrom(today)))
@@ -188,6 +220,8 @@ async function loadTransactions(
       'transactions.amount_cents as amount_cents',
       'transactions.status as status',
       'transactions.balance_cents as balance_cents',
+      'transactions.category as category',
+      'transactions.category_source as category_source',
     )
     .where((q) =>
       q
@@ -210,6 +244,10 @@ async function loadTransactions(
       amountCents: row.amount_cents,
       status: row.status,
       balanceCents: row.balance_cents,
+      category: effectiveCategory(
+        { category: row.category, categorySource: row.category_source },
+        drawingIds.has(row.id),
+      ).category,
     }
   })
 }
@@ -221,7 +259,10 @@ function toVerdictRow(row: VerdictQueryRow): VerdictRow {
     transactionId: String(row.id),
     date: nzDate(row.date),
     merchant: row.merchant_name ?? row.description ?? '',
-    // The effective category (prd-01 Ruling 4), not Akahu's.
+    // The effective category (prd-01 Ruling 4), not Akahu's. The drawing
+    // overlay is not laid here: `readHabits` never lists a drawing, and a
+    // half Hannah categorised by hand keeps her category. `setVerdict` does
+    // not refuse a drawing half, and answers its stored category.
     category: row.category,
     amountCents: row.amount_cents,
     verdict: row.verdict,
@@ -253,7 +294,8 @@ export async function readHabits(
   const currentIds = accounts
     .filter((a) => a.role === 'current')
     .map((a) => Number(a.id))
-  const transactions = await loadTransactions(today, currentIds, db)
+  const drawingIds = await loadDrawings(db)
+  const transactions = await loadTransactions(today, currentIds, drawingIds, db)
   const input: HabitsInput = { scope, today, accounts, transactions }
 
   const runway = guard(() => runwayTenths(input))

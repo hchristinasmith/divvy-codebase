@@ -18,13 +18,27 @@
 // - spend: `trailingSpendCents`, outflow over the last `TRAILING_DAYS` NZ
 //   days, today included, settled and pending, on in-scope accounts of any
 //   role (a credit-card purchase is spend). Money in never nets against it.
-//   Own-account transfers are not spend (`findOwnTransfers`).
+//   Own-account transfers are not spend (`findOwnTransfers`), and neither
+//   is a drawing (below).
 // - A month is `TRAILING_DAYS` days of that spend, so runway in months is
 //   assets ÷ spend, and in tenths it is floor(assets × 10 ÷ spend): one
 //   rounding, of exact integers, down, so it never flatters (as
 //   safe-to-spend's per-day figure). Assets of 0 or less are 0 months; with
 //   no spend and positive assets, runway is unbounded and the contract's
 //   answer is null.
+//
+// Drawings (prd-02 Ruling 15): a row whose effective category is Drawings
+// (`isDrawingCategory`, shared/drawings.ts) is never spending, in any scope:
+// not Strawb's, not Personal's, not All's. It adds nothing to runway's spend
+// and is never listed for a verdict. Each row carries its effective
+// category, with drawings laid over as the overview hands them to
+// safe-to-spend: Drawings on both halves of a matched drawing unless Hannah
+// set the row's category by hand, which wins (`effectiveCategory`). This
+// module does not match drawings itself; the caller does, with
+// `findDrawingIds` over every candidate, not only the rows passed here.
+// prd-03's `get_habits` must hand over the same effective category.
+// Drawings still move balances, so the no-overdraft streak reads them as
+// any other row.
 //
 // Streaks (`habitStreaks`) hold only what stored data can compute (#52
 // Done-when 2). The one streak is no overdraft (`noOverdraftDays`). Omitted
@@ -54,6 +68,7 @@ import type {
   Scope,
   TransactionStatus,
 } from './contracts.ts'
+import { isDrawingCategory } from './drawings.ts'
 import { sumCents } from './money.ts'
 import { daysBetween, daysInMonth } from './safe-to-spend.ts'
 
@@ -107,6 +122,12 @@ export interface HabitTransaction {
   status: TransactionStatus
   /** The account balance after this row; null when the bank sent none. */
   balanceCents: Cents | null
+  /**
+   * The effective category, with drawings laid over (`effectiveCategory`,
+   * shared/drawings.ts): Drawings on a half of a matched drawing unless
+   * Hannah set the row's category by hand. Null when it has none.
+   */
+  category: string | null
 }
 
 export interface HabitsInput {
@@ -234,6 +255,11 @@ function checkTransactions(
     }
     if (tx.balanceCents !== null)
       assertCents(tx.balanceCents, 'a transaction balanceCents')
+    // A caller that left the category off would count every drawing as
+    // spend without a word; refuse it instead.
+    if (tx.category !== null && typeof tx.category !== 'string') {
+      throw new TypeError('a transaction category must be text or null')
+    }
   }
 }
 
@@ -279,8 +305,8 @@ export function habitsReadFrom(today: IsoDate): IsoDate {
  * Only the date, amount and account are read, which are what prd-03's
  * replica keeps.
  *
- * Drawings (Strawb paying Personal) are open PR #264; once it lands, how a
- * drawing is treated follows it.
+ * Category is not read, so it pairs a drawing like any row; the view drops
+ * drawings before calling it (prd-02 Ruling 15, see `transferLegsInView`).
  */
 // DECISION PENDING (#52): own-account transfer detection. Provisional
 // option A (pair match). Alternatives: B, Akahu `type === 'TRANSFER'`;
@@ -360,9 +386,12 @@ export function runwayAssetsCents(
  * view's own rows only, from `habitsReadFrom(today)` to today, so how much
  * older history a caller passes changes nothing, and a row of another
  * scope can never take a leg's partner and move this view's figures. A
- * pair is left out only when both legs are in the view: a Strawb →
- * Personal payment is not spend in All, and is Strawb's spend in the
- * Strawb view.
+ * pair is left out only when both legs are in the view: a Personal →
+ * Strawb payment is not spend in All, and is Personal's spend in the
+ * Personal view. A Strawb → Personal payment matched as a drawing is
+ * never spend in any view (prd-02 Ruling 15); one the drawing match did not
+ * take, or whose halves Hannah gave another category by hand, is a transfer
+ * like any other, so Strawb's spend in the Strawb view.
  */
 function transferLegsInView(input: HabitsInput, checked: Checked): Set<string> {
   const from = habitsReadFrom(input.today)
@@ -372,13 +401,20 @@ function transferLegsInView(input: HabitsInput, checked: Checked): Set<string> {
       rowScope !== undefined &&
       inScope(input.scope, rowScope) &&
       tx.date >= from &&
-      tx.date <= input.today
+      tx.date <= input.today &&
+      // A drawing is never spend, so it never needs a partner to drop out;
+      // left in, a drawing half could take another row's partner and leave
+      // that row counted as spend. Dropped here, before pairing.
+      !isDrawingCategory(tx.category)
     )
   })
   return new Set(findOwnTransfers(inView).keys())
 }
 
-/** In-scope outflows of the view, not transfer legs, dated `from` to today. */
+/**
+ * In-scope outflows of the view, not drawings and not transfer legs, dated
+ * `from` to today.
+ */
 function viewOutflows(
   input: HabitsInput,
   checked: Checked,
@@ -390,6 +426,8 @@ function viewOutflows(
     const rowScope = checked.scopeOf.get(tx.accountId)
     if (rowScope === undefined || !inScope(input.scope, rowScope)) return false
     if (tx.amountCents >= 0) return false
+    // A drawing is never spending (prd-02 Ruling 15).
+    if (isDrawingCategory(tx.category)) return false
     if (settledOnly && tx.status !== 'settled') return false
     // ISO dates compare correctly as strings.
     if (tx.date < from || tx.date > input.today) return false
@@ -404,7 +442,8 @@ function viewOutflows(
 /**
  * Outflow of the view over the last `TRAILING_DAYS` NZ days, today
  * included, as a positive number of cents: settled and pending rows on
- * in-scope accounts of any role, own-account transfers left out.
+ * in-scope accounts of any role, drawings and own-account transfers left
+ * out.
  */
 export function trailingSpendCents(input: HabitsInput): Cents {
   const checked = checkInput(input)
@@ -467,6 +506,8 @@ export function runwayTenths(input: HabitsInput): number | null {
  */
 export function noOverdraftDays(input: HabitsInput): number | null {
   checkInput(input)
+  // Drawings are not dropped here: they still move balances (prd-02 Ruling
+  // 15), and this reads only balances, never categories.
   const { today } = input
   const currents = input.accounts.filter(
     (a) => a.role === 'current' && inScope(input.scope, a.scope),
@@ -535,8 +576,9 @@ export function habitStreaks(input: HabitsInput): HabitStreak[] {
 
 /**
  * The spending listed for a verdict: settled outflows of the view over the
- * last `VERDICT_WINDOW_DAYS` NZ days, today included, own-account transfers
- * left out, newest date first, then highest id, at most
+ * last `VERDICT_WINDOW_DAYS` NZ days, today included, drawings (never
+ * spending, prd-02 Ruling 15) and own-account transfers left out, newest
+ * date first, then highest id, at most
  * `VERDICT_LIST_LIMIT`. A pending row is never listed: its id changes on
  * every sync (prd-01 Ruling 1), so a verdict on it would be lost.
  */

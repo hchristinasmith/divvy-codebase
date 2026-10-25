@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 import type { AccountRole, RowScope, Scope } from '../contracts.ts'
+import { DRAWINGS_CATEGORY } from '../drawings.ts'
 import {
   TRAILING_DAYS,
   TRANSFER_WINDOW_DAYS,
@@ -58,6 +59,7 @@ function tx(
     amountCents,
     status: 'settled',
     balanceCents: 1000,
+    category: 'Groceries',
     ...fields,
   }
 }
@@ -674,6 +676,110 @@ describe('recentSpendingIds', () => {
   })
 })
 
+describe('drawings are never spending (prd-02 Ruling 15)', () => {
+  // The caller lays drawings over each row's category (`effectiveCategory`,
+  // shared/drawings.ts), so here a drawing is a row whose category is
+  // Drawings: a matched half the rule tagged, or a row Hannah tagged.
+  const accounts = [EVERYDAY, SAVER, TRADING]
+  const drawingOut = () =>
+    tx('4', ago(4), -40_000, { category: DRAWINGS_CATEGORY })
+  const drawingIn = () =>
+    tx('1', ago(3), 40_000, { category: DRAWINGS_CATEGORY })
+  const spend = (rows: HabitTransaction[], scope: Scope) =>
+    trailingSpendCents(input(accounts, rows, scope))
+  const listed = (rows: HabitTransaction[], scope: Scope) =>
+    recentSpendingIds(input(accounts, rows, scope))
+
+  it('a Strawb out half is not spend and not listed, in Strawb or All', () => {
+    const rows = [drawingOut(), drawingIn()]
+    for (const scope of ['strawb', 'all'] as const) {
+      expect(spend(rows, scope)).toBe(0)
+      expect(listed(rows, scope)).toEqual([])
+    }
+  })
+
+  it('an out half whose partner is not passed is still not spend', () => {
+    // The drawing match ran over every candidate; this input holds one half.
+    const rows = [drawingOut()]
+    for (const scope of ['strawb', 'all'] as const) {
+      expect(spend(rows, scope)).toBe(0)
+      expect(listed(rows, scope)).toEqual([])
+    }
+  })
+
+  it('a Personal outflow Hannah tagged Drawings is not spend and not listed, in Personal or All', () => {
+    const rows = [tx('1', ago(2), -7_000, { category: DRAWINGS_CATEGORY })]
+    for (const scope of ['personal', 'all'] as const) {
+      expect(spend(rows, scope)).toBe(0)
+      expect(listed(rows, scope)).toEqual([])
+    }
+  })
+
+  it('other spending beside a drawing still counts', () => {
+    const shop = tx('4', ago(1), -2_500)
+    const rows = [drawingOut(), drawingIn(), shop]
+    expect(spend(rows, 'strawb')).toBe(2_500)
+    expect(listed(rows, 'strawb')).toEqual([shop.id])
+  })
+
+  it('a matched half Hannah gave another category counts as spend', () => {
+    // effectiveCategory keeps a category she set by hand, so this half
+    // arrives as Contractors, not Drawings.
+    const out = tx('4', ago(4), -40_000, { category: 'Contractors' })
+    const inn = tx('1', ago(3), 40_000, { category: 'Contractors' })
+    expect(spend([out, inn], 'strawb')).toBe(40_000)
+    expect(listed([out, inn], 'strawb')).toEqual([out.id])
+    // In All both legs are in the view: a transfer, as any other.
+    expect(spend([out, inn], 'all')).toBe(0)
+  })
+
+  it('a drawing half never takes another row’s transfer partner', () => {
+    // Everyday → Saver for 50,000, and a drawing of the same amount whose
+    // out half has the lowest id and whose in half lands two days later.
+    // Paired with the rest, the drawing's out half would take the saver
+    // inflow (gap 0, lower out id) and leave the Everyday outflow counted.
+    const out = {
+      ...tx('4', ago(5), -50_000),
+      id: '10',
+      category: DRAWINGS_CATEGORY,
+    }
+    const inn = {
+      ...tx('1', ago(3), 50_000),
+      id: '11',
+      category: DRAWINGS_CATEGORY,
+    }
+    const everydayOut = { ...tx('1', ago(5), -50_000), id: '12' }
+    const saverIn = { ...tx('2', ago(5), 50_000), id: '13' }
+    const rows = [out, inn, everydayOut, saverIn]
+    expect(spend(rows, 'all')).toBe(0)
+    expect(listed(rows, 'all')).toEqual([])
+    // Personal never saw the out half: the same answer.
+    expect(spend(rows, 'personal')).toBe(0)
+  })
+
+  it('the overdraft streak still reads a drawing’s balance', () => {
+    // A drawing that took the account below 0 today is an overdraft.
+    const rows = [
+      tx('1', ago(9), 5_000, { balanceCents: 5_000 }),
+      tx('1', TODAY, -40_000, {
+        balanceCents: -35_000,
+        category: DRAWINGS_CATEGORY,
+      }),
+    ]
+    expect(noOverdraftDays(input([EVERYDAY], rows, 'personal'))).toBe(0)
+  })
+
+  it('a category that is neither text nor null throws', () => {
+    const row = {
+      ...tx('1', TODAY, -1),
+      category: undefined,
+    } as unknown as HabitTransaction
+    expect(() => trailingSpendCents(input([EVERYDAY], [row]))).toThrow(
+      TypeError,
+    )
+  })
+})
+
 describe('the module source', () => {
   it('imports only from shared/, so prd-03 can load it without server/', () => {
     const source = readFileSync(
@@ -689,6 +795,7 @@ describe('the module source', () => {
     )
     expect(specifiers).toEqual([
       './contracts.ts',
+      './drawings.ts',
       './money.ts',
       './safe-to-spend.ts',
     ])

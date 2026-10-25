@@ -11,6 +11,7 @@ import { connect } from 'node:net'
 
 import connection from '../../db/connection.ts'
 import * as habitsDb from '../../db/habits.ts'
+import * as matcher from '../../../shared/drawings.ts'
 import {
   closeDb,
   freshApp,
@@ -39,6 +40,16 @@ vi.mock('../../db/habits.ts', async (importOriginal) => {
     readHabits: vi.fn(real.readHabits),
     setVerdict: vi.fn(real.setVerdict),
   }
+})
+
+// The real drawing matcher, behind a spy, so a test can make it throw
+// through the real loader. As in ../../db/__tests__/overview.test.ts, the
+// spy sits on shared/drawings.ts, not on server/db/drawings.ts, which
+// overview.ts and it import from each other.
+vi.mock('../../../shared/drawings.ts', async (importOriginal) => {
+  const real =
+    await importOriginal<typeof import('../../../shared/drawings.ts')>()
+  return { ...real, findDrawingIds: vi.fn(real.findDrawingIds) }
 })
 
 let served: LoopbackApi | undefined
@@ -174,12 +185,12 @@ const STRAWB_ROWS = [
   }),
 ]
 
-// Strawb → Personal on the same day: not spend in All, Strawb's spend in
-// Strawb, an inflow (never spend) in Personal. This rests on the provisional
-// transfer option A, pair match (DECISION PENDING in shared/habits.ts
-// `findOwnTransfers`); every test titled "(decision pending: transfer
-// detection)" changes with that decision.
-const TRANSFER_ROWS = [
+// Strawb → Personal on the same day, the same amount: a drawing (prd-02
+// Ruling 15), so both halves show Drawings and neither is spend in any
+// scope. Every test titled "(decision pending: transfer detection)" rests on
+// the provisional transfer option A, pair match (DECISION PENDING in
+// shared/habits.ts `findOwnTransfers`), and changes with that decision.
+const DRAWING_ROWS = [
   tx(203, TRADING, '2026-10-22', -40_000, 396_000),
   tx(104, EVERYDAY, '2026-10-22', 40_000, 912_000),
 ]
@@ -196,7 +207,7 @@ async function seed() {
   await insertAll('transactions', [
     ...PERSONAL_ROWS,
     ...STRAWB_ROWS,
-    ...TRANSFER_ROWS,
+    ...DRAWING_ROWS,
     ...UNREADABLE_ROWS,
   ])
 }
@@ -260,14 +271,6 @@ const SUPPLIER: VerdictRow = {
   amountCents: -64_000,
   verdict: null,
 }
-const DRAWING: VerdictRow = {
-  transactionId: '203',
-  date: '2026-10-22',
-  merchant: 'Example Shop',
-  category: 'Shopping',
-  amountCents: -40_000,
-  verdict: null,
-}
 // 2026-09-01 to 2026-10-28, both counted: 30 days of September + 28.
 const STREAK_58: HabitStreak = {
   key: 'no_overdraft',
@@ -276,7 +279,7 @@ const STREAK_58: HabitStreak = {
 }
 
 describe('GET: the response is the contract', () => {
-  it('all: hand-worked runway, the streak and both scopes’ spending (decision pending: transfer detection)', async () => {
+  it('all: hand-worked runway, the streak and both scopes’ spending', async () => {
     await seed()
 
     const res = await get('all')
@@ -288,10 +291,10 @@ describe('GET: the response is the contract', () => {
       expect(keys(v)).toEqual(keys(VERDICT_KEYS))
     expect(res.body).toStrictEqual({
       // assets 1,000,000 + 500,000; spend 128,000 + 500 + 64,000 = 192,500
-      // (the transfer is not spend); 15,000,000 ÷ 192,500 = 77.9 → 77.
+      // (the drawing is not spend); 15,000,000 ÷ 192,500 = 77.9 → 77.
       runwayTenths: 77,
       streaks: [STREAK_58],
-      // Newest first; the transfer, the pending row, inflows, the Xero row
+      // Newest first; the drawing, the pending row, inflows, the Xero row
       // and the unmapped row are not listed.
       verdicts: [SUPPLIER, GROCER],
     })
@@ -310,16 +313,17 @@ describe('GET: the response is the contract', () => {
     })
   })
 
-  it('strawb: the drawing to Personal is Strawb’s spend (decision pending: transfer detection)', async () => {
+  it('strawb: the drawing to Personal is not Strawb’s spend (prd-02 Ruling 15)', async () => {
     await seed()
 
     const res = await get('strawb')
 
     expect(res.body).toStrictEqual({
-      // 5,000,000 ÷ (64,000 + 40,000) = 48.07 → 48.
-      runwayTenths: 48,
+      // 5,000,000 ÷ 64,000 = 78.125 → 78; the drawing's 40,000 is not
+      // spend.
+      runwayTenths: 78,
       streaks: [STREAK_58],
-      verdicts: [DRAWING, SUPPLIER],
+      verdicts: [SUPPLIER],
     })
   })
 
@@ -521,7 +525,14 @@ describe('NZ calendar dates from stored UTC instants', () => {
     const res = await get('personal')
 
     expect(res.body.verdicts).toStrictEqual([
-      { ...DRAWING, transactionId: '105', amountCents: -2_500 },
+      {
+        transactionId: '105',
+        date: '2026-10-22',
+        merchant: 'Example Shop',
+        category: 'Shopping',
+        amountCents: -2_500,
+        verdict: null,
+      },
     ])
   })
 
@@ -564,13 +575,111 @@ describe('NZ calendar dates from stored UTC instants', () => {
   })
 })
 
+describe('drawings are never spending (prd-02 Ruling 15)', () => {
+  // Strawb pays Personal 40,000: out on 2026-10-21, in on 2026-10-24. Three
+  // days apart is inside the drawing window (DRAWING_DAYS_AFTER) and outside
+  // the transfer window (TRANSFER_WINDOW_DAYS), so only the drawing rule can
+  // leave it out of All.
+  const drawingRows = (outFields: Row = {}) => [
+    tx(205, TRADING, '2026-10-21', -40_000, 396_000, {
+      merchant_name: null,
+      description: 'EXAMPLE DRAWING OUT',
+      category: null,
+      ...outFields,
+    }),
+    tx(106, EVERYDAY, '2026-10-24', 40_000, 912_000, {
+      merchant_name: null,
+      description: 'EXAMPLE DRAWING IN',
+      category: 'Income',
+    }),
+  ]
+
+  it('a Strawb → Personal drawing moves no scope’s runway and is listed in none', async () => {
+    await seedAccounts()
+    await insertAll('transactions', [...PERSONAL_ROWS, ...STRAWB_ROWS])
+    const scopes = ['all', 'personal', 'strawb'] as const
+    const before = new Map<string, HabitsResponse>()
+    for (const scope of scopes) before.set(scope, (await get(scope)).body)
+
+    await insertAll('transactions', drawingRows())
+
+    for (const scope of scopes) {
+      const res = await get(scope)
+      expect(res.status).toBe(200)
+      expect(res.body).toStrictEqual(before.get(scope))
+      const listed = res.body.verdicts.map((v: VerdictRow) => v.transactionId)
+      expect(listed).not.toContain('205')
+      expect(listed).not.toContain('106')
+    }
+    // Hand-worked, so the comparison above is not of two broken reads:
+    // Strawb is 5,000,000 ÷ 64,000 = 78.125 → 78.
+    expect((await get('strawb')).body.runwayTenths).toBe(78)
+  })
+
+  it('the drawing ids are loaded once per read', async () => {
+    await seed()
+    vi.mocked(matcher.findDrawingIds).mockClear()
+
+    expect((await get('all')).status).toBe(200)
+
+    expect(vi.mocked(matcher.findDrawingIds)).toHaveBeenCalledTimes(1)
+  })
+
+  it('a half Hannah categorised by hand keeps her category and is spend', async () => {
+    await seedAccounts()
+    await insertAll('transactions', [
+      ...STRAWB_ROWS,
+      ...drawingRows({ category: 'Contractors', category_source: 'user' }),
+    ])
+
+    const res = await get('strawb')
+
+    expect(res.body).toStrictEqual({
+      // 5,000,000 ÷ (64,000 + 40,000) = 48.07 → 48.
+      runwayTenths: 48,
+      streaks: [STREAK_58],
+      verdicts: [
+        {
+          transactionId: '205',
+          date: '2026-10-21',
+          merchant: 'EXAMPLE DRAWING OUT',
+          category: 'Contractors',
+          amountCents: -40_000,
+          verdict: null,
+        },
+        SUPPLIER,
+      ],
+    })
+  })
+
+  // The shared matcher's RangeError and TypeError name ids and values.
+  it.each([
+    ['RangeError', new RangeError('candidate 205 appears twice')],
+    ['TypeError', new TypeError('amountCents of candidate 205 is 1.5')],
+  ])('a drawing-load %s is the fixed-text 500', async (_name, thrown) => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await seed()
+    vi.mocked(matcher.findDrawingIds).mockImplementationOnce(() => {
+      throw thrown
+    })
+
+    const res = await get('all')
+
+    expect(res.status).toBe(500)
+    expect(res.body).toStrictEqual({ error: 'habits input invalid' })
+    expect(log.mock.calls).toEqual([
+      ['habits: could not read habits', 'HabitsDataError'],
+    ])
+  })
+})
+
 describe('scope isolation', () => {
   it('Strawb spend, verdicts and transfers neither appear in nor move Personal (decision pending: transfer detection)', async () => {
     await seedAccounts()
     await insertAll('transactions', PERSONAL_ROWS)
     const before = (await get('personal')).body
 
-    await insertAll('transactions', [...STRAWB_ROWS, ...TRANSFER_ROWS])
+    await insertAll('transactions', [...STRAWB_ROWS, ...DRAWING_ROWS])
     expect((await put(201, { verdict: 'not_really' })).status).toBe(200)
 
     expect((await get('personal')).body).toStrictEqual(before)
@@ -581,7 +690,8 @@ describe('scope isolation', () => {
     await insertAll('transactions', STRAWB_ROWS)
     const before = (await get('strawb')).body
 
-    // Personal → Strawb, the reverse of TRANSFER_ROWS.
+    // Personal → Strawb, the reverse of DRAWING_ROWS: money put in, never a
+    // drawing.
     await insertAll('transactions', [
       ...PERSONAL_ROWS,
       tx(105, EVERYDAY, '2026-10-22', -40_000, 832_000),
