@@ -78,6 +78,16 @@ describe('server/index.ts boot', () => {
     expect(mocks.listen).toHaveBeenCalledWith(4123, '127.0.0.1', expect.any(Function))
   })
 
+  it('listens on 127.0.0.1 when HOST is blank', async () => {
+    // .env.example ships `HOST=`, which dotenv loads as "". listen(port, '')
+    // binds every interface, so a blank HOST must fall back like an unset one.
+    vi.stubEnv('HOST', '')
+
+    await importIndex()
+
+    expect(mocks.listen).toHaveBeenCalledWith(4123, '127.0.0.1', expect.any(Function))
+  })
+
   it('listens on HOST when set', async () => {
     vi.stubEnv('HOST', '0.0.0.0')
 
