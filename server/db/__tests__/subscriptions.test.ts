@@ -23,6 +23,14 @@ import {
   uncancelSubscription,
   type SubscriptionMarkRow,
 } from '../subscriptions.ts'
+import * as drawings from '../drawings.ts'
+
+// The real drawing loader, behind a spy, so a test can make it throw what
+// the shared matcher throws.
+vi.mock('../drawings.ts', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../drawings.ts')>()
+  return { ...real, loadDrawingIds: vi.fn(real.loadDrawingIds) }
+})
 
 // The subscriptions data module (prd-02 Ruling 14, issue #229), against a
 // fresh in-memory database. Every value below is invented. The clock is
@@ -437,6 +445,33 @@ describe('readSubscriptions: drawings (prd-02 Ruling 15)', () => {
       subscriptions.map((r) => [r.merchantKey, r.chargeCount]),
     ).toStrictEqual([['m:merchant_fixture_payee', 3]])
   })
+
+  it.each([
+    ['a RangeError', new RangeError('candidate 7 appears twice')],
+    [
+      'a TypeError',
+      new TypeError(
+        'amountCents of candidate 7 must be an integer number of cents, got 1.5',
+      ),
+    ],
+  ])(
+    'the drawing matcher throwing %s is a fixed-text error, not its message',
+    async (_why, thrown) => {
+      await seedAccounts()
+      await seedStream()
+      vi.mocked(drawings.loadDrawingIds).mockClear()
+      vi.mocked(drawings.loadDrawingIds).mockRejectedValueOnce(thrown)
+
+      const err: unknown = await readSubscriptions('personal').then(
+        () => undefined,
+        (e: unknown) => e,
+      )
+
+      expect(err).toBeInstanceOf(SubscriptionsDataError)
+      expect((err as Error).message).toMatch(/^subscription input invalid$/)
+      expect(vi.mocked(drawings.loadDrawingIds)).toHaveBeenCalledTimes(1)
+    },
+  )
 })
 
 describe('her mark wins after the next sync', () => {

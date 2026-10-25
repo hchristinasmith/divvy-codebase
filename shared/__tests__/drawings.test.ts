@@ -140,6 +140,18 @@ describe('findDrawingIds: the window, in NZ calendar days', () => {
     expect(ids([out(1, '2027-02-28'), into(2, '2027-03-04')])).toStrictEqual([])
   })
 
+  it.each<[string, string, string]>([
+    // 2000 is a leap year: divisible by 400, though also by 100.
+    ['29 February 2000', '2000-02-29', '2000-03-01'],
+    // A two-digit year is accepted as written. Date.UTC would read it as
+    // 1950 and still find this pair; the next row is the one it fails.
+    ['a date in the year 0050', '0050-03-01', '0050-03-02'],
+    // Read by Date.UTC as 1999 and the year 100, these are centuries apart.
+    ['the end of the year 0099', '0099-12-31', '0100-01-01'],
+  ])('accepts %s as a calendar date', (_why, outDate, inDate) => {
+    expect(ids([out(1, outDate), into(2, inDate)])).toStrictEqual([1, 2])
+  })
+
   it('weekly equal draws seven days apart never cross-match', () => {
     // Tuesdays, each arriving 3 days later. A cross-match would need a gap
     // of 7 − 3 = 4 or 7 + 3 = 10 days.
@@ -305,6 +317,36 @@ describe('findDrawingIds: refusals', () => {
     [
       'a date that is not a calendar date',
       [out(1, '2026-02-30')],
+      RangeError,
+      'date of candidate 1 must be a YYYY-MM-DD calendar date',
+    ],
+    [
+      'a date with month 00',
+      [out(1, '2026-00-10')],
+      RangeError,
+      'date of candidate 1 must be a YYYY-MM-DD calendar date',
+    ],
+    [
+      'a date with month 13',
+      [out(1, '2026-13-01')],
+      RangeError,
+      'date of candidate 1 must be a YYYY-MM-DD calendar date',
+    ],
+    [
+      'a date with day 00',
+      [out(1, '2026-10-00')],
+      RangeError,
+      'date of candidate 1 must be a YYYY-MM-DD calendar date',
+    ],
+    [
+      '31 November',
+      [out(1, '2026-11-31')],
+      RangeError,
+      'date of candidate 1 must be a YYYY-MM-DD calendar date',
+    ],
+    [
+      '29 February 1900, a century that is not a leap year',
+      [out(1, '1900-02-29')],
       RangeError,
       'date of candidate 1 must be a YYYY-MM-DD calendar date',
     ],

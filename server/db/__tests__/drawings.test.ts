@@ -160,6 +160,12 @@ describe('loadDrawingIds', () => {
       ],
     ],
     [
+      // `new Date(null)` is 1 January 1970, so without the null-date filter
+      // both halves would land on the same day and pair.
+      'two halves that both have no date',
+      [tx(1, TRADING, null, -30000), tx(2, EVERYDAY, null, 30000)],
+    ],
+    [
       'an inflow whose date is not an instant',
       [
         tx(1, TRADING, '2026-10-27T01:00:00.000Z', -30000),
