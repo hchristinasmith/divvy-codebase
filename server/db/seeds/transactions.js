@@ -13,8 +13,10 @@ import { dollarsToCents } from '../../../shared/money.ts'
 // file still works as `DIVVY_SEED_TRANSACTIONS=spending.js`. That file is
 // gitignored and must stay that way.
 //
-// Akahu amounts are float dollars; they become integer cents here, as the
-// Akahu sync will do at its boundary (prd-01 Ruling 3).
+// Akahu amounts are float dollars here, so they become integer cents with
+// `dollarsToCents`. The sync does not use that path:
+// `server/sync/akahu-client.ts` reads amounts as exact text and converts them
+// through `exactAmountToCents` and `parseDollars` (prd-01 Ruling 3).
 
 const __dirname = Path.dirname(URL.fileURLToPath(import.meta.url))
 const REPO_ROOT = Path.resolve(__dirname, '..', '..', '..')
@@ -64,6 +66,10 @@ function toRow(txn) {
     category_name: txn.category?.name || null,
     category_group_id: group?._id || null,
     category_group_name: group?.name || null,
+    akahu_category_id: txn.category?._id || null,
+    akahu_category_name: txn.category?.name || null,
+    akahu_category_group_id: group?._id || null,
+    akahu_category_group_name: group?.name || null,
     // Seeded rows are Akahu data: the effective category is Akahu's.
     category: txn.category?.name || null,
     category_source: 'akahu',

@@ -54,9 +54,13 @@ export interface Accounts {
   
 /**
  * A transaction as Akahu's API returns it (`/transactions`). Money here is
- * float dollars, exactly as received; it becomes integer cents only at the
- * server boundary (the seed now, `server/sync/` later: prd-01 Ruling 3).
- * The Dashboard still renders this shape from the live proxy.
+ * float dollars, exactly as received. The seed turns it into integer cents
+ * with `dollarsToCents`. The sync never uses this shape:
+ * `server/sync/akahu-client.ts` reads Akahu's amounts as exact text, converts
+ * them with `parseDollars` and returns its own cents types
+ * (`server/sync/types.ts`, prd-01 Ruling 3).
+ * The Dashboard still renders this shape, in dollars, from the live proxy
+ * (`server/routes/akahu.ts`).
  */
 export interface AkahuTransaction {
   _id: string

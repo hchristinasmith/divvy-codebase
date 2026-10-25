@@ -81,6 +81,10 @@ describe('transactions seed', () => {
       category_name: source.category!.name,
       category_group_id: source.category!.groups.personal_finance._id,
       category_group_name: source.category!.groups.personal_finance.name,
+      akahu_category_id: source.category!._id,
+      akahu_category_name: source.category!.name,
+      akahu_category_group_id: source.category!.groups.personal_finance._id,
+      akahu_category_group_name: source.category!.groups.personal_finance.name,
       merchant_id: source.merchant!._id,
       merchant_name: source.merchant!.name,
       merchant_website: source.merchant!.website,
@@ -91,6 +95,47 @@ describe('transactions seed', () => {
     // Pin the key set too: toMatchObject cannot see a column that appeared
     // or vanished.
     expect(Object.keys(row).sort()).toEqual([...TRANSACTION_COLUMNS].sort())
+  })
+
+  it('every seeded row has akahu_category_* equal to its legacy category_*', async () => {
+    await db.seed.run()
+
+    const rows = await db('transactions')
+      .select(
+        'akahu_id',
+        'category_id',
+        'category_name',
+        'category_group_id',
+        'category_group_name',
+        'akahu_category_id',
+        'akahu_category_name',
+        'akahu_category_group_id',
+        'akahu_category_group_name',
+      )
+      .orderBy('akahu_id')
+
+    // Non-vacuity: without this, an all-NULL legacy column would make the
+    // comparison below pass with nothing compared.
+    expect(rows.filter((r) => r.category_id !== null).length).toBeGreaterThan(0)
+
+    // Whole-set comparison: a mismatch shows the row's akahu_id in the diff.
+    expect(
+      rows.map((r) => ({
+        akahu_id: r.akahu_id,
+        id: r.akahu_category_id,
+        name: r.akahu_category_name,
+        group_id: r.akahu_category_group_id,
+        group_name: r.akahu_category_group_name,
+      })),
+    ).toEqual(
+      rows.map((r) => ({
+        akahu_id: r.akahu_id,
+        id: r.category_id,
+        name: r.category_name,
+        group_id: r.category_group_id,
+        group_name: r.category_group_name,
+      })),
+    )
   })
 
   it('reads a private JSON dump when DIVVY_SEED_TRANSACTIONS points at one', async () => {

@@ -1,8 +1,11 @@
 // Money is integer cents everywhere Divvy stores or computes it (M1 #8, D12).
 //
-// Akahu sends dollars as floats; they become cents once, at the boundary
-// (`dollarsToCents`), and are formatted for display only at the edge
-// (`formatCents`). Nothing in between multiplies or divides by 100.
+// Akahu sends dollars as decimal text; responses the sync reads become cents
+// once, at the boundary in `server/sync/akahu-client.ts`, through
+// `exactAmountToCents` (shared/exact-json.ts) and `parseDollars` here.
+// `dollarsToCents` is the seed's float path only. Cents are formatted for
+// display only at the edge (`formatCents`). Nothing in between multiplies or
+// divides by 100.
 //
 // This module is imported by the client, the server and the knex seed. The
 // seed runs under plain Node, which strips the types, so keep this file free
@@ -26,9 +29,13 @@ export function formatCents(cents: number): string {
 }
 
 /**
- * Converts a dollar amount as Akahu sends it (a float) to integer cents,
- * rounding half away from zero on the decimal value, so 1.005 → 101 even
- * though 1.005 * 100 is 100.49999999999999 in binary floating point.
+ * Converts a float dollar amount to integer cents, rounding half away from
+ * zero on the decimal value, so 1.005 → 101 even though 1.005 * 100 is
+ * 100.49999999999999 in binary floating point. Akahu data the sync reads
+ * never reaches this function: `server/sync/akahu-client.ts` reads it as exact
+ * text and converts it through `exactAmountToCents`, which calls
+ * `parseDollars`. Only the seed (`server/db/seeds/transactions.js`) uses this
+ * float path.
  */
 export function dollarsToCents(dollars: number): number {
   if (!Number.isFinite(dollars)) {
