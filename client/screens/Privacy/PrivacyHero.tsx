@@ -10,7 +10,7 @@ export default function PrivacyHero() {
   return (
     <section
       aria-labelledby={headingId}
-      className="col-span-full flex flex-col gap-3 rounded-card bg-pink-hover p-8 shadow-card"
+      className="col-span-full flex flex-col gap-3 rounded-card bg-rose p-8 shadow-card"
     >
       {/* Basis: a single-user app with no hosted service of its own
           (CLAUDE.md; D1, D4). The only host server/ calls at runtime is
@@ -31,8 +31,8 @@ export default function PrivacyHero() {
           (server/index.ts). Config, not a confirmed live deploy: keep "set
           up to" until the deploy is verified. Also depends on the tailnet
           policy (docs/deploy.md section 2). */}
-      {/* Colour: body is white rather than the design's blush, for contrast
-          on the pink-hover background. Still below AA at 15px; flagged for Hannah. */}
+      {/* Colour: rose background with white text (6.17:1, AA) instead of the
+          design's blush on pink-hover (2.69:1); chosen by the owner at review. */}
       <p className="m-0 max-w-[560px] text-body-15 leading-normal text-pretty text-surface">
         Divvy is set up to run on a single server that only your Tailscale
         network can reach. The cards below say where your data goes.
