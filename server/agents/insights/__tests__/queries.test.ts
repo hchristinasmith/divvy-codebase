@@ -648,6 +648,10 @@ describe('loadLedger', () => {
   it('refuses a from that names no calendar date with a RangeError', async () => {
     await expect(loadLedger('personal', '2026-13-01', '2026-10-25')).rejects.toThrow(RangeError)
   })
+
+  it('refuses a to that names no calendar date with a RangeError', async () => {
+    await expect(loadLedger('personal', '2026-10-01', '2026-13-01')).rejects.toThrow(RangeError)
+  })
 })
 
 // ---- Pure folds ----
