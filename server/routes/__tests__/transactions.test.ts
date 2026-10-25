@@ -193,6 +193,81 @@ describe('PATCH /api/v1/transactions/:id', () => {
     },
   )
 
+  it('answers with exactly the row that is now stored', async () => {
+    const { id } = await rowFor('trans_fixture_002')
+
+    const res = await api
+      .patch(`/api/v1/transactions/${id}`)
+      .send({ category: 'Bakeries' })
+      .expect(200)
+
+    expect(Object.keys(res.body).sort()).toEqual(['transaction'])
+    expect(res.body.transaction).toEqual(await rowFor('trans_fixture_002'))
+  })
+
+  it('overwrites an earlier PATCH on the same row', async () => {
+    const { id } = await rowFor('trans_fixture_002')
+
+    await api
+      .patch(`/api/v1/transactions/${id}`)
+      .send({ category: 'Bakeries' })
+      .expect(200)
+    const second = await api
+      .patch(`/api/v1/transactions/${id}`)
+      .send({ category: 'Convenience stores' })
+
+    expect(second.status).toBe(200)
+    expect(second.body.transaction).toMatchObject({
+      category: 'Convenience stores',
+      category_source: 'user',
+    })
+    expect(await rowFor('trans_fixture_002')).toMatchObject({
+      category: 'Convenience stores',
+      category_source: 'user',
+    })
+  })
+
+  it('takes ownership of the row even when the category is the one Akahu gave', async () => {
+    const before = await rowFor('trans_fixture_002')
+    expect(before.category_source).toBe('akahu')
+
+    const res = await api
+      .patch(`/api/v1/transactions/${before.id}`)
+      .send({ category: before.category })
+
+    expect(res.status).toBe(200)
+    expect((await rowFor('trans_fixture_002')).category_source).toBe('user')
+  })
+
+  it('leaves status, source and the Akahu-category copies as they were, and touches no other row', async () => {
+    const target = await rowFor('trans_fixture_002')
+    await connection('transactions').where({ id: target.id }).update({
+      source: 'xero',
+      akahu_category_name: 'Invented category',
+      akahu_category_group_name: 'Invented group',
+    })
+    const before = await connection('transactions').select().orderBy('id')
+
+    await api
+      .patch(`/api/v1/transactions/${target.id}`)
+      .send({ category: 'Bakeries' })
+      .expect(200)
+
+    const after = await connection('transactions').select().orderBy('id')
+    expect(after.map((r) => r.id)).toEqual(before.map((r) => r.id))
+    const changed = after.find((r) => r.id === target.id)
+    expect(changed).toMatchObject({
+      status: 'settled',
+      source: 'xero',
+      akahu_category_name: 'Invented category',
+      akahu_category_group_name: 'Invented group',
+    })
+    for (const [i, row] of after.entries()) {
+      if (row.id === target.id) continue
+      expect(row).toEqual(before[i])
+    }
+  })
+
   it('no longer answers PUT, the old half of the contract', async () => {
     const { id } = await rowFor('trans_fixture_002')
     const res = await api
