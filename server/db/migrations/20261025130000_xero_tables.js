@@ -9,6 +9,10 @@
 // are keyed on Xero's own id, so the sync replaces a row with
 // `INSERT … ON CONFLICT(<id>) DO UPDATE` (knex `onConflict(id).merge()`) and
 // a second sync of the same document leaves one row. Divvy never edits them.
+// The client returns only outstanding documents, so upsert alone never
+// removes one that was paid or voided since the last run: in the same
+// transaction as its upserts, a sync deletes every row of the table it did
+// not see this run (the rows whose `synced_at` is not this run's).
 //
 // Column names follow `models/xero.ts` (what `server/xero/client/` returns),
 // in snake_case, plus the time Divvy stored the row.
@@ -35,12 +39,20 @@
 //   no default, so a writer has to say. The one default is
 //   `xero_connection.version = 0`.
 // - Every CHECK is named `<table>_<what>`, so a refusal names its rule.
+// - Writers: an `_enc` column takes a raw Buffer (base64 or hex text is
+//   refused), and an instant is `Date#toISOString()` text (a JS Date,
+//   `knex.fn.now()` or `CURRENT_TIMESTAMP` is refused).
 // - A non-integer PRIMARY KEY in SQLite allows NULL unless the column says
 //   NOT NULL, so each text key does, and refuses the empty string.
 //
 // xero_connection (Rulings 2, 3): the token vault, one row at most. `id` is
-// pinned to 1 by `xero_connection_single_row`; the sync writes it with
-// `onConflict('id').merge()`. The access token, refresh token and tenant id
+// pinned to 1 by `xero_connection_single_row`. The vault and the
+// connect/disconnect routes own this table; the sync never writes it. A
+// refresh is `UPDATE … WHERE id = 1 AND version = ?` setting
+// `version = version + 1`; disconnect sets `status` and nulls every `_enc`
+// column in the same UPDATE. A partial upsert (`insert(…).onConflict('id')
+// .merge()` without `status`) fails NOT NULL on `status`, so it is not a way
+// to write here. The access token, refresh token and tenant id
 // are stored only as AES-256-GCM ciphertext under a key from the
 // environment (`XERO_TOKEN_KEY`), never in this file or the database: there
 // is no plaintext column for any of them, and each `*_enc` column holds a
@@ -50,7 +62,8 @@
 // atomic refresh: a refresher writes the new pair only `WHERE version = ?`
 // and increments it. `status`:
 // - `connected` — the tokens, tenant, `expires_at`, `scopes` and
-//   `connected_at` are all present (`xero_connection_connected_has_tokens`).
+//   `connected_at` are all present, and `scopes` is not empty
+//   (`xero_connection_connected_has_tokens`).
 // - `needs_reconnect` — a refresh failed (Ruling 3); the old ciphertext may
 //   stay, so nothing is required or forbidden.
 // - `disconnected` — no token or tenant ciphertext is kept
@@ -67,8 +80,11 @@
 // `status` is Xero's own word, kept as received.
 //
 // xero_pay_runs: stored only (matching is a later PRD), keyed on Xero's
-// `payRunID`. There is no currency column because the client returns none:
-// the organisation's payroll is Xero Payroll NZ, which pays in NZD. prd-03's
+// `payRunID`. `total_cost_cents` and `total_pay_cents` are integer cents with
+// no sign rule: Ruling 6 stores Xero data as received, the client's amount
+// reader accepts a minus sign, and a refusal here would fail the whole sync.
+// There is no currency column because the client returns none: the
+// organisation's payroll is Xero Payroll NZ, which pays in NZD. prd-03's
 // replica must exclude this table too (Ruling 2).
 //
 // xero_profit_loss (Ruling 6): the accrual-basis Net Profit for one period,
@@ -178,13 +194,14 @@ export async function up(knex) {
     instantCheck(table, 'last_refresh_at', 'xero_connection_last_refresh_at_is_instant')
     table.check(
       `?? <> 'connected' OR (?? IS NOT NULL AND ?? IS NOT NULL AND ?? IS NOT NULL
-        AND ?? IS NOT NULL AND ?? IS NOT NULL AND ?? IS NOT NULL)`,
+        AND ?? IS NOT NULL AND ?? IS NOT NULL AND length(??) > 0 AND ?? IS NOT NULL)`,
       [
         'status',
         'access_token_enc',
         'refresh_token_enc',
         'tenant_id_enc',
         'expires_at',
+        'scopes',
         'scopes',
         'connected_at',
       ],
@@ -219,11 +236,11 @@ export async function up(knex) {
     dateCheck(table, 'period_start', 'xero_pay_runs_period_start_is_date')
     dateCheck(table, 'period_end', 'xero_pay_runs_period_end_is_date')
     dateCheck(table, 'payment_date', 'xero_pay_runs_payment_date_is_date')
-    centsCheck(table, 'total_cost_cents', 'xero_pay_runs_total_cost_non_negative', {
-      nonNegative: true,
+    centsCheck(table, 'total_cost_cents', 'xero_pay_runs_total_cost_is_cents', {
+      nonNegative: false,
     })
-    centsCheck(table, 'total_pay_cents', 'xero_pay_runs_total_pay_non_negative', {
-      nonNegative: true,
+    centsCheck(table, 'total_pay_cents', 'xero_pay_runs_total_pay_is_cents', {
+      nonNegative: false,
     })
     instantCheck(table, 'synced_at', 'xero_pay_runs_synced_at_is_instant')
     table.check('?? <= ??', ['period_start', 'period_end'], 'xero_pay_runs_period_in_order')

@@ -398,8 +398,9 @@ const CENTS: [table: string, column: string, nonNegative: boolean, check: string
   ['xero_bills', 'total_cents', false, 'xero_bills_total_is_cents'],
   ['xero_bills', 'amount_due_cents', true, 'xero_bills_amount_due_non_negative'],
   ['xero_bills', 'amount_paid_cents', false, 'xero_bills_amount_paid_is_cents'],
-  ['xero_pay_runs', 'total_cost_cents', true, 'xero_pay_runs_total_cost_non_negative'],
-  ['xero_pay_runs', 'total_pay_cents', true, 'xero_pay_runs_total_pay_non_negative'],
+  // Pay run totals are stored as Xero sends them (Ruling 6), sign and all.
+  ['xero_pay_runs', 'total_cost_cents', false, 'xero_pay_runs_total_cost_is_cents'],
+  ['xero_pay_runs', 'total_pay_cents', false, 'xero_pay_runs_total_pay_is_cents'],
   ['xero_profit_loss', 'net_profit_cents', false, 'xero_profit_loss_net_profit_is_cents'],
 ]
 
@@ -826,7 +827,7 @@ describe('xero_connection (Done-when 6; Rulings 2, 3)', () => {
     expect(await db('xero_connection').pluck('id')).toEqual([1])
   })
 
-  it("is written by upsert on id: the second write replaces the first", async () => {
+  it('a full-row upsert on id still leaves one row (the vault refreshes with the guarded UPDATE)', async () => {
     await db('xero_connection').insert(vault()).onConflict('id').merge()
     const refreshed = vault({
       access_token_enc: CIPHER_2,
@@ -879,6 +880,52 @@ describe('xero_connection (Done-when 6; Rulings 2, 3)', () => {
       refusedBy('xero_connection_connected_has_tokens'),
     )
     expect(await count('xero_connection')).toBe(0)
+  })
+
+  it('refuses a connected vault with empty scopes; other statuses may have them', async () => {
+    await expect(db('xero_connection').insert(vault({ scopes: '' }))).rejects.toThrow(
+      refusedBy('xero_connection_connected_has_tokens'),
+    )
+    expect(await count('xero_connection')).toBe(0)
+
+    for (const status of ['needs_reconnect', 'disconnected']) {
+      const row = status === 'disconnected' ? { id: 1, status, scopes: '' } : vault({ status, scopes: '' })
+      await db('xero_connection').insert(row)
+      expect(await db('xero_connection').first('status', 'scopes'), status).toStrictEqual({
+        status,
+        scopes: '',
+      })
+      await db('xero_connection').del()
+    }
+  })
+
+  it("refreshes by compare-and-swap on version (Ruling 3): a stale version writes nothing", async () => {
+    await db('xero_connection').insert(vault())
+    const refresh = () =>
+      db('xero_connection')
+        .update({
+          access_token_enc: CIPHER_2,
+          refresh_token_enc: CIPHER_2,
+          expires_at: '2026-10-25T05:00:00.000Z',
+          last_refresh_at: LATER,
+          version: db.raw('version + 1'),
+        })
+        .where({ id: 1, version: 0 })
+
+    expect(await refresh()).toBe(1)
+    expect(await refresh()).toBe(0)
+
+    const stored = await db('xero_connection').first()
+    expect(Object.keys(stored).sort()).toEqual(Object.keys(SCHEMA.xero_connection).sort())
+    expect(stored).toStrictEqual(
+      vault({
+        access_token_enc: CIPHER_2,
+        refresh_token_enc: CIPHER_2,
+        expires_at: '2026-10-25T05:00:00.000Z',
+        last_refresh_at: LATER,
+        version: 1,
+      }),
+    )
   })
 
   it.each(ENC)('refuses a disconnected vault that keeps %s', async (column) => {
