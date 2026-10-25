@@ -541,6 +541,25 @@ describe('findDrawingIds: the largest pairing, then the tie-breaks (#276)', () =
     ).toStrictEqual([2, 3, 4, 5])
   })
 
+  it("a set of out days that skips the step's own day still counts the sets ending before it (#276)", () => {
+    // Windows: 1 (day 0) reaches no inflow; 3 (day 2) reaches 6 (day 5);
+    // 4 (day 8) reaches 7 (day 7) and 5 (day 9); 2 (day 10) reaches only 5.
+    // The largest pairing is 3 ↔ 6, 4 ↔ 7, 2 ↔ 5, and 1 stays a charge.
+    // Found by test-guard: a walk that forgets the best set ending well
+    // before the step's day when it skips that day pairs only 4 ↔ 5.
+    expect(
+      ids([
+        out(1, dateAtOffset(0)),
+        out(2, dateAtOffset(10)),
+        out(3, dateAtOffset(2)),
+        out(4, dateAtOffset(8)),
+        into(5, dateAtOffset(9)),
+        into(6, dateAtOffset(5)),
+        into(7, dateAtOffset(7)),
+      ]),
+    ).toStrictEqual([2, 3, 4, 5, 6, 7])
+  })
+
   it('equals the maximum-pairing oracle on every case, in one dense run or split into several', () => {
     // A fixed-seed generator (mulberry32, a seed of its own), so a failure is
     // reproducible. More halves a side, and more amounts, than the generator
@@ -627,15 +646,16 @@ describe('findDrawingIds: the largest pairing, then the tie-breaks (#276)', () =
     expect(elapsed).toBeLessThan(2000)
   })
 
-  it('pairs a daily chain across 10,000 days, every pair three days apart', () => {
-    // An outflow on each of days 0 to 9,999, each landing 3 days later, so
-    // days 3 to 9,999 hold an outflow and an inflow. Outflow 0 reaches only
+  it('pairs a daily chain across 40,000 days, every pair three days apart', () => {
+    // An outflow on each of days 0 to 39,999, each landing 3 days later, so
+    // days 3 to 39,999 hold an outflow and an inflow. Outflow 0 reaches only
     // inflow 3, so outflow 1 must take inflow 4, and so on up the chain:
     // the only pairing of all 20,000 rows is every outflow with its own
     // inflow, and every same-day (gap 0) pair is passed over. Greedy took
     // those and stranded the first three outflows and the last three
-    // inflows.
-    const days = 10_000
+    // inflows. The chain is long enough that a walk redoing its dynamic
+    // program from day 0 on every step (quadratic in days) overruns the bound.
+    const days = 40_000
     const candidates: DrawingCandidate[] = []
     for (let day = 0; day < days; day += 1) {
       candidates.push(out(day + 1, dateAtOffset(day)))

@@ -280,10 +280,11 @@ class RunWalk {
         this.insLeft[inDay] -= k
         taken.outs[outDay] += k
         taken.ins[inDay] += k
-        // ending[p] reads outs up to p and ins up to p + DRAWING_DAYS_AFTER.
+        // ending[p] reads outs up to p and ins up to p + DRAWING_DAYS_AFTER;
+        // inDay − AFTER is never past outDay, so it bounds both changes.
         this.endingValid = Math.min(
           this.endingValid,
-          Math.max(0, Math.min(outDay, inDay - DRAWING_DAYS_AFTER)),
+          Math.max(0, inDay - DRAWING_DAYS_AFTER),
         )
       }
     }
