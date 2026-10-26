@@ -4088,3 +4088,335 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
     })
   })
 })
+
+// ---------------------------------------------------------------------------
+// Before #392
+// ---------------------------------------------------------------------------
+
+// Written before the "possibly stopped" flag (#392), green on main as it is
+// today: `subscriptions()` takes no today and reads no clock, so an active
+// row is counted in the totals however long ago its last charge was. A test
+// titled "(changes in #392)" pins behaviour the build is meant to change; its
+// diff there is the change. The rest pin what the build must keep. Rows that
+// a test above already pins exactly are not repeated here; these are the old
+// fixtures. Every expected value is worked by hand and written as a literal;
+// invented merchants only. The clock is set to 26 October 2026 to make
+// "years ago" concrete; the result does not depend on it.
+describe('before #392: an old last charge changes nothing yet', () => {
+  // Gaps 30 (10 Jan to 9 Feb) and 30 (9 Feb to 11 Mar; 2023 has no 29 Feb).
+  const OLD_MONTHLY = ['2023-01-10', '2023-02-09', '2023-03-11']
+  // Gaps 7 and 7.
+  const OLD_WEEKLY = ['2022-05-02', '2022-05-09', '2022-05-16']
+  // Gaps 366 (across 29 Feb 2020) and 365: both in the yearly band.
+  const OLD_YEARLY = ['2019-06-01', '2020-06-01', '2021-06-01']
+
+  const atToday = () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime('2026-10-26T00:00:00Z')
+  }
+
+  /** The detected, unmarked, never-cancelled row for the stream fixture. */
+  const streamRow = (
+    fields: Pick<
+      SubscriptionRow,
+      | 'chargeCount'
+      | 'lastChargedOn'
+      | 'amountCents'
+      | 'cadence'
+      | 'perMonthCents'
+      | 'perYearCents'
+    >,
+  ): SubscriptionRow => ({
+    merchantKey: STREAM,
+    scope: 'personal',
+    name: 'Example Stream',
+    detected: true,
+    marked: false,
+    status: 'active',
+    cancelledOn: null,
+    chargedAgainOn: null,
+    ...fields,
+  })
+
+  it.each([
+    {
+      cadence: 'monthly',
+      dates: OLD_MONTHLY,
+      amount: 1599,
+      // Passes through; 12 × 1599 = 19188.
+      perMonth: 1599,
+      perYear: 19188,
+    },
+    {
+      cadence: 'weekly',
+      dates: OLD_WEEKLY,
+      amount: 1250,
+      // 1250 × 52 = 65000; ÷ 12 = 5416.67 → 5417; × 12 = 65004.
+      perMonth: 5417,
+      perYear: 65004,
+    },
+    {
+      cadence: 'yearly',
+      dates: OLD_YEARLY,
+      amount: 1806,
+      // 1806 ÷ 12 = 150.5 → 151; × 12 = 1812.
+      perMonth: 151,
+      perYear: 1812,
+    },
+  ] as const)(
+    '$cadence: an active row is counted however old its last charge (changes in #392)',
+    ({ cadence, dates, amount, perMonth, perYear }) => {
+      atToday()
+      const result = run(charges(dates, { amountCents: -amount }))
+
+      expect(keys(result)).toEqual(keys(RESPONSE_KEYS))
+      expect(result.subscriptions).toHaveLength(1)
+      expect(keys(result.subscriptions[0])).toEqual(keys(ROW_KEYS))
+      expect(keys(result.totals)).toEqual(keys(TOTAL_KEYS))
+      expect(result).toStrictEqual({
+        subscriptions: [
+          streamRow({
+            chargeCount: 3,
+            lastChargedOn: dates[2],
+            amountCents: amount,
+            cadence,
+            perMonthCents: perMonth,
+            perYearCents: perYear,
+          }),
+        ],
+        questions: [],
+        notSubscriptions: [],
+        totals: {
+          perMonthCents: perMonth,
+          perYearCents: perYear,
+          countedCount: 1,
+          uncountedCount: 0,
+        },
+      })
+    },
+  )
+
+  it('an old row is summed beside a current one (changes in #392)', () => {
+    atToday()
+    const result = run([
+      ...charges(OLD_MONTHLY),
+      ...charges(WEEKLY, {
+        merchantId: 'merchant_fixture_weekly_box',
+        merchantName: 'Example Weekly Box',
+        description: 'EXAMPLE WEEKLY BOX 0001',
+        amountCents: -1250,
+      }),
+    ])
+
+    // Stream before Weekly Box by name.
+    expect(
+      result.subscriptions.map((r) => [
+        r.merchantKey,
+        r.lastChargedOn,
+        r.status,
+        r.perMonthCents,
+      ]),
+    ).toStrictEqual([
+      [STREAM, '2023-03-11', 'active', 1599],
+      ['m:merchant_fixture_weekly_box', '2026-08-17', 'active', 5417],
+    ])
+    // 1599 + 5417 = 7016; 12 × 7016 = 84192.
+    expect(result.totals).toStrictEqual({
+      perMonthCents: 7016,
+      perYearCents: 84192,
+      countedCount: 2,
+      uncountedCount: 0,
+    })
+  })
+
+  it('an old cancelled row is listed as cancelled and counted in neither total', () => {
+    atToday()
+    const result = run(charges(OLD_MONTHLY), [
+      mark({ cancelledOn: '2023-03-11' }),
+    ])
+
+    expect(keys(result.subscriptions[0])).toEqual(keys(ROW_KEYS))
+    expect(result.subscriptions).toStrictEqual([
+      {
+        ...streamRow({
+          chargeCount: 3,
+          lastChargedOn: '2023-03-11',
+          amountCents: 1599,
+          cadence: 'monthly',
+          perMonthCents: 1599,
+          perYearCents: 19188,
+        }),
+        status: 'cancelled',
+        cancelledOn: '2023-03-11',
+      },
+    ])
+    expect(result.totals).toStrictEqual(NOTHING.totals)
+  })
+
+  it('an old marked row with no cadence is listed and uncounted', () => {
+    atToday()
+    const result = run(
+      [tx({ date: '2023-03-11' })],
+      [mark({ answer: 'subscription' })],
+    )
+
+    expect(keys(result.subscriptions[0])).toEqual(keys(ROW_KEYS))
+    expect(result.subscriptions).toStrictEqual([
+      {
+        ...streamRow({
+          chargeCount: 1,
+          lastChargedOn: '2023-03-11',
+          amountCents: 1599,
+          cadence: null,
+          perMonthCents: null,
+          perYearCents: null,
+        }),
+        detected: false,
+        marked: true,
+      },
+    ])
+    expect(result.totals).toStrictEqual({
+      perMonthCents: 0,
+      perYearCents: 0,
+      countedCount: 0,
+      uncountedCount: 1,
+    })
+  })
+
+  it('an old charged-again row is active and counted (changes in #392)', () => {
+    atToday()
+    // Gaps 30, 30 and 30 (11 Mar to 10 Apr): monthly over all four.
+    // Cancelled 12 March; 10 April is the earliest charge after it.
+    const result = run(charges([...OLD_MONTHLY, '2023-04-10']), [
+      mark({ cancelledOn: '2023-03-12' }),
+    ])
+
+    expect(keys(result.subscriptions[0])).toEqual(keys(ROW_KEYS))
+    expect(result.subscriptions).toStrictEqual([
+      {
+        ...streamRow({
+          chargeCount: 4,
+          lastChargedOn: '2023-04-10',
+          amountCents: 1599,
+          cadence: 'monthly',
+          perMonthCents: 1599,
+          perYearCents: 19188,
+        }),
+        cancelledOn: '2023-03-12',
+        chargedAgainOn: '2023-04-10',
+      },
+    ])
+    expect(result.totals).toStrictEqual({
+      perMonthCents: 1599,
+      perYearCents: 19188,
+      countedCount: 1,
+      uncountedCount: 0,
+    })
+  })
+
+  describe('a marked lane whose charges stopped', () => {
+    const GADGET = 'm:merchant_fixture_gadget'
+    const gadget = (date: string, cents: number): SubscriptionTransaction =>
+      tx({
+        date,
+        amountCents: -cents,
+        merchantId: 'merchant_fixture_gadget',
+        merchantName: 'Example Gadget',
+        description: 'EXAMPLE GADGET 0001',
+      })
+    const onDay = (
+      year: string,
+      day: string,
+      cents: number,
+      months: readonly string[],
+    ) => months.map((m) => gadget(`${year}-${m}-${day}`, cents))
+    // A: the 5th, January to May, at 1000 (gaps 31, 28, 31, 30). B: the
+    // 25th, March to October, at 2500. Interleaved, the all-history rule
+    // sees gaps of about 20 and 10 days: no band, so it is read as lanes.
+    // A forms on 5 March, first, and holds the bare key; B forms on 25 May.
+    // A's span holds two of B's charges and B's two of A's: each clear
+    // (2 × 2 ≤ 5, 2 × 2 ≤ 8). A's last charge, 5 May, is 173 days before
+    // the merchant's latest, 25 October: stale, so only her answer on the
+    // bare key lists it, and it is not detected.
+    const fixture = (year: string) => [
+      ...onDay(year, '05', 1000, ['01', '02', '03', '04', '05']),
+      ...onDay(year, '25', 2500, [
+        '03',
+        '04',
+        '05',
+        '06',
+        '07',
+        '08',
+        '09',
+        '10',
+      ]),
+    ]
+    const marked = [mark({ merchantKey: GADGET, answer: 'subscription' })]
+
+    /** Both rows and the totals, for the fixture in `year`. */
+    const expected = (year: string): SubscriptionsResponse => ({
+      subscriptions: [
+        {
+          merchantKey: GADGET,
+          scope: 'personal',
+          name: 'Example Gadget',
+          chargeCount: 5,
+          lastChargedOn: `${year}-05-05`,
+          amountCents: 1000,
+          cadence: 'monthly',
+          detected: false,
+          marked: true,
+          status: 'active',
+          cancelledOn: null,
+          chargedAgainOn: null,
+          perMonthCents: 1000,
+          perYearCents: 12000,
+        },
+        {
+          merchantKey: `${GADGET}#${year}-03-25:2500`,
+          scope: 'personal',
+          name: 'Example Gadget',
+          chargeCount: 8,
+          lastChargedOn: `${year}-10-25`,
+          amountCents: 2500,
+          cadence: 'monthly',
+          detected: true,
+          marked: false,
+          status: 'active',
+          cancelledOn: null,
+          chargedAgainOn: null,
+          perMonthCents: 2500,
+          perYearCents: 30000,
+        },
+      ],
+      questions: [],
+      notSubscriptions: [],
+      // 1000 + 2500 = 3500; 12 × 3500 = 42000.
+      totals: {
+        perMonthCents: 3500,
+        perYearCents: 42000,
+        countedCount: 2,
+        uncountedCount: 0,
+      },
+    })
+
+    it('while its sibling runs on: the stopped lane is active and counted (changes in #392)', () => {
+      atToday()
+      const result = run(fixture('2026'), marked)
+
+      for (const row of result.subscriptions)
+        expect(keys(row)).toEqual(keys(ROW_KEYS))
+      expect(result).toStrictEqual(expected('2026'))
+    })
+
+    it('when the whole merchant stopped years ago: both lanes are active and counted (changes in #392)', () => {
+      atToday()
+      // 2023, like 2026, has no 29 February: the same gaps.
+      const result = run(fixture('2023'), marked)
+
+      for (const row of result.subscriptions)
+        expect(keys(row)).toEqual(keys(ROW_KEYS))
+      expect(result).toStrictEqual(expected('2023'))
+    })
+  })
+})

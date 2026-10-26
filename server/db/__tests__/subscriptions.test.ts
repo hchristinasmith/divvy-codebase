@@ -1513,3 +1513,84 @@ describe('writes: a scope the shared module refuses (#391)', () => {
     },
   )
 })
+
+// Written before the "possibly stopped" flag (#392), green on main as it is
+// today: `readSubscriptions` takes no clock, so an active subscription whose
+// last charge is years before today is still counted in the totals. The
+// build is meant to change this; its diff here is the change. Invented
+// values only.
+describe('before #392: readSubscriptions', () => {
+  // 00:00 UTC is 13:00 NZDT or 12:00 NZST: the NZ date is the UTC date.
+  // Gaps 30 and 30 (2023 has no 29 February).
+  const OLD_MONTHLY = [
+    '2023-01-10T00:00:00.000Z',
+    '2023-02-09T00:00:00.000Z',
+    '2023-03-11T00:00:00.000Z',
+  ]
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('a monthly subscription last charged in 2023 is active and counted in the totals (changes in #392)', async () => {
+    await seedAccounts()
+    await insertTxs(OLD_MONTHLY.map((date) => tx(EVERYDAY, date, -1599)))
+    // Today is 28 October 2026 in NZ.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(NOW)
+
+    const result = await readSubscriptions('personal')
+
+    expect(result.subscriptions).toHaveLength(1)
+    expect(keys(result.subscriptions[0])).toEqual(
+      [
+        'merchantKey',
+        'scope',
+        'name',
+        'chargeCount',
+        'lastChargedOn',
+        'amountCents',
+        'cadence',
+        'detected',
+        'marked',
+        'status',
+        'cancelledOn',
+        'chargedAgainOn',
+        'perMonthCents',
+        'perYearCents',
+      ].sort(),
+    )
+    expect(keys(result.totals)).toEqual(
+      ['perMonthCents', 'perYearCents', 'countedCount', 'uncountedCount'].sort(),
+    )
+    expect(result).toStrictEqual({
+      subscriptions: [
+        {
+          merchantKey: STREAM,
+          scope: 'personal',
+          name: 'Example Stream',
+          chargeCount: 3,
+          lastChargedOn: '2023-03-11',
+          amountCents: 1599,
+          cadence: 'monthly',
+          detected: true,
+          marked: false,
+          status: 'active',
+          cancelledOn: null,
+          chargedAgainOn: null,
+          perMonthCents: 1599,
+          // 12 × 1599 = 19188
+          perYearCents: 19188,
+        },
+      ],
+      questions: [],
+      notSubscriptions: [],
+      totals: {
+        perMonthCents: 1599,
+        perYearCents: 19188,
+        countedCount: 1,
+        uncountedCount: 0,
+      },
+    })
+  })
+})
