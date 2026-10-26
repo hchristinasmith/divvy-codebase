@@ -728,6 +728,14 @@ describe('triggers and options', () => {
     expect(await runRows()).toEqual([])
   })
 
+  it('a config field given as undefined takes its default', async () => {
+    await seedAccounts()
+    await learn(BAKERY)
+    await tx()
+    const config = { batchSize: undefined, ruleThreshold: undefined, enabled: undefined }
+    expect(await run({ config })).toMatchObject({ outcome: 'success', considered: 1, written: 1 })
+  })
+
   it('a threshold of 3 is honoured', async () => {
     await seedAccounts()
     await learn(BAKERY)

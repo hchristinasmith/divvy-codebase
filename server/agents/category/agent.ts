@@ -134,7 +134,14 @@ export async function runCategoryAgent(
   if (options.syncRunId !== undefined && !positiveInteger(options.syncRunId)) {
     throw new Error('syncRunId must be a positive integer')
   }
-  const config: AgentConfig = { ...DEFAULTS, ...options.config }
+  // An absent or undefined field takes its default; a spread would let an
+  // explicit `undefined` (an unset env var, say) override it.
+  const given = options.config ?? {}
+  const config: AgentConfig = {
+    batchSize: given.batchSize ?? DEFAULTS.batchSize,
+    ruleThreshold: given.ruleThreshold ?? DEFAULTS.ruleThreshold,
+    enabled: given.enabled ?? DEFAULTS.enabled,
+  }
   if (!positiveInteger(config.batchSize)) throw new Error('batchSize must be a positive integer')
   if (!positiveInteger(config.ruleThreshold)) throw new Error('ruleThreshold must be a positive integer')
   if (typeof config.enabled !== 'boolean') throw new Error('enabled must be a boolean')
