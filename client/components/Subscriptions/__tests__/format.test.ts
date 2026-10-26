@@ -31,21 +31,28 @@ describe('formatDay appends the year when the date is not in today\'s year', () 
   })
 
   it('appends the year to the last day of the year before and the first day after', () => {
-    expect(formatDay('2025-12-31', NOW)).toBe('31 Dec 2025')
-    expect(formatDay('2027-01-01', NOW)).toBe('1 Jan 2027')
+    expect(formatDay('2025-12-31', NOW)).toBe('31 Dec\u00a02025')
+    expect(formatDay('2027-01-01', NOW)).toBe('1 Jan\u00a02027')
   })
 
   it('appends the year to a date just before 1 Jan when today is 1 Jan', () => {
-    expect(formatDay('2025-12-31', '2026-01-01')).toBe('31 Dec 2025')
+    expect(formatDay('2025-12-31', '2026-01-01')).toBe('31 Dec\u00a02025')
   })
 
   it('appends the year to a date just after 31 Dec when today is 31 Dec', () => {
-    expect(formatDay('2026-01-01', '2025-12-31')).toBe('1 Jan 2026')
+    expect(formatDay('2026-01-01', '2025-12-31')).toBe('1 Jan\u00a02026')
   })
 
   it('shows the year when today is not a calendar date', () => {
-    expect(formatDay('2026-11-28', '')).toBe('28 Nov 2026')
-    expect(formatDay('2026-11-28', '28/10/2026')).toBe('28 Nov 2026')
+    expect(formatDay('2026-11-28', '')).toBe('28 Nov\u00a02026')
+    expect(formatDay('2026-11-28', '28/10/2026')).toBe('28 Nov\u00a02026')
+  })
+
+  it('joins the year with a non-breaking space and the day and month with a plain one', () => {
+    // So a year never wraps onto its own line in a narrow column.
+    const label = formatDay('2025-12-31', NOW)
+    expect(label.charAt(6)).toBe('\u00a0')
+    expect(label.charAt(2)).toBe(' ')
   })
 
   it('still returns anything that is not a calendar date unchanged, with a today given', () => {

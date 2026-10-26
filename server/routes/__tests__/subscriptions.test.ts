@@ -934,6 +934,67 @@ describe('round trips', () => {
 
     expect(res.body.cancelledOn).toBe('2026-10-28')
   })
+
+  it('a split merchant whose bare-key part stopped unlisted: No on the bare key hides every part (issue #400)', async () => {
+    await seed()
+    // Example Split App bills two subscriptions (prd-02 Ruling 16): A on
+    // the 5th, January to May, at 1000, and B on the 20th, February to
+    // October, at 2500. A forms first and holds the bare key; B gets
+    // <bare>#2026-02-20:2500. By 20 October A's last charge is months
+    // back and nothing pins it, so it is not listed: no listed row carries
+    // the bare key.
+    const split = (date: string, cents: number) =>
+      tx(EVERYDAY, `${date}T00:00:00.000Z`, -cents, {
+        merchant_id: 'merchant_fixture_split',
+        merchant_name: 'Example Split App',
+        description: 'EXAMPLE SPLIT APP',
+      })
+    await insertAll('transactions', [
+      ...['01', '02', '03', '04', '05'].map((m) => split(`2026-${m}-05`, 1000)),
+      ...['02', '03', '04', '05', '06', '07', '08', '09', '10'].map((m) =>
+        split(`2026-${m}-20`, 2500),
+      ),
+    ])
+    const SPLIT = 'm:merchant_fixture_split'
+    const PART_B = `${SPLIT}#2026-02-20:2500`
+    const splitKeys = (rows: { merchantKey: string }[]) =>
+      rows
+        .map((r) => r.merchantKey)
+        .filter((k) => k === SPLIT || k.startsWith(`${SPLIT}#`))
+
+    let body: SubscriptionsResponse = (await get('personal')).body
+    expect(splitKeys(body.subscriptions)).toStrictEqual([PART_B])
+    expect(splitKeys(body.questions)).toStrictEqual([])
+    expect(splitKeys(body.notSubscriptions)).toStrictEqual([])
+
+    const no = await mark({
+      scope: 'personal',
+      merchantKey: SPLIT,
+      answer: 'not_subscription',
+    })
+    expect(no.status).toBe(200)
+    expect(no.body).toStrictEqual({
+      scope: 'personal',
+      merchantKey: SPLIT,
+      answer: 'not_subscription',
+      cancelledOn: null,
+    })
+
+    body = (await get('personal')).body
+    expect(splitKeys(body.subscriptions)).toStrictEqual([])
+    expect(splitKeys(body.questions)).toStrictEqual([])
+    // Listed once, under the bare key, with every charge of both parts.
+    const listed = body.notSubscriptions.filter((r) =>
+      splitKeys([r]).length > 0,
+    )
+    expect(
+      listed.map((r) => [r.merchantKey, r.chargeCount, r.lastChargedOn]),
+    ).toStrictEqual([[SPLIT, 14, '2026-10-20']])
+    // The other merchants are untouched.
+    expect(body.subscriptions.map((r) => r.merchantKey)).toStrictEqual([
+      STREAM,
+    ])
+  })
 })
 
 describe('subscriptions never enter safe-to-spend, and nothing is called out', () => {
