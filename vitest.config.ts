@@ -1,6 +1,13 @@
 import { defineConfig, mergeConfig } from 'vitest/config'
 import viteConfig from './vite.config.js'
 
+// Every test run uses UTC, a non-NZ zone, so a test that reads the browser's
+// local date instead of `nzCalendarDate` fails here rather than passing on an
+// Auckland machine (#396). This line runs in the main vitest process before
+// its workers are spawned; workers inherit `process.env`, and Node re-reads
+// the zone when `TZ` is assigned. `npx vitest run` and `npm test` both use it.
+process.env.TZ = 'UTC'
+
 // Tests sit beside the code in `__tests__/` folders (CLAUDE.md, Testing;
 // docs/testing.md). Anything outside those folders is not collected, so a
 // stray `*.test.*` elsewhere (or in a dead tree) never runs by accident.
