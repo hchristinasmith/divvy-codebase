@@ -1,11 +1,7 @@
 import express from 'express'
 import type { Request, Response } from 'express'
 
-import type {
-  BudgetResponse,
-  BudgetsResponse,
-  Scope,
-} from '../../shared/contracts.ts'
+import type { BudgetResponse, BudgetsResponse } from '../../shared/contracts.ts'
 import {
   BudgetsDataError,
   createBudget,
@@ -18,6 +14,7 @@ import {
 } from '../db/budgets.ts'
 import { OverviewDataError } from '../db/overview.ts'
 import { errorClass } from '../error-class.ts'
+import { fromThisSite, parseScope } from '../http.ts'
 
 const router = express.Router()
 
@@ -43,38 +40,6 @@ const router = express.Router()
 // Errors are fixed text and never echo what was sent. A `BudgetsDataError`
 // or an `OverviewDataError` carries one of its own constant messages;
 // anything else is a generic text. Only the error's class is logged.
-
-/**
- * A copy of `parseScope` in ./bills.ts, ./overview.ts and
- * ./subscriptions.ts; change all together (#236 tracks folding the route
- * helpers). A plain `all`, `personal` or `strawb`; anything else, a
- * repeated `scope` included, is refused.
- */
-function parseScope(raw: unknown): Scope | null {
-  return raw === 'all' || raw === 'personal' || raw === 'strawb' ? raw : null
-}
-
-/**
- * A copy of `fromThisSite` in ./sync.ts, ./overview.ts, ./subscriptions.ts,
- * ./bills.ts and ./goals.ts; change all together (#236 tracks folding them).
- * `Sec-Fetch-Site` when the browser sends it; otherwise no `Origin` (curl)
- * passes and an `Origin` must name this host.
- */
-function fromThisSite(req: Request): boolean {
-  const site = req.headers['sec-fetch-site']
-  if (site !== undefined) return site === 'same-origin' || site === 'none'
-  const origin = req.headers.origin
-  if (origin === undefined) return true
-  const host = req.headers.host
-  if (host === undefined) return false
-  try {
-    return new URL(origin).host === host.toLowerCase()
-  } catch {
-    // `Origin: null` (a sandboxed frame, a file: page) and anything else
-    // that is not a URL.
-    return false
-  }
-}
 
 // A copy of `parseId` in ./bills.ts and ./goals.ts; change all together
 // (#236 tracks folding the route helpers). Digits only: Number() would also
