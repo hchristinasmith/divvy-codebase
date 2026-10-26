@@ -3,15 +3,9 @@ import * as db from '../db/transactions.ts'
 import { isSelectableCategory } from '../db/categories.ts'
 import { applyDrawings, loadDrawingIds } from '../db/drawings.ts'
 import type { UpdateTransactionCategoryResponse } from '../../models/transactions.ts'
+import { errorClass } from '../error-class.ts'
 
 const router = express.Router()
-
-// What a 500 logs: the error's class only, as routes/accounts.ts does. Never
-// the error, its message or its stack: knex puts the SQL and its bound values
-// into the message, the stack repeats it, and a search string is one of them.
-function errorClass(err: unknown): string {
-  return err instanceof Error ? err.constructor.name : typeof err
-}
 
 // GET /api/v1/transactions?description=
 // Each row shows its effective category: a half of a drawing is Drawings,

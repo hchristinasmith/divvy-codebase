@@ -7,6 +7,7 @@ import {
   dismissAlert,
   readOverview,
 } from '../db/overview.ts'
+import { errorClass } from '../error-class.ts'
 
 // /api/v1/overview (prd-02, issue #44): the Overview screen's one read and
 // its alert dismissal. Mounted by ./index.ts.
@@ -57,10 +58,6 @@ function fromThisSite(req: Request): boolean {
     // that is not a URL.
     return false
   }
-}
-
-function errorClass(err: unknown): string {
-  return err instanceof Error ? err.constructor.name : typeof err
 }
 
 const router = express.Router()

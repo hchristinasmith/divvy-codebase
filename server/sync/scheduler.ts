@@ -3,6 +3,7 @@ import { createAkahuClient } from './akahu-client.ts'
 import type { AkahuClient } from './akahu-client.ts'
 import { runSync as defaultRunSync } from './run.ts'
 import type { SyncOptions, SyncResult } from './run.ts'
+import { errorClass } from '../error-class.ts'
 
 // The in-process sync scheduler (prd-01 Ruling 6, issue #27): one per
 // process, on the one machine Fly runs, calling `runSync` on a fixed
@@ -106,12 +107,6 @@ function clientFromEnv(): AkahuClient {
     token: process.env.AKAHU_USER_TOKEN ?? '',
     appId: process.env.AKAHU_APP_ID ?? '',
   })
-}
-
-/** A class name is code, not data; a message can carry a credential. */
-function errorClass(err: unknown): string {
-  if (err instanceof Error) return err.constructor.name
-  return typeof err
 }
 
 export function createSyncScheduler(deps: SchedulerDeps = {}): SyncScheduler {

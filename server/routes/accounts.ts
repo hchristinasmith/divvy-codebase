@@ -8,6 +8,7 @@ import type {
 import { getCategoryGroups } from '../db/categories.ts'
 import { applyDrawings, loadDrawingIds } from '../db/drawings.ts'
 import { listAccounts, listTransactions } from '../db/synced.ts'
+import { errorClass } from '../error-class.ts'
 
 // /api/v1/accounts (prd-01, issue #32): the Dashboard's accounts and
 // transactions, read from what sync stored. These replace the live Akahu
@@ -294,10 +295,6 @@ function parseAccountIds(raw: unknown): string[] | undefined | 'invalid' {
     .map((id) => id.trim())
     .filter((id) => id !== '')
   return ids.length === 0 ? 'invalid' : ids
-}
-
-function errorClass(err: unknown): string {
-  return err instanceof Error ? err.constructor.name : typeof err
 }
 
 const router = express.Router()

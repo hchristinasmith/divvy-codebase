@@ -42,11 +42,7 @@ import { finishRun, listRuns, startRun } from '../db/agent-runs.ts'
 import { insertProposal } from '../db/proposals.ts'
 import { loadCandidates, loadEvidence, type Candidate } from './read.ts'
 import { deriveRules, proposalOf, type Rule } from './rules.ts'
-
-// The class of what was thrown, as the routes log it.
-function errorClass(err: unknown): string {
-  return err instanceof Error ? err.constructor.name : typeof err
-}
+import { errorClass } from '../../error-class.ts'
 
 // Ruling 7's N is 2; a batch of 500 sweeps a year of history in a few syncs.
 const DEFAULTS: AgentConfig = { batchSize: 500, ruleThreshold: 2, enabled: true }

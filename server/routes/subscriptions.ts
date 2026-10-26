@@ -14,6 +14,7 @@ import {
   setAnswer,
   uncancelSubscription,
 } from '../db/subscriptions.ts'
+import { errorClass } from '../error-class.ts'
 
 // /api/v1/subscriptions (prd-02 Ruling 14, issue #229): the Subscriptions
 // screen's read and Hannah's marks. Mounted by ./index.ts.
@@ -65,10 +66,6 @@ function fromThisSite(req: Request): boolean {
     // that is not a URL.
     return false
   }
-}
-
-function errorClass(err: unknown): string {
-  return err instanceof Error ? err.constructor.name : typeof err
 }
 
 type Body = Record<string, unknown>

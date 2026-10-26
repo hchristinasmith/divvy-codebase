@@ -10,6 +10,7 @@ import {
   type SettingsResponse,
   type UpdateAccountRequest,
 } from '../../shared/contracts.ts'
+import { errorClass } from '../error-class.ts'
 
 // /api/v1/settings (issue 46; prd-02 Rulings 2, 9, 10, 11), mounted by
 // ./index.ts. The settings panel reads and writes the tax rate, Strawb's
@@ -19,11 +20,6 @@ import {
 // JSON 404.
 
 const router = express.Router()
-
-// Logs the class only: a class is code; a message can carry SQL or values.
-function errorClass(err: unknown): string {
-  return err instanceof Error ? err.constructor.name : typeof err
-}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)

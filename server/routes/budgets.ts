@@ -17,6 +17,7 @@ import {
   type BudgetRefusal,
 } from '../db/budgets.ts'
 import { OverviewDataError } from '../db/overview.ts'
+import { errorClass } from '../error-class.ts'
 
 const router = express.Router()
 
@@ -73,15 +74,6 @@ function fromThisSite(req: Request): boolean {
     // that is not a URL.
     return false
   }
-}
-
-/**
- * A copy of `errorClass` in ./overview.ts, ./accounts.ts, ./subscriptions.ts,
- * ./transactions.ts, ./bills.ts, ./goals.ts and ../sync/scheduler.ts; change
- * all together (#236 tracks folding them).
- */
-function errorClass(err: unknown): string {
-  return err instanceof Error ? err.constructor.name : typeof err
 }
 
 // A copy of `parseId` in ./bills.ts and ./goals.ts; change all together

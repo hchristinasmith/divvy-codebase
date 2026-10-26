@@ -18,6 +18,7 @@ import {
   validateCreateBill,
   type BillRefusal,
 } from '../db/bills.ts'
+import { errorClass } from '../error-class.ts'
 
 const router = express.Router()
 
@@ -68,14 +69,6 @@ function fromThisSite(req: Request): boolean {
     // that is not a URL.
     return false
   }
-}
-
-/**
- * A copy of `errorClass` in ./overview.ts, ./accounts.ts, ./subscriptions.ts
- * and ../sync/scheduler.ts; change all together.
- */
-function errorClass(err: unknown): string {
-  return err instanceof Error ? err.constructor.name : typeof err
 }
 
 // Digits only: Number() would also accept '1e3', '0x10' and ' 7'.

@@ -27,11 +27,7 @@ import { finishRun, startRun, type StartRun } from '../db/agent-runs.ts'
 import { insertInsight, listInsights } from '../db/insights.ts'
 import { buildDrafts } from './prompt.ts'
 import { collectAggregates, lastCompleteWeek, weekRange } from './queries.ts'
-
-// The class of what was thrown, as the routes log it.
-function errorClass(err: unknown): string {
-  return err instanceof Error ? err.constructor.name : typeof err
-}
+import { errorClass } from '../../error-class.ts'
 
 export interface InsightsRunOptions {
   // An ISO week label; the last complete NZ week before `now` when absent.

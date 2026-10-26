@@ -18,6 +18,7 @@ import {
   validateGoalPatch,
   type GoalRefusal,
 } from '../db/goals.ts'
+import { errorClass } from '../error-class.ts'
 
 const router = express.Router()
 
@@ -64,15 +65,6 @@ function fromThisSite(req: Request): boolean {
     // that is not a URL.
     return false
   }
-}
-
-/**
- * A copy of `errorClass` in ./overview.ts, ./accounts.ts, ./subscriptions.ts,
- * ./bills.ts and ../sync/scheduler.ts; change all together (#236 tracks
- * folding them).
- */
-function errorClass(err: unknown): string {
-  return err instanceof Error ? err.constructor.name : typeof err
 }
 
 // A copy of `parseId` in ./bills.ts; change both together (#236 tracks
