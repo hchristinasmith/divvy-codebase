@@ -40,6 +40,19 @@ function metaLine(row: SubscriptionRow, today: IsoDate): string {
   return parts.join(' · ')
 }
 
+// A part of a split merchant (prd-02 Ruling 16) has the merchant's plain
+// key plus a suffix: `#`, its first charge's date, `:`, its cents, and an
+// optional `.<n>` tie number. Only a suffix of exactly that shape at the
+// end is stripped. A `d:` key never holds `#`. A merchant whose `m:` id
+// holds `#` is never split; if its id happened to end in that exact shape
+// it would be stripped too, and the server refuses the shorter key unless
+// some charge in that scope carries it.
+const PART_SUFFIX = /#\d{4}-\d{2}-\d{2}:\d+(?:\.\d+)?$/
+
+function plainKey(merchantKey: string): string {
+  return merchantKey.replace(PART_SUFFIX, '')
+}
+
 const TEXT_BUTTON = `self-start cursor-pointer bg-transparent p-0 text-body-12 font-semibold text-deep hover:text-rose hover:underline disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS}`
 
 export default function SubscriptionItem({
@@ -86,13 +99,20 @@ export default function SubscriptionItem({
         )}
         {row.detected ? (
           // Clearing her answer would leave a detected row listed, so the
-          // way out is to say it is not one.
+          // way out is to say it is not one. On a part it is said of the
+          // whole merchant, through the plain key, which hides every part
+          // even when the part holding that key is not listed.
           <button
             type="button"
             className={TEXT_BUTTON}
             aria-label={`Not a subscription: ${row.name}`}
             disabled={actions.isPending}
-            onClick={() => actions.mark(target, 'not_subscription')}
+            onClick={() =>
+              actions.mark(
+                { scope: row.scope, merchantKey: plainKey(row.merchantKey) },
+                'not_subscription',
+              )
+            }
           >
             Not a subscription
           </button>

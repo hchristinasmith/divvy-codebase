@@ -674,6 +674,85 @@ describe('taking a row out of the list', () => {
   })
 })
 
+describe('a part of a split merchant (issue 400)', () => {
+  // prd-02 Ruling 16: a merchant's later parts carry its plain key plus
+  // `#<first date>:<first cents>`, and an optional `.<n>` tie number.
+  it.each([
+    ['a part', `${STREAM}#2026-02-20:2500`, STREAM],
+    ['a part with a tie number', `${STREAM}#2026-02-20:2500.2`, STREAM],
+    ['the plain key', STREAM, STREAM],
+    [
+      'a plain key holding a # that is not a part suffix',
+      'm:merchant_invented#stream',
+      'm:merchant_invented#stream',
+    ],
+    [
+      'a plain key holding a date with no cents',
+      'm:merchant_invented#2026-02-20',
+      'm:merchant_invented#2026-02-20',
+    ],
+    [
+      'a part suffix that is not at the end',
+      'm:merchant_invented#2026-02-20:2500#x',
+      'm:merchant_invented#2026-02-20:2500#x',
+    ],
+  ])(
+    'Not a subscription on %s sends the merchant key it should',
+    async (_label, rowKey, sentKey) => {
+      const { fx } = setup(
+        response({ subscriptions: [row({ merchantKey: rowKey })] }),
+      )
+      await loaded()
+
+      fireEvent.click(
+        within(item('personal', rowKey)).getByRole('button', {
+          name: 'Not a subscription: Example Stream',
+        }),
+      )
+
+      await waitFor(() => expect(fx.callsTo('PUT', MARK)).toHaveLength(1))
+      const [body] = fx.bodiesTo('PUT', MARK)
+      expect(Object.keys(body).sort()).toEqual(MARK_KEYS)
+      expect(body).toEqual({
+        scope: 'personal',
+        merchantKey: sentKey,
+        answer: 'not_subscription',
+      })
+    },
+  )
+
+  it('Cancel and Unmark on a part keep the part’s own key', async () => {
+    const PART = `${STREAM}#2026-02-20:2500`
+    const { fx } = setup(
+      response({
+        subscriptions: [row({ merchantKey: PART, detected: false, marked: true })],
+      }),
+    )
+    await loaded()
+
+    fireEvent.click(
+      within(item('personal', PART)).getByRole('button', {
+        name: 'Cancel Example Stream',
+      }),
+    )
+    await waitFor(() => expect(fx.callsTo('POST', CANCEL)).toHaveLength(1))
+    await settled()
+    fireEvent.click(
+      within(item('personal', PART)).getByRole('button', {
+        name: 'Unmark Example Stream',
+      }),
+    )
+    await waitFor(() => expect(fx.callsTo('PUT', MARK)).toHaveLength(1))
+
+    expect(fx.bodiesTo('POST', CANCEL)).toEqual([
+      { scope: 'personal', merchantKey: PART },
+    ])
+    expect(fx.bodiesTo('PUT', MARK)).toEqual([
+      { scope: 'personal', merchantKey: PART, answer: null },
+    ])
+  })
+})
+
 describe('in the All view', () => {
   it("every write names the row's own scope, never all", async () => {
     const { fx } = setup(
