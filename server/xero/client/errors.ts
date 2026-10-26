@@ -1,9 +1,10 @@
 // The one error type the Xero client rejects with.
 //
 // A failure is never an empty list: a caller that sees zero invoices can trust
-// there are none. Every failure Xero reports is one of these codes; a failure
-// before Xero answers (the token function or `fetch` rejecting) propagates
-// unchanged, still as a rejection.
+// there are none. Every failure Xero reports is one of these codes. A rejection
+// from `getAccessToken` propagates unchanged (it is the vault's error). A
+// rejection from `fetch` becomes `request_failed` with fixed text, because
+// undici's TypeError can quote the bearer token.
 //
 // Messages are fixed text plus an HTTP status or a field name. They never
 // carry the access token, the tenant id or a response body, so an error can be
@@ -15,6 +16,7 @@ export type XeroErrorCode =
   | 'rate_limited' // 429: see `retry_after`
   | 'http_error' // any other non-2xx status
   | 'bad_response' // a 2xx body that is not the shape this client reads
+  | 'request_failed' // fetch rejected before Xero answered (network, refused redirect)
 
 export class XeroClientError extends Error {
   readonly code: XeroErrorCode

@@ -73,6 +73,10 @@ This has been done once: `TS_AUTHKEY` is staged on `divvy-strawb`. Run it again 
 
 The database backup needs three more secrets: `LITESTREAM_REPLICA_URL`, `LITESTREAM_ACCESS_KEY_ID` and `LITESTREAM_SECRET_ACCESS_KEY`. Set them before deploying an image that contains `litestream.yml`: without `LITESTREAM_REPLICA_URL` the machine does not boot. Setting them, and restoring from the backup, is in [restore.md](restore.md), section 1.
 
+The Xero connection needs `XERO_TOKEN_KEY`, which encrypts the stored Xero tokens. Generate it with `openssl rand -base64 32`: it must be 32 bytes in standard, padded base64. The vault refuses anything else as `key_invalid` (a trailing newline, missing padding, base64url, hex, the wrong length), and an unset key is `key_missing`. It is a Fly secret only, never in the image or the database. Write a copy in the password manager before you set it, separate from the database backup: the replica holds the encrypted tokens, so the key and the replica together give anyone the tokens. Losing the key, or rotating it, makes every stored token fail to decrypt (`decrypt_failed`). The vault does not re-encrypt or fall back to an old key, so the fix is to reconnect Xero.
+
+`XERO_CLIENT_ID` and `XERO_CLIENT_SECRET` are the Xero app's OAuth credentials from the Xero developer portal (prd-05). No code reads them yet: the connect flow is issue #65, so set them when that lands. Keep them out of shell history as for `TS_AUTHKEY`, with a leading space.
+
 ## 5. Deploy
 
 Before this command, the Litestream secrets must be set (section 4, [restore.md](restore.md) section 1). The image always starts under Litestream, and without them the machine does not boot.
