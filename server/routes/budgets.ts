@@ -42,7 +42,7 @@ const router = express.Router()
 // anything else is a generic text. Only the error's class is logged.
 
 // A copy of `parseId` in ./bills.ts and ./goals.ts; change all together
-// (#236 tracks folding the route helpers). Digits only: Number() would also
+// (#420 tracks folding them). Digits only: Number() would also
 // accept '1e3', '0x10' and ' 7'.
 function parseId(raw: string): number | null {
   const id = Number(raw)
@@ -75,8 +75,8 @@ function failed(res: Response, what: string, err: unknown): void {
 /**
  * The checks every write by id starts with: this site, then the id. Answers
  * the id, or null once a refusal has been sent. A copy of `writableId` in
- * ./bills.ts and ./goals.ts; change all together (#236 tracks folding the
- * route helpers).
+ * ./bills.ts and ./goals.ts; change all together (#420 tracks folding
+ * them).
  */
 function writableId(req: Request, res: Response): number | null {
   if (!fromThisSite(req)) {
