@@ -31,7 +31,7 @@ import { useSubscriptionActions } from './useSubscriptionActions.ts'
 //
 // The Active / Cancelled choice (issue 390) is the screen's, not the read's,
 // so a switch never refetches and never touches the totals; it survives a
-// scope switch and resets on leaving the screen.
+// scope switch.
 const STATUS_OPTIONS: readonly { value: SubscriptionStatus; label: string }[] = [
   { value: 'active', label: 'Active' },
   { value: 'cancelled', label: 'Cancelled' },
