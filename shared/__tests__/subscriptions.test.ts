@@ -2414,6 +2414,169 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
         expect(run([...START, app('2026-03-13', 1500)])).toStrictEqual(NOTHING)
       })
     })
+
+    describe('the wait for a nearer charge weighs cents against the date’s nearest charge', () => {
+      const app = at('merchant_fixture_app', 'Example App')
+      // A on the 10th at 1500: 10 May, 10 June (31 days), 10 July (30).
+      // On 7 August the lane (last 10 July) is 28 days on, expected 10
+      // August (31): 3 off, the most allowed. A second charge comes after,
+      // in the band. Whether the lane waits for it depends on its day and
+      // its cents against the charges dated 7 August.
+      const LANE = [
+        app('2026-05-10', 1500),
+        app('2026-06-10', 1500),
+        app('2026-07-10', 1500),
+      ]
+      const rowOf = (transactions: readonly SubscriptionTransaction[]) =>
+        run(transactions).subscriptions.map((r) => [
+          r.merchantKey,
+          r.chargeCount,
+          r.lastChargedOn,
+          r.amountCents,
+        ])
+
+      it('a later charge nearer the day but further in cents does not make the lane wait', () => {
+        // 7 Aug at 1700 is 200 from 1500; 10 Aug at 4000 is 2500 from it. 10
+        // Aug is on the day but further in cents: the lane takes 7 Aug, and
+        // 4000 starts a lane. Gaps 31, 30, 28: spread 3.
+        expect(
+          rowOf([...LANE, app('2026-08-07', 1700), app('2026-08-10', 4000)]),
+        ).toStrictEqual([['m:merchant_fixture_app', 4, '2026-08-07', 1700]])
+      })
+
+      it('a later charge nearer the day and exactly as near in cents does make it wait', () => {
+        // 7 Aug at 1700 is 200 from 1500; 10 Aug at 1300 is 200 the other
+        // way. Equal counts as no further: the lane waits and takes 10 Aug
+        // (31 days, 0 off). 1700 starts a lane, one stray in its span: 2 ≤ 4.
+        expect(
+          rowOf([...LANE, app('2026-08-07', 1700), app('2026-08-10', 1300)]),
+        ).toStrictEqual([['m:merchant_fixture_app', 4, '2026-08-10', 1300]])
+      })
+
+      it('a later charge as far from the day as the earlier one does not make it wait', () => {
+        // 7 Aug is 3 before the expected 10 Aug; 13 Aug (34 days on, the
+        // band’s edge) is 3 after it, at 1500 and so 0 from the lane. Not
+        // nearer: the lane takes 7 Aug (gaps 31, 30, 28) and 13 Aug starts
+        // a lane.
+        expect(
+          rowOf([...LANE, app('2026-08-07', 1700), app('2026-08-13', 1500)]),
+        ).toStrictEqual([['m:merchant_fixture_app', 4, '2026-08-07', 1700]])
+      })
+
+      it('the nearest in cents is taken over every charge dated that day, not the first', () => {
+        // Two charges on 7 Aug, 1000 (500 from the lane) and 1480 (20 from
+        // it); 10 Aug at 1300 is 200 from it. Against the nearest of the
+        // day, 20, 10 Aug is further: the lane does not wait and takes the
+        // 1480. Against the first, 500, it would wait. 1000 starts a lane,
+        // one stray in the span on its last date: 2 ≤ 4.
+        expect(
+          rowOf([
+            ...LANE,
+            app('2026-08-07', 1000),
+            app('2026-08-07', 1480),
+            app('2026-08-10', 1300),
+          ]),
+        ).toStrictEqual([['m:merchant_fixture_app', 4, '2026-08-07', 1480]])
+      })
+    })
+
+    describe('boundaries of the expected day', () => {
+      const app = at('merchant_fixture_app', 'Example App')
+
+      it('a charge 4 days off the expected day is refused; 3 is the most allowed', () => {
+        // A on the 10th at 1500: 10 May, 10 June, 10 July, with a one-off
+        // on 20 June so the all-history rule misses it. 6 August is 27 days
+        // after 10 July, in the band, and 4 before the expected 10 August
+        // (31): refused, so it starts a lane. Gaps would be 31, 30, 27
+        // (spread 4), so only the day refuses it. One stray: 2 ≤ 3.
+        const result = run([
+          app('2026-05-10', 1500),
+          app('2026-06-10', 1500),
+          app('2026-06-20', 3100),
+          app('2026-07-10', 1500),
+          app('2026-08-06', 1500),
+        ])
+
+        expect(
+          result.subscriptions.map((r) => [
+            r.merchantKey,
+            r.chargeCount,
+            r.lastChargedOn,
+          ]),
+        ).toStrictEqual([['m:merchant_fixture_app', 3, '2026-07-10']])
+      })
+
+      it('a charge 3 off ranks behind one 2 off, whatever else favours it', () => {
+        // Lane X: the 10th at 1500, January to March, three charges. Lane
+        // Y: one charge, 5 March at 3100, billing on the 5th. On 7 April, X
+        // is 28 days on from 10 March, expected 10 April (31): 3 off, so 1
+        // past the slack, and its charge is 0 cents from X's. Y is 33 days
+        // on from 5 March, expected 5 April (31): 2 off, on the day. X has
+        // two charges or more and is nearer in cents, but lateness ranks
+        // first: Y takes 7 April. X stays at 3 charges, with one stray
+        // (5 March) in its span: 2 ≤ 3.
+        const result = run([
+          app('2026-01-10', 1500),
+          app('2026-02-10', 1500),
+          app('2026-03-05', 3100),
+          app('2026-03-10', 1500),
+          app('2026-04-07', 1500),
+        ])
+
+        expect(
+          result.subscriptions.map((r) => [
+            r.merchantKey,
+            r.chargeCount,
+            r.lastChargedOn,
+          ]),
+        ).toStrictEqual([['m:merchant_fixture_app', 3, '2026-03-10']])
+      })
+
+      it('a billing day of the 31st is expected on the 31st in a month that has one', () => {
+        // 31 March, 30 April (30 days, the last day of April), then 3 June.
+        // The anchor day is 31, so from 30 April the lane expects 31 May,
+        // 31 days on; 3 June is 34 days on, 3 off: it joins (gaps 30, 34:
+        // spread 4). Expecting the 30th would make it 4 off. A one-off on
+        // 15 April keeps the all-history rule out; one stray: 2 ≤ 3.
+        const result = run([
+          app('2026-03-31', 999),
+          app('2026-04-15', 3100),
+          app('2026-04-30', 999),
+          app('2026-06-03', 999),
+        ])
+
+        expect(
+          result.subscriptions.map((r) => [
+            r.merchantKey,
+            r.chargeCount,
+            r.lastChargedOn,
+          ]),
+        ).toStrictEqual([['m:merchant_fixture_app', 3, '2026-06-03']])
+      })
+
+      it('a billing day of the 31st is expected on the last day of a shorter month, not a day before it', () => {
+        // 31 January, 28 February (the last day), 31 March, then 3 May: 33
+        // days on from 31 March, expected 30 April (30 days on), 3 off: it
+        // joins (gaps 28, 31, 33: spread 5). Expecting the 29th would make
+        // it 4 off. A one-off on 15 February keeps the all-history rule
+        // out; one stray: 2 ≤ 4.
+        const result = run([
+          app('2026-01-31', 999),
+          app('2026-02-15', 3100),
+          app('2026-02-28', 999),
+          app('2026-03-31', 999),
+          app('2026-05-03', 999),
+        ])
+
+        expect(
+          result.subscriptions.map((r) => [
+            r.merchantKey,
+            r.chargeCount,
+            r.lastChargedOn,
+          ]),
+        ).toStrictEqual([['m:merchant_fixture_app', 4, '2026-05-03']])
+      })
+    })
   })
 
   describe('a subscription keeps one key as charges arrive', () => {
@@ -2955,6 +3118,42 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
       // 2 × 3 = 6 > 4.
       expect(result).toStrictEqual(NOTHING)
     })
+
+    describe('a stray on the lane’s first or last date is inside its span', () => {
+      // A lane of 10 Jan, 9 Feb and 11 Mar at 999 (three charges, so at
+      // most one stray: 2 × 1 ≤ 3, and 2 × 2 = 4 > 3).
+      const THREE = [
+        shop('2026-01-10', 999),
+        shop('2026-02-09', 999),
+        shop('2026-03-11', 999),
+      ]
+
+      it('one stray on the first date and one between: two, refused', () => {
+        expect(
+          run([...THREE, shop('2026-01-10', 3100), shop('2026-02-20', 2780)]),
+        ).toStrictEqual(NOTHING)
+      })
+
+      it('one stray on the last date and one between: two, refused', () => {
+        expect(
+          run([...THREE, shop('2026-02-20', 2780), shop('2026-03-11', 3100)]),
+        ).toStrictEqual(NOTHING)
+      })
+
+      it('a single stray on either end date is one: kept', () => {
+        for (const stray of [
+          shop('2026-01-10', 3100),
+          shop('2026-03-11', 3100),
+        ]) {
+          expect(
+            run([...THREE, stray]).subscriptions.map((r) => [
+              r.merchantKey,
+              r.chargeCount,
+            ]),
+          ).toStrictEqual([['m:merchant_fixture_shop', 3]])
+        }
+      })
+    })
   })
 
   describe('a lane that stopped', () => {
@@ -2996,6 +3195,76 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
         ]),
       ).toStrictEqual([
         ['m:merchant_fixture_app#2026-01-15:1000', 6, '2026-06-15', 1000],
+      ])
+    })
+  })
+
+  describe('live at the high edge of the lane’s band', () => {
+    const app = at('merchant_fixture_app', 'Example App')
+    // A on the 10th at 999: 10 December, 10 January, 10 February (gaps 31,
+    // 31), with a one-off on 20 January so the all-history rule misses it
+    // (one stray: 2 ≤ 3). The merchant’s latest charge is a one-off dated
+    // after the lane's last charge, 10 February. March is 28 days on from
+    // 10 February, expected 10 March, so a one-off on 16 or 17 March is 6
+    // or 7 off and joins no lane.
+    const LANE = [
+      app('2025-12-10', 999),
+      app('2026-01-10', 999),
+      app('2026-01-20', 3100),
+      app('2026-02-10', 999),
+    ]
+
+    it('34 days before the latest charge is still live', () => {
+      // 10 February to 16 March is 34 days, the monthly band’s high edge.
+      const result = run([...LANE, app('2026-03-16', 4800)])
+
+      expect(
+        result.subscriptions.map((r) => [
+          r.merchantKey,
+          r.chargeCount,
+          r.lastChargedOn,
+          r.detected,
+        ]),
+      ).toStrictEqual([['m:merchant_fixture_app', 3, '2026-02-10', true]])
+    })
+
+    it('35 days before the latest charge is stale', () => {
+      // 10 February to 17 March is 35 days.
+      expect(run([...LANE, app('2026-03-17', 4800)])).toStrictEqual(NOTHING)
+    })
+  })
+
+  describe('lanes that touch on one date', () => {
+    const club = at('merchant_fixture_club', 'Example Club')
+
+    it('a lane’s last date and another’s first count as held by both', () => {
+      // Lane X is yearly: 5 March 2024, 2025 and 2026 at 9900. Lane Y is
+      // monthly: 5 March, 5 April and 5 May 2026 at 500. On 5 March 2026
+      // the 9900 is 0 cents from X's last and the 500 starts Y. X's last
+      // charge and Y's first fall on that one date and nowhere else do
+      // two lanes’ spans meet: two overlap there. Overlapped, Y, monthly
+      // with 3 charges, needs 4 and is not clear; X, yearly, is. X formed
+      // first (5 March 2026) and holds the bare key. Counting a lane's
+      // first or last date as not held would see no overlap and list Y.
+      const result = run([
+        club('2024-03-05', 9900),
+        club('2025-03-05', 9900),
+        club('2026-03-05', 500),
+        club('2026-03-05', 9900),
+        club('2026-04-05', 500),
+        club('2026-05-05', 500),
+      ])
+
+      expect(
+        result.subscriptions.map((r) => [
+          r.merchantKey,
+          r.cadence,
+          r.chargeCount,
+          r.lastChargedOn,
+          r.amountCents,
+        ]),
+      ).toStrictEqual([
+        ['m:merchant_fixture_club', 'yearly', 3, '2026-03-05', 9900],
       ])
     })
   })
@@ -3151,6 +3420,36 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
         ['m:merchant_fixture_gym#2026-01-17:3300', true, false],
       ])
     })
+
+    it('a lane marked not_subscription stays under notSubscriptions and writable when it is not clear', () => {
+      const no = mark({
+        merchantKey: 'm:merchant_fixture_gym#2026-01-10:2200',
+        answer: 'not_subscription',
+      })
+      const transactions = [...lanes, ...fourth]
+      const result = run(transactions, [no])
+
+      // Not clear (four overlap), so nothing lists the 10th lane unmarked;
+      // her answer pins it, so she can undo it from notSubscriptions.
+      expect(result.subscriptions).toStrictEqual([])
+      expect(result.notSubscriptions).toStrictEqual([
+        {
+          merchantKey: 'm:merchant_fixture_gym#2026-01-10:2200',
+          scope: 'personal',
+          name: 'Example Gym',
+          chargeCount: 6,
+          lastChargedOn: '2026-06-10',
+          amountCents: 2200,
+        },
+      ])
+      // The other lanes are not clear and not pinned: not keys.
+      expect(
+        chargeKeys({ scope: 'personal', transactions, marks: [no] }),
+      ).toStrictEqual([
+        'm:merchant_fixture_gym',
+        'm:merchant_fixture_gym#2026-01-10:2200',
+      ])
+    })
   })
 
   describe('keys that cannot be split', () => {
@@ -3161,16 +3460,20 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
     })
 
     it('a merchant with one lane needs no lane key, so # in its id does not matter', () => {
-      // The noise-guard lane: one formed lane, listed under the bare key.
+      // The noise-guard lane, with a one-off on 20 January so the
+      // all-history rule misses it and lanes are read: one formed lane,
+      // listed under the bare key. The one-off starts a lane that never
+      // grows, so there is no second formed lane to need a key.
       const result = run([
         shop('2026-01-10', 999),
+        shop('2026-01-20', 3100),
         shop('2026-02-09', 999),
         shop('2026-03-11', 999),
         shop('2026-04-10', 999),
       ])
-      expect(result.subscriptions.map((r) => r.merchantKey)).toStrictEqual([
-        'm:merchant#fixture',
-      ])
+      expect(
+        result.subscriptions.map((r) => [r.merchantKey, r.chargeCount]),
+      ).toStrictEqual([['m:merchant#fixture', 4]])
     })
 
     it('a bare key leaving exactly the headroom splits; one character longer does not', () => {
@@ -3198,6 +3501,103 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
       ])
 
       expect(result).toStrictEqual(NOTHING)
+    })
+
+    it('an m: id holding # with her subscription answer on the bare key is listed by the all-history rule: all its charges, no cadence', () => {
+      const result = run(p1('merchant#fixture'), [
+        mark({ merchantKey: 'm:merchant#fixture', answer: 'subscription' }),
+      ])
+
+      // Never split, so no lane is listed and her answer falls to the
+      // all-history rule: P1's sixteen charges are irregular (same-day
+      // pairs are gaps of no days), so no cadence. The latest charge is
+      // the 4620 on 1 May. Listed and left out of the totals.
+      expect(result.subscriptions).toStrictEqual([
+        {
+          merchantKey: 'm:merchant#fixture',
+          scope: 'personal',
+          name: 'Example Tools',
+          chargeCount: 16,
+          lastChargedOn: '2026-05-01',
+          amountCents: 4620,
+          cadence: null,
+          detected: false,
+          marked: true,
+          status: 'active',
+          cancelledOn: null,
+          chargedAgainOn: null,
+          perMonthCents: null,
+          perYearCents: null,
+        },
+      ])
+      expect(result.questions).toStrictEqual([])
+      expect(result.notSubscriptions).toStrictEqual([])
+      expect(result.totals).toStrictEqual({
+        perMonthCents: 0,
+        perYearCents: 0,
+        countedCount: 0,
+        uncountedCount: 1,
+      })
+    })
+
+    it('a merchant one of whose lane keys is another merchant’s bare key, with her subscription answer on its bare key, is listed by the all-history rule', () => {
+      const result = run(
+        [
+          ...p1(),
+          tx({
+            date: '2026-05-02',
+            merchantId: 'merchant_fixture_tools#2026-01-01:4620',
+            merchantName: 'Example Other',
+          }),
+        ],
+        [mark({ merchantKey: TOOLS, answer: 'subscription' })],
+      )
+
+      // Example Other has one charge: not listed. P1 is not split, so
+      // Example Tools is one row with all sixteen charges and no cadence.
+      expect(
+        result.subscriptions.map((r) => [
+          r.merchantKey,
+          r.chargeCount,
+          r.cadence,
+          r.detected,
+          r.marked,
+        ]),
+      ).toStrictEqual([['m:merchant_fixture_tools', 16, null, false, true]])
+    })
+  })
+
+  describe('lanes that would build one key', () => {
+    it('later lanes with one first date and cents get the plain key, then .2, .3 and .4', () => {
+      const tools = at(TOOLS_ID, 'Example Tools')
+      // Five identical subscriptions billed on the 1st at 2000, January to
+      // May: five rows a month, each taken by one lane. All five form on 1
+      // March, so five overlap and none is clear; her marks list the lanes.
+      // The first in lane order holds the bare key. The other four all
+      // build ...#2026-01-01:2000: the first later formed keeps it, the
+      // next get .2, .3 and .4.
+      const transactions = JAN_TO(5).flatMap((m) =>
+        [0, 1, 2, 3, 4].map(() => tools(`2026-${m}-01`, 2000)),
+      )
+      const KEY = 'm:merchant_fixture_tools#2026-01-01:2000'
+      const laneKeys = [KEY, `${KEY}.2`, `${KEY}.3`, `${KEY}.4`]
+      const marks = laneKeys.map((merchantKey) =>
+        mark({ merchantKey, answer: 'subscription' }),
+      )
+
+      const result = run(transactions, marks)
+
+      expect(
+        result.subscriptions.map((r) => [
+          r.merchantKey,
+          r.chargeCount,
+          r.detected,
+          r.marked,
+        ]),
+      ).toStrictEqual(laneKeys.map((k) => [k, 5, false, true]))
+      expect(
+        chargeKeys({ scope: 'personal', transactions, marks }),
+      ).toStrictEqual([TOOLS, ...laneKeys])
     })
   })
 
@@ -3405,6 +3805,152 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
     })
   })
 
+  describe('marks on lanes in a scope', () => {
+    // The same merchant paid from both scopes is two merchants (Ruling 14),
+    // each with its own lanes, answers and cancel dates.
+    const strawb = (transactions: readonly SubscriptionTransaction[]) =>
+      transactions.map((t) => ({ ...t, scope: 'strawb' as const }))
+    const LANE_2000 = 'm:merchant_fixture_tools#2026-01-01:2000'
+    const LANE_4620 = 'm:merchant_fixture_tools#2026-01-01:4620'
+
+    it('a lane key’s marks belong to its own scope when both scopes show the same merchant', () => {
+      // P1 in both scopes. Strawb’s 4620 lane is answered subscription;
+      // personal’s 2000 lane is cancelled on 1 May. Neither mark touches
+      // the other scope’s lane of the same key.
+      const result = run(
+        [...p1(), ...strawb(p1())],
+        [
+          mark({
+            scope: 'strawb',
+            merchantKey: LANE_4620,
+            answer: 'subscription',
+          }),
+          mark({
+            scope: 'personal',
+            merchantKey: LANE_2000,
+            cancelledOn: '2026-05-01',
+          }),
+        ],
+        'all',
+      )
+
+      expect(
+        result.subscriptions.map((r) => [
+          r.scope,
+          r.merchantKey,
+          r.marked,
+          r.status,
+          r.cancelledOn,
+        ]),
+      ).toStrictEqual([
+        ['personal', TOOLS, false, 'active', null],
+        ['personal', LANE_2000, false, 'cancelled', '2026-05-01'],
+        ['personal', LANE_4620, false, 'active', null],
+        ['strawb', TOOLS, false, 'active', null],
+        ['strawb', LANE_2000, false, 'active', null],
+        ['strawb', LANE_4620, true, 'active', null],
+      ])
+    })
+
+    it('a strawb lane marked in the strawb view is marked there', () => {
+      const result = run(
+        strawb(p1()),
+        [
+          mark({
+            scope: 'strawb',
+            merchantKey: LANE_4620,
+            answer: 'not_subscription',
+          }),
+        ],
+        'strawb',
+      )
+
+      expect(
+        result.subscriptions.map((r) => [r.scope, r.merchantKey]),
+      ).toStrictEqual([
+        ['strawb', TOOLS],
+        ['strawb', LANE_2000],
+      ])
+      expect(
+        result.notSubscriptions.map((r) => [r.scope, r.merchantKey]),
+      ).toStrictEqual([['strawb', LANE_4620]])
+    })
+
+    it('a strawb lane that is not clear is pinned by a strawb mark, and a personal copy of it is not', () => {
+      const gym = at('merchant_fixture_gym', 'Example Gym')
+      // Four monthly subscriptions on the 3rd, 10th, 17th and 24th in
+      // each scope: four overlap, so no lane is clear in either.
+      const four = [
+        ...monthly(gym, '03', 1100, JAN_TO(6)),
+        ...monthly(gym, '10', 2200, JAN_TO(6)),
+        ...monthly(gym, '17', 3300, JAN_TO(6)),
+        ...monthly(gym, '24', 4400, JAN_TO(6)),
+      ]
+      const result = run(
+        [...four, ...strawb(four)],
+        [
+          mark({
+            scope: 'strawb',
+            merchantKey: 'm:merchant_fixture_gym#2026-01-10:2200',
+            answer: 'subscription',
+          }),
+        ],
+        'all',
+      )
+
+      expect(
+        result.subscriptions.map((r) => [
+          r.scope,
+          r.merchantKey,
+          r.detected,
+          r.marked,
+        ]),
+      ).toStrictEqual([
+        ['strawb', 'm:merchant_fixture_gym#2026-01-10:2200', false, true],
+      ])
+    })
+
+    it('a strawb merchant whose id is a personal lane key blocks no personal lane', () => {
+      // A strawb merchant whose id is personal P1’s 4620 lane key. Keys
+      // are per scope, so it blocks nothing in personal.
+      const result = run(
+        [
+          ...p1(),
+          tx({
+            scope: 'strawb',
+            date: '2026-05-02',
+            merchantId: 'merchant_fixture_tools#2026-01-01:4620',
+            merchantName: 'Example Other',
+          }),
+        ],
+        [],
+        'all',
+      )
+
+      expect(
+        result.subscriptions.map((r) => [r.scope, r.merchantKey]),
+      ).toStrictEqual([
+        ['personal', TOOLS],
+        ['personal', LANE_2000],
+        ['personal', LANE_4620],
+      ])
+    })
+
+    it('chargeKeys in the strawb scope names strawb’s lane keys only', () => {
+      expect(
+        chargeKeys({
+          scope: 'strawb',
+          transactions: [...p1(), ...strawb(p1('merchant_fixture_vendor'))],
+          marks: [],
+        }),
+      ).toStrictEqual([
+        'm:merchant_fixture_vendor',
+        'm:merchant_fixture_vendor#2026-01-01:2000',
+        'm:merchant_fixture_vendor#2026-01-01:4620',
+      ])
+    })
+  })
+
   describe('chargeKeys: every key a write may name', () => {
     const OTHER = tx({
       date: '2026-04-09',
@@ -3487,6 +4033,38 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
           ],
         }),
       ).toContain('m:merchant_fixture_tools#2026-01-01:4620')
+    })
+
+    it('a stale lane marked not_subscription is still listed under notSubscriptions and still a key, so it can be undone', () => {
+      const app = at('merchant_fixture_app', 'Example App')
+      // As in the test above: A, the 5th from January to October, holds the
+      // bare key; B, the 20th from February to May, is stale on 5 October.
+      // Her not_subscription on B pins it like any other answer.
+      const transactions = [
+        ...monthly(app, '05', 1000, JAN_TO(10)),
+        ...monthly(app, '20', 2500, JAN_TO(5).slice(1)),
+      ]
+      const B = 'm:merchant_fixture_app#2026-02-20:2500'
+      const marks = [mark({ merchantKey: B, answer: 'not_subscription' })]
+
+      const result = run(transactions, marks)
+
+      expect(result.subscriptions.map((r) => r.merchantKey)).toStrictEqual([
+        'm:merchant_fixture_app',
+      ])
+      expect(result.notSubscriptions).toStrictEqual([
+        {
+          merchantKey: B,
+          scope: 'personal',
+          name: 'Example App',
+          chargeCount: 4,
+          lastChargedOn: '2026-05-20',
+          amountCents: 2500,
+        },
+      ])
+      expect(
+        chargeKeys({ scope: 'personal', transactions, marks }),
+      ).toStrictEqual(['m:merchant_fixture_app', B])
     })
 
     it('a merchant the all-history rule detects has only its bare key', () => {

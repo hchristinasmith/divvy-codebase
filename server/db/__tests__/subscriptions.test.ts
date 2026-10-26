@@ -1398,6 +1398,71 @@ describe('#391 lanes through the data module (prd-02 Ruling 16)', () => {
     ).toStrictEqual([[B, null, null]])
   })
 
+  it('a lane key in the strawb scope is written there, marks that lane only, and leaves personal’s lane of the same key alone', async () => {
+    // The same merchant and shape paid from the trading account: strawb
+    // has its own three lanes under the same three keys.
+    const rows: Row[] = []
+    for (const month of ['01', '02', '03', '04', '05']) {
+      for (const cents of [2000, 2000, 4620]) {
+        rows.push({
+          ...tools(`2026-${month}-01`, cents),
+          account_id: TRADING,
+        })
+      }
+    }
+    rows.push({ ...tools('2026-03-17', 1500), account_id: TRADING })
+    await insertTxs(rows)
+
+    expect(
+      await cancelSubscription(
+        { scope: 'strawb', merchantKey: LANE_4620 },
+        '2026-05-01',
+        NOW,
+      ),
+    ).toStrictEqual({
+      scope: 'strawb',
+      merchantKey: LANE_4620,
+      answer: null,
+      cancelledOn: '2026-05-01',
+    })
+    expect(
+      await setAnswer(
+        { scope: 'strawb', merchantKey: LANE_2000 },
+        'subscription',
+        NOW,
+      ),
+    ).toStrictEqual({
+      scope: 'strawb',
+      merchantKey: LANE_2000,
+      answer: 'subscription',
+      cancelledOn: null,
+    })
+
+    expect(
+      (await marks()).map((m) => [
+        m.scope,
+        m.merchant_key,
+        m.answer,
+        m.cancelled_on,
+      ]),
+    ).toStrictEqual([
+      ['strawb', LANE_4620, null, '2026-05-01'],
+      ['strawb', LANE_2000, 'subscription', null],
+    ])
+    const rowsOf = (result: Awaited<ReturnType<typeof readSubscriptions>>) =>
+      result.subscriptions.map((r) => [r.merchantKey, r.marked, r.status])
+    expect(rowsOf(await readSubscriptions('strawb'))).toStrictEqual([
+      [TOOLS, false, 'active'],
+      [LANE_2000, true, 'active'],
+      [LANE_4620, false, 'cancelled'],
+    ])
+    expect(rowsOf(await readSubscriptions('personal'))).toStrictEqual([
+      [TOOLS, false, 'active'],
+      [LANE_2000, false, 'active'],
+      [LANE_4620, false, 'active'],
+    ])
+  })
+
   it('a stored amount that is not whole cents makes a write a fixed-text error, not the value', async () => {
     await insertTxs([tx(EVERYDAY, MONTHLY[0], -15.5)])
 
@@ -1409,4 +1474,42 @@ describe('#391 lanes through the data module (prd-02 Ruling 16)', () => {
     ).rejects.toThrow(/^subscription input invalid$/)
     expect(await marks()).toStrictEqual([])
   })
+})
+
+// A target whose scope is not one the shared module accepts (a caller bug:
+// `all` is a view, never a row scope) reaches `chargeKeys`, which throws a
+// RangeError naming the value. Every write turns it into the fixed text and
+// writes nothing.
+describe('writes: a scope the shared module refuses (#391)', () => {
+  type Target = { scope: RowScope; merchantKey: string }
+  const BAD_SCOPE: Target = {
+    scope: 'all' as unknown as RowScope,
+    merchantKey: STREAM,
+  }
+
+  beforeEach(async () => {
+    await seedAccounts()
+    await seedStream()
+  })
+
+  it.each([
+    ['setAnswer', (t: Target) => setAnswer(t, 'subscription', NOW)],
+    [
+      'cancelSubscription',
+      (t: Target) => cancelSubscription(t, undefined, NOW),
+    ],
+    ['uncancelSubscription', (t: Target) => uncancelSubscription(t, NOW)],
+  ])(
+    '%s: the fixed text, not the shared module’s message',
+    async (_why, write) => {
+      const err: unknown = await write(BAD_SCOPE).then(
+        () => undefined,
+        (e: unknown) => e,
+      )
+
+      expect(err).toBeInstanceOf(SubscriptionsDataError)
+      expect((err as Error).message).toBe('subscription input invalid')
+      expect(await marks()).toStrictEqual([])
+    },
+  )
 })
