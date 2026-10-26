@@ -10,6 +10,7 @@ import {
   type SettingsResponse,
   type UpdateAccountRequest,
 } from '../../shared/contracts.ts'
+import { errorClass } from '../error-class.ts'
 
 // /api/v1/settings (issue 46; prd-02 Rulings 2, 9, 10, 11), mounted by
 // ./index.ts. The settings panel reads and writes the tax rate, Strawb's
@@ -19,12 +20,6 @@ import {
 // JSON 404.
 
 const router = express.Router()
-
-// What a 500 logs: the stack as a string, as server.ts logs one, never the
-// error object and the fields Node prints beside it.
-function logged(error: unknown): string | undefined {
-  return error instanceof Error ? error.stack : typeof error
-}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -36,7 +31,7 @@ router.get('/', async (_req, res) => {
     const body: SettingsResponse = await db.getSettings()
     res.json(body)
   } catch (error) {
-    console.error('Error reading settings:', logged(error))
+    console.error('Error reading settings:', errorClass(error))
     res.status(500).json({ error: 'Internal server error' })
   }
 })
@@ -51,7 +46,7 @@ router.patch('/', async (req, res) => {
     const body: SettingsResponse = await db.updateSettings(result.patch)
     res.json(body)
   } catch (error) {
-    console.error('Error updating settings:', logged(error))
+    console.error('Error updating settings:', errorClass(error))
     res.status(500).json({ error: 'Internal server error' })
   }
 })
@@ -64,7 +59,7 @@ router.get('/accounts', async (_req, res) => {
     }
     res.json(body)
   } catch (error) {
-    console.error('Error listing account roles:', logged(error))
+    console.error('Error listing account roles:', errorClass(error))
     res.status(500).json({ error: 'Internal server error' })
   }
 })
@@ -138,7 +133,7 @@ router.put('/accounts/:id', async (req, res) => {
     }
     res.json(row)
   } catch (error) {
-    console.error('Error updating account settings:', logged(error))
+    console.error('Error updating account settings:', errorClass(error))
     res.status(500).json({ error: 'Internal server error' })
   }
 })

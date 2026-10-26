@@ -5,6 +5,7 @@ import connection from '../db/connection.ts'
 import type { IsoTimestamp, SyncOutcome, SyncRun } from '../../models/sync.ts'
 import { rankByStartedAt } from '../sync/ranked-runs.ts'
 import { syncScheduler } from '../sync/scheduler.ts'
+import { errorClass } from '../error-class.ts'
 
 // /api/v1/sync (prd-01 Ruling 6, issue #27): what the last sync did, when
 // the next is due, and "sync now". prd-02's Sync screen reads this shape.
@@ -117,7 +118,7 @@ router.get('/status', async (req, res) => {
     // eslint-disable-next-line no-console
     console.error(
       'sync status: could not read sync_runs',
-      err instanceof Error ? err.constructor.name : typeof err,
+      errorClass(err),
     )
     res.status(500).json({ error: 'Could not read sync status' })
   }
