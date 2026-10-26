@@ -80,6 +80,9 @@ import { rankByStartedAt } from '../sync/ranked-runs.ts'
 // - `bill_overdue:<billId>:<dueDate>`: an unpaid occurrence before today.
 // - `bill_due_soon:<billId>:<dueDate>`: an unpaid occurrence from today to
 //   the next payday.
+// - `bill_too_many_unpaid:<billId>:<lastPayday>`: a bill past the
+//   unpaid-occurrence limit, left out of the totals (#247). Like
+//   over_budget, a dismissal lasts one pay period.
 
 /**
  * A failure the route may name to the client. The message is one of a closed
@@ -91,7 +94,6 @@ export type OverviewDataErrorMessage =
   | 'a stored setting is not valid'
   | 'an account has no balance'
   | 'a transaction is incomplete'
-  | 'a bill has too many unpaid occurrences'
 
 export class OverviewDataError extends Error {
   constructor(message: OverviewDataErrorMessage) {
@@ -229,6 +231,18 @@ async function readSettings(db: Db): Promise<Settings> {
   return settings
 }
 
+/**
+ * A bill with more unpaid occurrences than `MAX_UNPAID_OCCURRENCES`. None of
+ * its occurrences reach safe-to-spend or the alerts; it is named by its own
+ * alert instead (#247, ruled by Hannah 2026-10-26).
+ */
+interface LeftOutBill {
+  id: number
+  name: string
+  scope: RowScope
+  amount_cents: number
+}
+
 /** One unpaid occurrence of a bill, as the alerts need it. */
 interface BillOccurrence {
   billId: number
@@ -267,6 +281,8 @@ interface Inputs {
   accounts: SafeToSpendAccount[]
   bills: SafeToSpendBill[]
   occurrences: BillOccurrence[]
+  /** Bills past the unpaid-occurrence limit, in id order. */
+  leftOutBills: LeftOutBill[]
   budgets: SafeToSpendBudget[]
   transactions: SafeToSpendTransaction[]
   /** Both halves of every drawing (prd-02 Ruling 15), loaded once per read. */
@@ -318,12 +334,21 @@ async function loadInputs(now: Date, db: Db): Promise<Inputs> {
   const paid = new Set(paymentRows.map((p) => `${p.bill_id}|${p.due_date}`))
   const bills: SafeToSpendBill[] = []
   const occurrences: BillOccurrence[] = []
+  const leftOutBills: LeftOutBill[] = []
   for (const bill of billRows) {
     const unpaid = guard(() => billOccurrencesThrough(bill, next)).filter(
       (dueDate) => !paid.has(`${bill.id}|${dueDate}`),
     )
+    // Past the limit the bill is left out whole, never truncated, and
+    // named by an alert so the missing amount is visible (#247).
     if (unpaid.length > MAX_UNPAID_OCCURRENCES) {
-      throw new OverviewDataError('a bill has too many unpaid occurrences')
+      leftOutBills.push({
+        id: bill.id,
+        name: bill.name,
+        scope: bill.scope,
+        amount_cents: bill.amount_cents,
+      })
+      continue
     }
     for (const dueDate of unpaid) {
       bills.push({
@@ -414,6 +439,7 @@ async function loadInputs(now: Date, db: Db): Promise<Inputs> {
     accounts,
     bills,
     occurrences,
+    leftOutBills,
     budgets,
     transactions,
     drawingIds,
@@ -437,10 +463,12 @@ function computeSafeToSpend(scope: Scope, inputs: Inputs): SafeToSpendResult {
   )
 }
 
+// A left-out bill comes first: it means the totals are missing a bill.
 const KIND_ORDER: Record<AlertKind, number> = {
-  over_budget: 0,
-  bill_overdue: 1,
-  bill_due_soon: 2,
+  bill_too_many_unpaid: 0,
+  over_budget: 1,
+  bill_overdue: 2,
+  bill_due_soon: 3,
 }
 
 function compareText(a: string, b: string): number {
@@ -453,7 +481,8 @@ function compareText(a: string, b: string): number {
 const SUBJECT_ORDER = new Intl.Collator('en')
 
 /**
- * The alerts for a safe-to-spend result, before dismissals: a budget line
+ * The alerts for a safe-to-spend result, before dismissals: a bill in the
+ * result's scope left out for too many unpaid occurrences, a budget line
  * the result says is over, and every unpaid bill occurrence in the result's
  * scope that is overdue or due by the next payday. Ordered by kind, then
  * due date, then subject (the bill's name or the budget's category), then
@@ -463,8 +492,20 @@ const SUBJECT_ORDER = new Intl.Collator('en')
 function deriveAlerts(
   result: SafeToSpendResult,
   occurrences: readonly BillOccurrence[],
+  leftOutBills: readonly LeftOutBill[],
 ): Alert[] {
   const alerts: Alert[] = []
+  for (const bill of leftOutBills) {
+    if (result.scope !== 'all' && bill.scope !== result.scope) continue
+    alerts.push({
+      id: `bill_too_many_unpaid:${bill.id}:${result.lastPayday}`,
+      kind: 'bill_too_many_unpaid',
+      scope: bill.scope,
+      subject: bill.name,
+      amountCents: bill.amount_cents,
+      dueDate: null,
+    })
+  }
   // `result.budgets` is already scoped by the shared module.
   for (const line of result.budgets) {
     if (line.overCents <= 0) continue
@@ -525,7 +566,7 @@ export async function readOverview(
   const inputs = await loadInputs(now, db)
   const result = computeSafeToSpend(scope, inputs)
 
-  const derived = deriveAlerts(result, inputs.occurrences)
+  const derived = deriveAlerts(result, inputs.occurrences, inputs.leftOutBills)
   const dismissedRows: { alert_id: string }[] = await db('alert_dismissals')
     .select('alert_id')
     .whereIn(
@@ -620,7 +661,7 @@ export async function dismissAlert(
   const inputs = await loadInputs(now, db)
   // `all` covers every alert either scope can show.
   const result = computeSafeToSpend('all', inputs)
-  const derived = deriveAlerts(result, inputs.occurrences)
+  const derived = deriveAlerts(result, inputs.occurrences, inputs.leftOutBills)
   if (!derived.some((a) => a.id === alertId)) return null
 
   await db('alert_dismissals')

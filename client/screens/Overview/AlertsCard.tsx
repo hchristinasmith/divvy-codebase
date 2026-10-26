@@ -17,6 +17,8 @@ const DOTS: Record<Alert['kind'], string> = {
   over_budget: 'bg-danger',
   bill_due_soon: 'bg-warn',
   bill_overdue: 'bg-warn',
+  // The totals are missing this bill.
+  bill_too_many_unpaid: 'bg-danger',
 }
 
 function alertText(alert: Alert, today: IsoDate): string {
@@ -29,6 +31,8 @@ function alertText(alert: Alert, today: IsoDate): string {
       return `${alert.subject} (${amount}) is due ${due}.`
     case 'bill_overdue':
       return `${alert.subject} (${amount}) is overdue, due ${due}.`
+    case 'bill_too_many_unpaid':
+      return `${alert.subject} (${amount}) has too many unpaid occurrences and is left out of the totals.`
   }
 }
 

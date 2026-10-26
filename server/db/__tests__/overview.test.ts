@@ -780,15 +780,48 @@ describe('#151: every unpaid occurrence through the next payday counts', () => {
     expect(lastInput().bills).toHaveLength(1000)
   })
 
-  it('a bill with more than 1000 unpaid occurrences is refused, not truncated', async () => {
+  // #247 (Hannah, 2026-10-26): past the limit the bill is left out whole,
+  // never truncated, and an alert names it; the read still answers.
+  it('a bill with more than 1000 unpaid occurrences is left out of the totals and raises an alert in its scope', async () => {
     await weeklyBillFrom(weeksBefore(1000))
+    await connection('bills').insert({
+      id: 2,
+      scope: 'personal',
+      name: 'Ordinary',
+      repeat: 'weekly',
+      amount_cents: 500,
+      first_due_date: '2026-10-28',
+      created_at: STAMP,
+      updated_at: STAMP,
+    })
+    const leftOut = {
+      id: 'bill_too_many_unpaid:1:2026-10-27',
+      kind: 'bill_too_many_unpaid',
+      scope: 'personal',
+      subject: 'Backdated',
+      amountCents: 100,
+      dueDate: null,
+    }
 
-    const err = await errorOf(() => readOverview('personal', NOW, connection))
+    const personal = await readOverview('personal', NOW, connection)
+    // Only the ordinary bill reaches safe-to-spend.
+    expect(lastInput().bills.map((b) => b.id)).toStrictEqual(['2:2026-10-28'])
+    expect(personal.safeToSpend.unpaidBillsCents).toBe(500)
+    expect(personal.alerts[0]).toStrictEqual(leftOut)
+    expect(personal.alerts.map((a) => a.id)).toStrictEqual([
+      leftOut.id,
+      'bill_due_soon:2:2026-10-28',
+    ])
 
-    expect(err).toBeInstanceOf(OverviewDataError)
-    expect((err as Error).message).toBe(
-      'a bill has too many unpaid occurrences',
-    )
+    const all = await readOverview('all', NOW, connection)
+    expect(lastInput().bills.map((b) => b.id)).toStrictEqual(['2:2026-10-28'])
+    expect(all.alerts.map((a) => a.id)).toStrictEqual([
+      leftOut.id,
+      'bill_due_soon:2:2026-10-28',
+    ])
+
+    const strawb = await readOverview('strawb', NOW, connection)
+    expect(strawb.alerts).toStrictEqual([])
   })
 })
 
