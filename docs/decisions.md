@@ -13,3 +13,5 @@ Numbered, never renumbered. Each answers a question from `audit-2026-10-23.md` Â
 Decided 2026-10-23. Still open from the audit: D6 Xero token storage, D7 job runner, D9 email ingestion route, D10 business/personal data model, D11 `wish_web/`, D12 integer cents (recommended yes, in M1).
 
 > 2026-10-26 (#387): D11's page half is settled. Hannah said "remove the wishlist page", and the Wishlist page is removed from the client (no route, sidebar entry or icon). D11 stays open for the data half: the `wishlist_items` table and the `wish_web/` question are untouched and tracked under #219, because dropping a table needs a migration and a separate decision.
+
+> 2026-10-26 (#28): D6 is closed. prd-05 Ruling 2 decides it: the Xero tokens and tenant are encrypted with AES-256-GCM in SQLite, under a key in the Fly secret `XERO_TOKEN_KEY`, never in the database, image or replica. `server/xero/vault/` implements it (this PR, #28).
