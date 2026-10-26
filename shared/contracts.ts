@@ -588,8 +588,9 @@ export interface SubscriptionRow extends SubscriptionMerchant {
   perYearCents: Cents | null
   /**
    * Active, with a cadence, and no charge for more than two billing cycles
-   * before today (issue #392). Computed on read, never stored: the next
-   * charge clears it, and it never makes a row cancelled.
+   * before today (issue #392). Computed on read, never stored: it clears
+   * when a charge the detector joins to this row lands, and a charge it
+   * does not join (#409) leaves it set. It never makes a row cancelled.
    */
   possiblyStopped: boolean
 }

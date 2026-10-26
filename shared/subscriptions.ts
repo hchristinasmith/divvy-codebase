@@ -66,9 +66,11 @@
 // after its own last charge: `POSSIBLY_STOPPED_AFTER_DAYS` for its cadence,
 // strictly more, by `daysBetween`. It stays listed and active with its
 // per-period figures, and leaves the totals until Hannah confirms it: she
-// cancels it, or the next charge clears the flag. A row with no cadence or
-// a cancelled row is never flagged. The flag is computed on read and never
-// stored, and never makes a row cancelled.
+// cancels it, or a later charge that the detection joins to this row clears
+// the flag. A charge that resumes after the gap is not guaranteed to be
+// joined to the old row (#409), so the flag can stay set. A row with no
+// cadence or a cancelled row is never flagged. The flag is computed on read
+// and never stored, and never makes a row cancelled.
 //
 // The merchant key is a stored contract (`subscription_marks.merchant_key`,
 // 20261025170000_subscription_marks.js). Changing `normaliseDescription` or
