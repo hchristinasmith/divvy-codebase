@@ -146,7 +146,7 @@
 // that holds it. `not_subscription` on the bare key hides every lane of that
 // merchant: the merchant is listed once, under `notSubscriptions` with its
 // bare key and all its charges, as before Ruling 16, and clearing that
-// answer brings the lanes back. The cancel-date reading below belongs to the
+// answer brings the lanes back. The cancel-date reading above belongs to the
 // all-history rule; a lane is never re-read up to its cancel date.
 //
 // What the lanes can get wrong:
@@ -156,18 +156,22 @@
 //   real cost, but only briefly: each 28-day step lands days before the
 //   expected day, so its lanes drift past `LANE_MAX_DEVIATION_DAYS` within
 //   a few charges, stop, and drop off. Measured on 2026-10-26 (Hannah
-//   asked for these numbers): one invented merchant, visits spaced at
-//   random within the range, amounts at random from 1500 to 5500 cents,
-//   200 days, 500 seeded trials per spacing; each figure is the trials
-//   that listed any subscription, by the all-history rule alone (main
-//   before #391) and by this module:
+//   asked for these numbers): one invented merchant, its first visit on 1
+//   January 2026 and each next one a whole number of days later, at random
+//   within the range, amounts at random from 1500 to 5499 cents, for 200
+//   days; 5000 trials per spacing (mulberry32, seed 20261026). Each figure
+//   is the trials that listed any subscription, by the all-history rule
+//   alone (main before #391) and by this module:
 //
 //     visit spacing           all-history rule   with lanes
-//     2 to 3 times a week          0 / 500          0 / 500
-//     every 5 to 10 days           2 / 500         10 / 500
-//     every 10 to 20 days          0 / 500         49 / 500
-//     every 20 to 40 days          1 / 500         52 / 500
-//     every 25 to 35 days        133 / 500        250 / 500
+//     every 1 to 5 days            0 / 5000          0 / 5000
+//     every 5 to 10 days          37 / 5000        121 / 5000
+//     every 10 to 20 days          0 / 5000        641 / 5000
+//     every 20 to 40 days         27 / 5000        637 / 5000
+//     every 25 to 35 days       1495 / 5000       2660 / 5000
+//
+//   Batches of 500 from the same run vary: for every 10 to 20 days, from
+//   49 to 79 with lanes.
 //
 // - A moved billing day or a skipped month starts a new lane under a new
 //   key. If the lane holding the bare key moves, its run after the move is
@@ -184,7 +188,8 @@
 //   can still change how the latest charges were dealt, and the overlap
 //   rules change as lanes form: an unmarked young or stopped row can drop
 //   off, come back, or take a new key while a sibling forms. A pinned row
-//   never drops off. A charge back-dated into history (a late sync) can
+//   never drops off, except on a merchant that is never split (Keys,
+//   above). A charge back-dated into history (a late sync) can
 //   change how every later charge was dealt.
 // - A merchant with more than `LANE_MAX_CONCURRENT` subscriptions at once is
 //   never split.

@@ -2360,6 +2360,36 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
       ])
     })
 
+    it('the same two subscriptions with Y’s rows first on each date: X still holds the bare key', () => {
+      // As above, but every date's rows arrive Y first. On 1 January both
+      // are 2000, so lane order falls to the name: X before Y, and X's
+      // charge starts the first lane whatever the input order. Dealt by
+      // input order instead, Y would start it and take the bare key.
+      const x = at(TOOLS_ID, 'Example X')
+      const y = at(TOOLS_ID, 'Example Y')
+      const result = run([
+        ...['01', '03'].flatMap((m) => [
+          y(`2026-${m}-01`, 2000),
+          x(`2026-${m}-01`, 2000),
+        ]),
+        ...['02', '04'].flatMap((m) => [
+          y(`2026-${m}-01`, 1990),
+          x(`2026-${m}-01`, 2010),
+        ]),
+      ])
+
+      expect(rowsOf(result)).toStrictEqual([
+        ['m:merchant_fixture_tools', 'Example X', 4, '2026-04-01', 2010],
+        [
+          'm:merchant_fixture_tools#2026-01-01:2000',
+          'Example Y',
+          4,
+          '2026-04-01',
+          1990,
+        ],
+      ])
+    })
+
     describe('a lane’s gaps stay within 5 days of each other', () => {
       const app = at('merchant_fixture_app', 'Example App')
       // 10 Jan, then 7 Feb: 28 days against the expected 31, 3 off, the
