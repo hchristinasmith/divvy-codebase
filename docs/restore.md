@@ -41,6 +41,7 @@ fly secrets set LITESTREAM_REPLICA_URL=<replica url> LITESTREAM_ACCESS_KEY_ID=<k
 - **Only the machine replicates to the production URL.** Never run `litestream replicate` (or the app under it) against that URL from a laptop. Litestream does not support two writers to one replica, and the second one's history would mix into the first's (REASONED, not tried).
 - **A restore always goes into a side directory, never in place.** `scripts/restore.sh` refuses the live database's own directory, refuses any directory that already holds a file whose name starts `divvy.sqlite3` or `.divvy.sqlite3` (the database, its `-wal`, `-shm` or `-journal`, a half-finished restore), and never overwrites. Never add `-force` to a hand-run `litestream restore`.
 - **A boot that hangs or fails before the app starts is the replica.** On a fresh volume Litestream must reach the replica before the app can start. If it cannot, the app is deliberately not started (section 8).
+- **A restore of a snapshot older than the last Xero token refresh will usually need a Xero reconnect.** Xero rotates the refresh token on every refresh, so the one in an older snapshot has already been used. A restore also needs the same `XERO_TOKEN_KEY` that encrypted the tokens (deploy.md section 4); without it the restored tokens cannot be decrypted.
 
 ## 3. The local drill
 
