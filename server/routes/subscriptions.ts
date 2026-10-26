@@ -1,11 +1,7 @@
 import express from 'express'
-import type { Request, Response } from 'express'
+import type { Response } from 'express'
 
-import type {
-  RowScope,
-  Scope,
-  SubscriptionAnswer,
-} from '../../shared/contracts.ts'
+import type { RowScope, SubscriptionAnswer } from '../../shared/contracts.ts'
 import { isIsoDate, isMerchantKey } from '../../shared/subscriptions.ts'
 import {
   SubscriptionsDataError,
@@ -15,6 +11,7 @@ import {
   uncancelSubscription,
 } from '../db/subscriptions.ts'
 import { errorClass } from '../error-class.ts'
+import { fromThisSite, parseScope } from '../http.ts'
 
 // /api/v1/subscriptions (prd-02 Ruling 14, issue #229): the Subscriptions
 // screen's read and Hannah's marks. Mounted by ./index.ts.
@@ -41,32 +38,6 @@ import { errorClass } from '../error-class.ts'
 // Errors are fixed text. A `SubscriptionsDataError` carries one of its own
 // constant messages, which name no value; anything else is a generic text.
 // Only the error's class is logged.
-
-/** A copy of `parseScope` in ./overview.ts. A plain scope; anything else is refused. */
-function parseScope(raw: unknown): Scope | null {
-  return raw === 'all' || raw === 'personal' || raw === 'strawb' ? raw : null
-}
-
-/**
- * A copy of `fromThisSite` in ./sync.ts and ./overview.ts; change all together.
- * `Sec-Fetch-Site` when the browser sends it; otherwise no `Origin` (curl)
- * passes and an `Origin` must name this host.
- */
-function fromThisSite(req: Request): boolean {
-  const site = req.headers['sec-fetch-site']
-  if (site !== undefined) return site === 'same-origin' || site === 'none'
-  const origin = req.headers.origin
-  if (origin === undefined) return true
-  const host = req.headers.host
-  if (host === undefined) return false
-  try {
-    return new URL(origin).host === host.toLowerCase()
-  } catch {
-    // `Origin: null` (a sandboxed frame, a file: page) and anything else
-    // that is not a URL.
-    return false
-  }
-}
 
 type Body = Record<string, unknown>
 

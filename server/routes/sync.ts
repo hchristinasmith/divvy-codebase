@@ -1,11 +1,11 @@
 import express from 'express'
-import type { Request } from 'express'
 
 import connection from '../db/connection.ts'
 import type { IsoTimestamp, SyncOutcome, SyncRun } from '../../models/sync.ts'
 import { rankByStartedAt } from '../sync/ranked-runs.ts'
 import { syncScheduler } from '../sync/scheduler.ts'
 import { errorClass } from '../error-class.ts'
+import { fromThisSite } from '../http.ts'
 
 // /api/v1/sync (prd-01 Ruling 6, issue #27): what the last sync did, when
 // the next is due, and "sync now". prd-02's Sync screen reads this shape.
@@ -68,26 +68,6 @@ function toRunStatus(row: SyncRun): SyncRunStatus {
       pendingMirrored: row.pending_mirrored_count,
     },
     error: row.error_message,
-  }
-}
-
-/**
- * `Sec-Fetch-Site` when the browser sends it; otherwise no `Origin` (curl)
- * passes and an `Origin` must name this host.
- */
-function fromThisSite(req: Request): boolean {
-  const site = req.headers['sec-fetch-site']
-  if (site !== undefined) return site === 'same-origin' || site === 'none'
-  const origin = req.headers.origin
-  if (origin === undefined) return true
-  const host = req.headers.host
-  if (host === undefined) return false
-  try {
-    return new URL(origin).host === host.toLowerCase()
-  } catch {
-    // `Origin: null` (a sandboxed frame, a file: page) and anything else
-    // that is not a URL.
-    return false
   }
 }
 

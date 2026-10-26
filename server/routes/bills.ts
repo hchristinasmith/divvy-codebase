@@ -5,7 +5,6 @@ import type {
   BillResponse,
   BillsResponse,
   MarkBillPaidResponse,
-  Scope,
 } from '../../shared/contracts.ts'
 import {
   BillsDataError,
@@ -19,6 +18,7 @@ import {
   type BillRefusal,
 } from '../db/bills.ts'
 import { errorClass } from '../error-class.ts'
+import { fromThisSite, parseScope } from '../http.ts'
 
 const router = express.Router()
 
@@ -39,37 +39,6 @@ const router = express.Router()
 // Errors are fixed text and never echo what was sent. A `BillsDataError`
 // carries one of its own constant messages; anything else is a generic
 // text. Only the error's class is logged.
-
-/**
- * A copy of `parseScope` in ./overview.ts and ./subscriptions.ts; change
- * all together.
- * A plain `all`, `personal` or `strawb`; anything else is refused.
- */
-function parseScope(raw: unknown): Scope | null {
-  return raw === 'all' || raw === 'personal' || raw === 'strawb' ? raw : null
-}
-
-/**
- * A copy of `fromThisSite` in ./overview.ts, ./subscriptions.ts and
- * ./sync.ts; change all together. `Sec-Fetch-Site` when the browser sends
- * it; otherwise no `Origin` (curl) passes and an `Origin` must name this
- * host.
- */
-function fromThisSite(req: Request): boolean {
-  const site = req.headers['sec-fetch-site']
-  if (site !== undefined) return site === 'same-origin' || site === 'none'
-  const origin = req.headers.origin
-  if (origin === undefined) return true
-  const host = req.headers.host
-  if (host === undefined) return false
-  try {
-    return new URL(origin).host === host.toLowerCase()
-  } catch {
-    // `Origin: null` (a sandboxed frame, a file: page) and anything else
-    // that is not a URL.
-    return false
-  }
-}
 
 // Digits only: Number() would also accept '1e3', '0x10' and ' 7'.
 function parseId(raw: string): number | null {

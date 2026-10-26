@@ -1,6 +1,7 @@
 import express from 'express'
 
 import connection from '../../db/connection.ts'
+import { errorClass } from '../../error-class.ts'
 import type {
   XeroAmountDue,
   XeroConnectionState,
@@ -271,10 +272,7 @@ async function readPulledThisWeek(now: number): Promise<XeroPulledThisWeek> {
 function logFailure(what: string, err: unknown): void {
   // The class only: a driver error's message can quote SQL or values.
   // eslint-disable-next-line no-console
-  console.error(
-    `xero ${what}: could not read the xero tables`,
-    err instanceof Error ? err.constructor.name : typeof err,
-  )
+  console.error(`xero ${what}: could not read the xero tables`, errorClass(err))
 }
 
 const router = express.Router()
