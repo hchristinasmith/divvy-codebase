@@ -327,6 +327,18 @@ describe('the activity sub-filter', () => {
     )
     expect(pressed.map((b) => b.textContent)).toEqual(['All'])
   })
+
+  it('draws the filter with the shared pill shape: semibold, with the pink focus outline', async () => {
+    setup('all')
+    await hero()
+    const pills = filterPills()
+    expect(pills.map((b) => b.textContent)).toEqual(['All', 'Personal', 'Strawb'])
+    for (const pill of pills) {
+      expect(pill.classList.contains('font-semibold')).toBe(true)
+      expect(pill.classList.contains('font-medium')).toBe(false)
+      expect(pill.classList.contains('focus-visible:outline-pink')).toBe(true)
+    }
+  })
 })
 
 describe('no Owed to you, invoice, Xero or estimated line (Ruling 4)', () => {

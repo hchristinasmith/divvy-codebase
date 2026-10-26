@@ -15,13 +15,18 @@ const OPTIONS = [
 
 type Letter = (typeof OPTIONS)[number]['value']
 
-function draw(value: Letter = 'a', onChange = vi.fn<[Letter], void>()) {
+function draw(
+  value: Letter = 'a',
+  onChange = vi.fn<[Letter], void>(),
+  disabled?: boolean,
+) {
   render(
     <SegmentedControl
       label="Letters"
       options={OPTIONS}
       value={value}
       onChange={onChange}
+      disabled={disabled}
     />,
   )
   return { onChange, group: screen.getByRole('group', { name: 'Letters' }) }
@@ -34,6 +39,8 @@ function sortedClasses(el: Element) {
 const PRESSED = [
   'bg-surface',
   'cursor-pointer',
+  'focus-visible:outline-2',
+  'focus-visible:outline-pink',
   'font-semibold',
   'px-3.5',
   'py-1.5',
@@ -45,6 +52,8 @@ const PRESSED = [
 const UNPRESSED = [
   'bg-transparent',
   'cursor-pointer',
+  'focus-visible:outline-2',
+  'focus-visible:outline-pink',
   'font-semibold',
   'px-3.5',
   'py-1.5',
@@ -109,5 +118,27 @@ describe('SegmentedControl', () => {
         .getAllByRole('button')
         .map((b) => b.getAttribute('aria-pressed')),
     ).toEqual(['true', 'false', 'false'])
+  })
+
+  it('disables every button, with the disabled classes, when disabled is set', () => {
+    const { group } = draw('a', vi.fn<[Letter], void>(), true)
+    const buttons = within(group).getAllByRole<HTMLButtonElement>('button')
+    expect(buttons).toHaveLength(3)
+    for (const button of buttons) {
+      expect(button.disabled).toBe(true)
+      expect(button.classList.contains('disabled:cursor-not-allowed')).toBe(true)
+      expect(button.classList.contains('disabled:opacity-50')).toBe(true)
+    }
+  })
+
+  it('leaves every button enabled, with no disabled classes, when disabled is absent', () => {
+    const { group } = draw()
+    const buttons = within(group).getAllByRole('button')
+    expect(buttons).toHaveLength(3)
+    for (const button of buttons) {
+      expect(button.hasAttribute('disabled')).toBe(false)
+      expect(button.classList.contains('disabled:cursor-not-allowed')).toBe(false)
+      expect(button.classList.contains('disabled:opacity-50')).toBe(false)
+    }
   })
 })

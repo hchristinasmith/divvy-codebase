@@ -38,17 +38,3 @@ export const PRIMARY_BUTTON = `${BUTTON_SHAPE} bg-pink text-surface hover:bg-pin
 
 // Blush: a lesser action such as "Try again".
 export const SECONDARY_BUTTON = `${BUTTON_SHAPE} bg-blush text-rose hover:bg-blush-hover ${FOCUS}`
-
-// The Personal / Business switch on each account row: ScopeToggle's shapes
-// at row size (handoff "Scope toggle"). The track is blush; the pressed
-// option is white with deep-rose text, the others transparent rose text.
-export const SCOPE_TRACK =
-  'inline-flex gap-1 rounded-pill bg-blush p-[3px] shadow-pill'
-
-const SCOPE_OPTION_SHAPE =
-  'cursor-pointer rounded-pill px-3 py-1 text-body-13 font-semibold disabled:cursor-not-allowed disabled:opacity-50'
-
-export function scopeOption(pressed: boolean): string {
-  const colours = pressed ? 'bg-surface text-deep' : 'bg-transparent text-rose'
-  return `${SCOPE_OPTION_SHAPE} ${colours} ${FOCUS}`
-}

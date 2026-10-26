@@ -146,6 +146,8 @@ describe('ScopeToggle markup (pinned before the #390 lift)', () => {
       [
         'bg-surface',
         'cursor-pointer',
+        'focus-visible:outline-2',
+        'focus-visible:outline-pink',
         'font-semibold',
         'px-3.5',
         'py-1.5',
@@ -163,6 +165,8 @@ describe('ScopeToggle markup (pinned before the #390 lift)', () => {
         [
           'bg-transparent',
           'cursor-pointer',
+          'focus-visible:outline-2',
+          'focus-visible:outline-pink',
           'font-semibold',
           'px-3.5',
           'py-1.5',
