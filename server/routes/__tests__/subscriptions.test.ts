@@ -367,6 +367,68 @@ describe('GET: the response is the contract', () => {
     })
     expect(res.text).not.toContain('business')
   })
+
+  it('a monthly row last charged more than 60 days before today in NZ is possibly stopped and out of the totals (issue #392)', async () => {
+    // The clock is 23:30 UTC on 27 October: 28 October in NZ. Charges at
+    // noon NZST on 1 June, 1 July and 31 July (gaps 30 and 30); 31 July to
+    // 28 October is 89 days.
+    await insertAll('accounts', [
+      account({
+        id: 1,
+        akahu_id: EVERYDAY,
+        name: 'Sentinel Everyday',
+        scope: 'personal',
+      }),
+    ])
+    await insertAll(
+      'transactions',
+      [
+        '2026-06-01T00:00:00.000Z',
+        '2026-07-01T00:00:00.000Z',
+        '2026-07-31T00:00:00.000Z',
+      ].map((date) =>
+        tx(EVERYDAY, date, -1299, {
+          merchant_id: 'merchant_fixture_paused',
+          merchant_name: 'Example Paused Stream',
+          description: 'EXAMPLE PAUSED STREAM',
+        }),
+      ),
+    )
+
+    const res = await get('personal')
+
+    expect(res.status).toBe(200)
+    expect(res.body.subscriptions).toHaveLength(1)
+    expect(keys(res.body.subscriptions[0])).toEqual(keys(ROW_KEYS))
+    expect(keys(res.body.totals)).toEqual(keys(TOTAL_KEYS))
+    expect(res.body.subscriptions).toStrictEqual([
+      {
+        merchantKey: 'm:merchant_fixture_paused',
+        scope: 'personal',
+        name: 'Example Paused Stream',
+        chargeCount: 3,
+        lastChargedOn: '2026-07-31',
+        amountCents: 1299,
+        cadence: 'monthly',
+        detected: true,
+        marked: false,
+        status: 'active',
+        cancelledOn: null,
+        chargedAgainOn: null,
+        perMonthCents: 1299,
+        // 12 × 1299
+        perYearCents: 15588,
+        possiblyStopped: true,
+      },
+    ])
+    expect(res.body.totals).toStrictEqual({
+      perMonthCents: 0,
+      perYearCents: 0,
+      countedCount: 0,
+      uncountedCount: 0,
+      possiblyStoppedCount: 1,
+    })
+  })
 })
 
 const WRITES = [
