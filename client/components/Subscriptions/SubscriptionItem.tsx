@@ -13,6 +13,10 @@ import type { SubscriptionActions } from './useSubscriptionActions.ts'
 // bank. A cancelled row is dimmed and struck through, and its button undoes
 // the cancel. A charge after the cancel date makes the row active again,
 // and a warning line says when it landed.
+//
+// A possibly-stopped row (issue 392) carries a chip beside the side chip
+// and stays under Active with its Cancel button. The route leaves it out of
+// the totals, so its meta line does not say what it counts as a month.
 
 function metaLine(row: SubscriptionRow, today: IsoDate): string {
   const parts = [
@@ -24,6 +28,7 @@ function metaLine(row: SubscriptionRow, today: IsoDate): string {
   // A weekly or yearly charge, as the route counts it in the monthly total.
   if (
     row.status === 'active' &&
+    !row.possiblyStopped &&
     row.cadence !== 'monthly' &&
     row.perMonthCents !== null
   ) {
@@ -65,6 +70,11 @@ export default function SubscriptionItem({
             {row.name}
           </span>
           <SideChip scope={row.scope} />
+          {row.possiblyStopped && (
+            <span className="rounded-pill bg-canvas px-2 py-0.5 text-body-11 font-semibold text-warn">
+              Possibly stopped
+            </span>
+          )}
         </div>
         <span data-testid="subscription-meta" className="text-body-12 text-ink-muted">
           {metaLine(row, today)}

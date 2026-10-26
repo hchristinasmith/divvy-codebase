@@ -181,7 +181,7 @@ describe('readSubscriptions: what is read', () => {
     await seedAccounts()
     await seedStream()
 
-    expect(await readSubscriptions('personal')).toStrictEqual({
+    expect(await readSubscriptions('personal', NOW)).toStrictEqual({
       subscriptions: [
         {
           merchantKey: STREAM,
@@ -198,6 +198,7 @@ describe('readSubscriptions: what is read', () => {
           chargedAgainOn: null,
           perMonthCents: 1599,
           perYearCents: 19188,
+          possiblyStopped: false,
         },
       ],
       questions: [],
@@ -207,6 +208,7 @@ describe('readSubscriptions: what is read', () => {
         perYearCents: 19188,
         countedCount: 1,
         uncountedCount: 0,
+        possiblyStoppedCount: 0,
       },
     })
   })
@@ -219,14 +221,14 @@ describe('readSubscriptions: what is read', () => {
     await seedAccounts()
     await seedStream(accountId, fields)
 
-    expect((await readSubscriptions('all')).subscriptions).toStrictEqual([])
+    expect((await readSubscriptions('all', NOW)).subscriptions).toStrictEqual([])
   })
 
   it('an inflow is never read', async () => {
     await seedAccounts()
     await insertTxs(MONTHLY.map((date) => tx(EVERYDAY, date, 1599)))
 
-    expect((await readSubscriptions('all')).subscriptions).toStrictEqual([])
+    expect((await readSubscriptions('all', NOW)).subscriptions).toStrictEqual([])
   })
 
   it('dates are NZ calendar dates, whatever form the instant is stored in', async () => {
@@ -240,7 +242,7 @@ describe('readSubscriptions: what is read', () => {
       tx(EVERYDAY, '2026-10-05T20:00:00.000Z', -1599),
     ])
 
-    const [row] = (await readSubscriptions('personal')).subscriptions
+    const [row] = (await readSubscriptions('personal', NOW)).subscriptions
     // Gaps 30 (08-06 to 09-05) and 31 (09-05 to 10-06).
     expect([row.lastChargedOn, row.cadence]).toStrictEqual([
       '2026-10-06',
@@ -256,9 +258,9 @@ describe('readSubscriptions: what is read', () => {
     await seedStream()
     await insertTxs([tx(EVERYDAY, date, -100)])
 
-    const read = readSubscriptions('personal')
+    const read = readSubscriptions('personal', NOW)
     await expect(read).rejects.toThrow(SubscriptionsDataError)
-    await expect(readSubscriptions('personal')).rejects.toThrow(
+    await expect(readSubscriptions('personal', NOW)).rejects.toThrow(
       /^a transaction is incomplete$/,
     )
   })
@@ -267,10 +269,10 @@ describe('readSubscriptions: what is read', () => {
     await seedAccounts()
     await insertTxs([tx(EVERYDAY, MONTHLY[0], -15.5)])
 
-    await expect(readSubscriptions('personal')).rejects.toThrow(
+    await expect(readSubscriptions('personal', NOW)).rejects.toThrow(
       SubscriptionsDataError,
     )
-    await expect(readSubscriptions('personal')).rejects.toThrow(
+    await expect(readSubscriptions('personal', NOW)).rejects.toThrow(
       /^subscription input invalid$/,
     )
   })
@@ -296,7 +298,7 @@ describe('readSubscriptions: scope', () => {
 
   it('personal shows no strawb merchant', async () => {
     expect(
-      (await readSubscriptions('personal')).subscriptions.map((r) => [
+      (await readSubscriptions('personal', NOW)).subscriptions.map((r) => [
         r.scope,
         r.name,
       ]),
@@ -305,7 +307,7 @@ describe('readSubscriptions: scope', () => {
 
   it('strawb shows no personal merchant', async () => {
     expect(
-      (await readSubscriptions('strawb')).subscriptions.map((r) => [
+      (await readSubscriptions('strawb', NOW)).subscriptions.map((r) => [
         r.scope,
         r.name,
       ]),
@@ -314,7 +316,7 @@ describe('readSubscriptions: scope', () => {
 
   it('all shows both', async () => {
     expect(
-      (await readSubscriptions('all')).subscriptions.map((r) => [
+      (await readSubscriptions('all', NOW)).subscriptions.map((r) => [
         r.scope,
         r.name,
       ]),
@@ -366,7 +368,7 @@ describe('readSubscriptions: a recurring strawb outflow (#264 regression)', () =
       ...partners,
     ])
 
-    const { subscriptions } = await readSubscriptions('strawb')
+    const { subscriptions } = await readSubscriptions('strawb', NOW)
 
     expect(
       subscriptions.map((r) => [
@@ -422,7 +424,7 @@ describe('readSubscriptions: drawings (prd-02 Ruling 15)', () => {
   it('a monthly strawb outflow paired with equal personal inflows is not a subscription (DW2)', async () => {
     await seedDrawings()
     for (const scope of ['all', 'strawb'] as const) {
-      const result = await readSubscriptions(scope)
+      const result = await readSubscriptions(scope, NOW)
       expect(result.subscriptions, scope).toStrictEqual([])
       expect(result.questions, scope).toStrictEqual([])
     }
@@ -440,7 +442,7 @@ describe('readSubscriptions: drawings (prd-02 Ruling 15)', () => {
       category: 'Business software and cloud services',
       category_source: 'user',
     })
-    const { subscriptions } = await readSubscriptions('strawb')
+    const { subscriptions } = await readSubscriptions('strawb', NOW)
     expect(
       subscriptions.map((r) => [r.merchantKey, r.chargeCount]),
     ).toStrictEqual([['m:merchant_fixture_payee', 3]])
@@ -462,7 +464,7 @@ describe('readSubscriptions: drawings (prd-02 Ruling 15)', () => {
       vi.mocked(drawings.loadDrawingIds).mockClear()
       vi.mocked(drawings.loadDrawingIds).mockRejectedValueOnce(thrown)
 
-      const err: unknown = await readSubscriptions('personal').then(
+      const err: unknown = await readSubscriptions('personal', NOW).then(
         () => undefined,
         (e: unknown) => e,
       )
@@ -493,7 +495,7 @@ describe('her mark wins after the next sync', () => {
     const idsAfter = await connection('transactions').orderBy('id').pluck('id')
     expect(idsAfter.some((id) => idsBefore.includes(id))).toBe(false)
 
-    const result = await readSubscriptions('personal')
+    const result = await readSubscriptions('personal', NOW)
     expect(result.subscriptions).toStrictEqual([])
     expect(
       result.notSubscriptions.map((r) => [r.merchantKey, r.chargeCount]),
@@ -512,7 +514,7 @@ describe('her mark wins after the next sync', () => {
     await connection('transactions').del()
     await seedCloudQuestion()
 
-    const result = await readSubscriptions('personal')
+    const result = await readSubscriptions('personal', NOW)
     expect(result.questions).toStrictEqual([])
     expect(
       result.subscriptions.map((r) => [r.merchantKey, r.cadence, r.marked]),
@@ -721,16 +723,16 @@ describe('writes', () => {
   it('cancelled, then charged again, then uncancelled, end to end', async () => {
     await cancelSubscription(target, '2026-08-31', NOW)
     expect(
-      (await readSubscriptions('personal')).subscriptions.map((r) => [
+      (await readSubscriptions('personal', NOW)).subscriptions.map((r) => [
         r.status,
         r.chargedAgainOn,
       ]),
     ).toStrictEqual([['cancelled', null]])
-    expect((await readSubscriptions('personal')).totals.countedCount).toBe(0)
+    expect((await readSubscriptions('personal', NOW)).totals.countedCount).toBe(0)
 
     await insertTxs([tx(EVERYDAY, '2026-09-29T00:00:00.000Z', -1599)])
     expect(
-      (await readSubscriptions('personal')).subscriptions.map((r) => [
+      (await readSubscriptions('personal', NOW)).subscriptions.map((r) => [
         r.status,
         r.cancelledOn,
         r.chargedAgainOn,
@@ -739,7 +741,7 @@ describe('writes', () => {
 
     await uncancelSubscription(target, LATER)
     expect(
-      (await readSubscriptions('personal')).subscriptions.map((r) => [
+      (await readSubscriptions('personal', NOW)).subscriptions.map((r) => [
         r.status,
         r.cancelledOn,
         r.chargedAgainOn,
@@ -752,7 +754,7 @@ describe('writes', () => {
     // 51 days after the last charge: no band.
     await insertTxs([tx(EVERYDAY, '2026-10-20T00:00:00.000Z', -1799)])
 
-    const read = await readSubscriptions('personal')
+    const read = await readSubscriptions('personal', NOW)
     expect(
       read.subscriptions.map((r) => [
         r.merchantKey,
@@ -768,7 +770,7 @@ describe('writes', () => {
     expect(read.totals.perMonthCents).toBe(1799)
 
     await uncancelSubscription(target, LATER)
-    expect((await readSubscriptions('personal')).subscriptions).toStrictEqual(
+    expect((await readSubscriptions('personal', NOW)).subscriptions).toStrictEqual(
       [],
     )
   })
@@ -780,7 +782,7 @@ describe('writes', () => {
       merchant_id: null,
       description: `${'a'.repeat(252)}${'\u{1D400}'.repeat(5)}`,
     })
-    const sent = (await readSubscriptions('personal')).subscriptions.find((r) =>
+    const sent = (await readSubscriptions('personal', NOW)).subscriptions.find((r) =>
       r.merchantKey.startsWith('d:'),
     )?.merchantKey
     expect(sent).toBe(`d:${'a'.repeat(252)}`)
@@ -789,7 +791,7 @@ describe('writes', () => {
 
     expect((await marks()).map((m) => m.merchant_key)).toContain(sent)
     expect(
-      (await readSubscriptions('personal')).subscriptions
+      (await readSubscriptions('personal', NOW)).subscriptions
         .filter((r) => r.merchantKey === sent)
         .map((r) => [r.status, r.cancelledOn]),
     ).toStrictEqual([['cancelled', '2026-09-01']])
@@ -800,11 +802,11 @@ describe('writes', () => {
     await setAnswer(target, 'not_subscription', NOW)
 
     expect(
-      (await readSubscriptions('strawb')).subscriptions.map(
+      (await readSubscriptions('strawb', NOW)).subscriptions.map(
         (r) => r.merchantKey,
       ),
     ).toStrictEqual([STREAM])
-    expect((await readSubscriptions('personal')).subscriptions).toStrictEqual(
+    expect((await readSubscriptions('personal', NOW)).subscriptions).toStrictEqual(
       [],
     )
   })
@@ -842,7 +844,7 @@ describe('writes', () => {
 
     // The strawb read is unchanged too.
     expect(
-      (await readSubscriptions('strawb')).notSubscriptions.map((r) => [
+      (await readSubscriptions('strawb', NOW)).notSubscriptions.map((r) => [
         r.scope,
         r.merchantKey,
       ]),
@@ -856,7 +858,7 @@ describe('writes', () => {
     await cancelSubscription(target, undefined, NOW)
     await uncancelSubscription(target, NOW)
     await setAnswer(target, null, NOW)
-    await readSubscriptions('all')
+    await readSubscriptions('all', NOW)
 
     expect(fetch).not.toHaveBeenCalled()
   })
@@ -914,7 +916,7 @@ describe('#391 regression: what detection today must keep', () => {
     it('three monthly charges are one row keyed m:<merchant id>', async () => {
       await seedStream()
 
-      const result = await readSubscriptions('personal')
+      const result = await readSubscriptions('personal', NOW)
 
       expect(result.subscriptions.map((r) => r.merchantKey)).toStrictEqual([
         'm:merchant_fixture_stream',
@@ -936,6 +938,7 @@ describe('#391 regression: what detection today must keep', () => {
           'chargedAgainOn',
           'perMonthCents',
           'perYearCents',
+          'possiblyStopped',
         ].sort(),
       )
     })
@@ -949,7 +952,7 @@ describe('#391 regression: what detection today must keep', () => {
         tx(EVERYDAY, '2026-07-31T00:00:00.000Z', -1799),
       ])
 
-      const result = await readSubscriptions('personal')
+      const result = await readSubscriptions('personal', NOW)
 
       expect(
         result.subscriptions.map((r) => [
@@ -966,7 +969,12 @@ describe('#391 regression: what detection today must keep', () => {
     it('#393 baseline: eight weekly visits at varying prices are one weekly row with the bare key', async () => {
       await seedVisits(VISIT_DAYS)
 
-      const result = await readSubscriptions('personal')
+      // Read the day after the last visit, so the row is not possibly
+      // stopped (#392).
+      const result = await readSubscriptions(
+        'personal',
+        new Date('2026-07-21T00:00:00Z'),
+      )
 
       expect(result.subscriptions).toStrictEqual([
         {
@@ -985,6 +993,7 @@ describe('#391 regression: what detection today must keep', () => {
           // 2750 × 52 = 143000; ÷ 12 = 11916.67 → 11917; × 12 = 143004.
           perMonthCents: 11917,
           perYearCents: 143004,
+          possiblyStopped: false,
         },
       ])
       expect(result.totals).toStrictEqual({
@@ -992,13 +1001,14 @@ describe('#391 regression: what detection today must keep', () => {
         perYearCents: 143004,
         countedCount: 1,
         uncountedCount: 0,
+        possiblyStoppedCount: 0,
       })
     })
 
     it('#393 baseline: the same visits with one skipped week are not detected', async () => {
       await seedVisits(SKIPPED_DAYS)
 
-      expect((await readSubscriptions('personal')).subscriptions).toStrictEqual(
+      expect((await readSubscriptions('personal', NOW)).subscriptions).toStrictEqual(
         [],
       )
     })
@@ -1019,7 +1029,7 @@ describe('#391 regression: what detection today must keep', () => {
         ['personal', 'm:merchant_fixture_stream', 'subscription'],
       ])
       expect(
-        (await readSubscriptions('personal')).subscriptions.map((r) => [
+        (await readSubscriptions('personal', NOW)).subscriptions.map((r) => [
           r.merchantKey,
           r.detected,
           r.marked,
@@ -1031,7 +1041,7 @@ describe('#391 regression: what detection today must keep', () => {
     it('No: the merchant leaves subscriptions and shows under notSubscriptions with the bare key', async () => {
       await setAnswer(target, 'not_subscription', NOW)
 
-      const result = await readSubscriptions('personal')
+      const result = await readSubscriptions('personal', NOW)
 
       expect(result.subscriptions).toStrictEqual([])
       expect(result.notSubscriptions).toStrictEqual([
@@ -1049,6 +1059,7 @@ describe('#391 regression: what detection today must keep', () => {
         perYearCents: 0,
         countedCount: 0,
         uncountedCount: 0,
+        possiblyStoppedCount: 0,
       })
     })
 
@@ -1059,7 +1070,7 @@ describe('#391 regression: what detection today must keep', () => {
         (await marks()).map((m) => [m.scope, m.merchant_key, m.cancelled_on]),
       ).toStrictEqual([['personal', 'm:merchant_fixture_stream', '2026-09-01']])
       expect(
-        (await readSubscriptions('personal')).subscriptions.map((r) => [
+        (await readSubscriptions('personal', NOW)).subscriptions.map((r) => [
           r.merchantKey,
           r.status,
           r.cancelledOn,
@@ -1075,7 +1086,7 @@ describe('#391 regression: what detection today must keep', () => {
       await uncancelSubscription(target, LATER)
 
       expect(
-        (await readSubscriptions('personal')).subscriptions.map((r) => [
+        (await readSubscriptions('personal', NOW)).subscriptions.map((r) => [
           r.merchantKey,
           r.status,
           r.cancelledOn,
@@ -1119,7 +1130,7 @@ describe('#391 regression: what detection today must keep', () => {
       )
       expect(await marks()).toStrictEqual([])
       expect(
-        (await readSubscriptions('personal')).subscriptions.map((r) => [
+        (await readSubscriptions('personal', NOW)).subscriptions.map((r) => [
           r.merchantKey,
           r.marked,
           r.cancelledOn,
@@ -1162,7 +1173,7 @@ describe('#391 lanes through the data module (prd-02 Ruling 16)', () => {
   }
 
   const lanes = async () =>
-    (await readSubscriptions('personal')).subscriptions.map((r) => [
+    (await readSubscriptions('personal', NOW)).subscriptions.map((r) => [
       r.merchantKey,
       r.chargeCount,
       r.amountCents,
@@ -1177,7 +1188,12 @@ describe('#391 lanes through the data module (prd-02 Ruling 16)', () => {
   })
 
   it('the read lists one row per lane, each under its own key', async () => {
-    const result = await readSubscriptions('personal')
+    // Read the day after the last charge, so no lane is possibly stopped
+    // (#392).
+    const result = await readSubscriptions(
+      'personal',
+      new Date('2026-05-02T00:00:00Z'),
+    )
 
     expect(await lanes()).toStrictEqual([
       [TOOLS, 5, 2000, false, 'active', null],
@@ -1190,6 +1206,7 @@ describe('#391 lanes through the data module (prd-02 Ruling 16)', () => {
       perYearCents: 103440,
       countedCount: 3,
       uncountedCount: 0,
+      possiblyStoppedCount: 0,
     })
   })
 
@@ -1209,7 +1226,7 @@ describe('#391 lanes through the data module (prd-02 Ruling 16)', () => {
     expect(
       (await marks()).map((m) => [m.scope, m.merchant_key, m.answer]),
     ).toStrictEqual([['personal', LANE_4620, 'not_subscription']])
-    const result = await readSubscriptions('personal')
+    const result = await readSubscriptions('personal', NOW)
     expect(result.subscriptions.map((r) => r.merchantKey)).toStrictEqual([
       TOOLS,
       LANE_2000,
@@ -1300,7 +1317,7 @@ describe('#391 lanes through the data module (prd-02 Ruling 16)', () => {
       NOW,
     )
 
-    const result = await readSubscriptions('personal')
+    const result = await readSubscriptions('personal', NOW)
     expect(result.subscriptions).toStrictEqual([])
     expect(
       result.notSubscriptions.map((r) => [r.merchantKey, r.chargeCount]),
@@ -1451,12 +1468,12 @@ describe('#391 lanes through the data module (prd-02 Ruling 16)', () => {
     ])
     const rowsOf = (result: Awaited<ReturnType<typeof readSubscriptions>>) =>
       result.subscriptions.map((r) => [r.merchantKey, r.marked, r.status])
-    expect(rowsOf(await readSubscriptions('strawb'))).toStrictEqual([
+    expect(rowsOf(await readSubscriptions('strawb', NOW))).toStrictEqual([
       [TOOLS, false, 'active'],
       [LANE_2000, true, 'active'],
       [LANE_4620, false, 'cancelled'],
     ])
-    expect(rowsOf(await readSubscriptions('personal'))).toStrictEqual([
+    expect(rowsOf(await readSubscriptions('personal', NOW))).toStrictEqual([
       [TOOLS, false, 'active'],
       [LANE_2000, false, 'active'],
       [LANE_4620, false, 'active'],
@@ -1512,4 +1529,128 @@ describe('writes: a scope the shared module refuses (#391)', () => {
       expect(await marks()).toStrictEqual([])
     },
   )
+})
+
+// Possibly stopped (issue #392) through the read: today is `now` as an NZ
+// calendar date, and the flag is computed on each read, never stored.
+// Invented values only.
+describe('readSubscriptions: possibly stopped (#392)', () => {
+  const ROW_KEY_LIST = [
+    'merchantKey',
+    'scope',
+    'name',
+    'chargeCount',
+    'lastChargedOn',
+    'amountCents',
+    'cadence',
+    'detected',
+    'marked',
+    'status',
+    'cancelledOn',
+    'chargedAgainOn',
+    'perMonthCents',
+    'perYearCents',
+    'possiblyStopped',
+  ]
+  const TOTAL_KEY_LIST = [
+    'perMonthCents',
+    'perYearCents',
+    'countedCount',
+    'uncountedCount',
+    'possiblyStoppedCount',
+  ]
+
+  beforeEach(async () => {
+    await seedAccounts()
+  })
+
+  it('the same rows at two nows: flagged and out of the totals only at the later, the NZ date, and nothing stored', async () => {
+    // Last charge 30 August. 23:30 UTC on 27 October is 28 October in NZ,
+    // 59 days on. 11:30 UTC on 29 October is 00:30 NZDT on the 30th, 61
+    // days on (its UTC date, the 29th, would be 60: not flagged).
+    await seedStream()
+
+    const before = await readSubscriptions('personal', NOW)
+    const after = await readSubscriptions(
+      'personal',
+      new Date('2026-10-29T11:30:00Z'),
+    )
+
+    expect(
+      before.subscriptions.map((r) => [r.status, r.possiblyStopped]),
+    ).toStrictEqual([['active', false]])
+    expect(before.totals).toStrictEqual({
+      perMonthCents: 1599,
+      perYearCents: 19188,
+      countedCount: 1,
+      uncountedCount: 0,
+      possiblyStoppedCount: 0,
+    })
+    expect(
+      after.subscriptions.map((r) => [
+        r.status,
+        r.possiblyStopped,
+        r.perMonthCents,
+      ]),
+    ).toStrictEqual([['active', true, 1599]])
+    expect(after.totals).toStrictEqual({
+      perMonthCents: 0,
+      perYearCents: 0,
+      countedCount: 0,
+      uncountedCount: 0,
+      possiblyStoppedCount: 1,
+    })
+    // Nothing about the flag is written.
+    expect(await count(connection, 'subscription_marks')).toBe(0)
+  })
+
+  // Pinned before the build (e78c739) as active and counted.
+  it('a monthly subscription last charged in 2023 is possibly stopped and out of the totals', async () => {
+    // 00:00 UTC is 13:00 NZDT or 12:00 NZST: the NZ date is the UTC date.
+    // Gaps 30 and 30 (2023 has no 29 February).
+    await insertTxs(
+      [
+        '2023-01-10T00:00:00.000Z',
+        '2023-02-09T00:00:00.000Z',
+        '2023-03-11T00:00:00.000Z',
+      ].map((date) => tx(EVERYDAY, date, -1599)),
+    )
+
+    const result = await readSubscriptions('personal', NOW)
+
+    expect(result.subscriptions).toHaveLength(1)
+    expect(keys(result.subscriptions[0])).toEqual([...ROW_KEY_LIST].sort())
+    expect(keys(result.totals)).toEqual([...TOTAL_KEY_LIST].sort())
+    expect(result).toStrictEqual({
+      subscriptions: [
+        {
+          merchantKey: STREAM,
+          scope: 'personal',
+          name: 'Example Stream',
+          chargeCount: 3,
+          lastChargedOn: '2023-03-11',
+          amountCents: 1599,
+          cadence: 'monthly',
+          detected: true,
+          marked: false,
+          status: 'active',
+          cancelledOn: null,
+          chargedAgainOn: null,
+          perMonthCents: 1599,
+          // 12 × 1599 = 19188
+          perYearCents: 19188,
+          possiblyStopped: true,
+        },
+      ],
+      questions: [],
+      notSubscriptions: [],
+      totals: {
+        perMonthCents: 0,
+        perYearCents: 0,
+        countedCount: 0,
+        uncountedCount: 0,
+        possiblyStoppedCount: 1,
+      },
+    })
+  })
 })

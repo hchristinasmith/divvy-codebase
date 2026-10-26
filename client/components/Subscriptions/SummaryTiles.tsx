@@ -5,10 +5,11 @@ import { plural } from './format.ts'
 // The two totals above the list, exactly as the route computed them
 // (shared/subscriptions.ts): nothing here adds, multiplies or divides. The
 // design's "Barely used" tile is not shown; Divvy has no usage data.
-// Active rows with no regular pattern are left out of both figures, and a
-// line says how many.
+// Active rows with no regular pattern, and possibly-stopped rows (issue
+// 392), are left out of both figures, and a line for each says how many.
 export default function SummaryTiles({ totals }: { totals: SubscriptionTotals }) {
   const uncounted = totals.uncountedCount
+  const stopped = totals.possiblyStoppedCount
   return (
     <div className="flex flex-col gap-2">
       <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4">
@@ -18,6 +19,11 @@ export default function SummaryTiles({ totals }: { totals: SubscriptionTotals })
       {uncounted > 0 && (
         <p className="m-0 text-body-12 text-ink-muted">
           {`${plural(uncounted, 'subscription')} left out of these totals: no regular pattern yet`}
+        </p>
+      )}
+      {stopped > 0 && (
+        <p className="m-0 text-body-12 text-ink-muted">
+          {`${plural(stopped, 'subscription')} left out of these totals: possibly stopped`}
         </p>
       )}
     </div>

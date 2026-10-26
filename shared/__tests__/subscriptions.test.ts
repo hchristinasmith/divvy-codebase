@@ -90,12 +90,26 @@ function mark(fields: Partial<SubscriptionMark> = {}): SubscriptionMark {
   }
 }
 
+/** A today for a test with no charges, or where today does not matter. */
+const TODAY = '2026-10-26'
+
+/**
+ * The latest valid charge date, else `TODAY`: the read as of the day the
+ * fixture's last charge landed, so no row is possibly stopped unless a
+ * sibling ran on past it.
+ */
+function latestDate(transactions: readonly SubscriptionTransaction[]): string {
+  const dates = transactions.map((t) => t.date).filter(isIsoDate)
+  return dates.length === 0 ? TODAY : dates.reduce((a, b) => (b > a ? b : a))
+}
+
 function run(
   transactions: readonly SubscriptionTransaction[],
   marks: readonly SubscriptionMark[] = [],
   scope: Scope = 'personal',
+  today: string = latestDate(transactions),
 ): SubscriptionsResponse {
-  return subscriptions({ scope, transactions, marks })
+  return subscriptions({ scope, transactions, marks, today })
 }
 
 // Gaps 30 and 30.
@@ -114,6 +128,7 @@ const NOTHING: SubscriptionsResponse = {
     perYearCents: 0,
     countedCount: 0,
     uncountedCount: 0,
+    possiblyStoppedCount: 0,
   },
 }
 
@@ -143,12 +158,14 @@ const ROW_KEYS: Record<keyof SubscriptionRow, true> = {
   chargedAgainOn: true,
   perMonthCents: true,
   perYearCents: true,
+  possiblyStopped: true,
 }
 const TOTAL_KEYS: Record<keyof SubscriptionTotals, true> = {
   perMonthCents: true,
   perYearCents: true,
   countedCount: true,
   uncountedCount: true,
+  possiblyStoppedCount: true,
 }
 
 const keys = (o: object) => Object.keys(o).sort()
@@ -449,6 +466,7 @@ describe('detection', () => {
           perMonthCents: 1599,
           // 12 × 1599 = 19188
           perYearCents: 19188,
+          possiblyStopped: false,
         },
       ],
       questions: [],
@@ -458,6 +476,7 @@ describe('detection', () => {
         perYearCents: 19188,
         countedCount: 1,
         uncountedCount: 0,
+        possiblyStoppedCount: 0,
       },
     })
   })
@@ -646,6 +665,7 @@ describe('scope: a row of one scope never shows under the other', () => {
       perYearCents: 71184,
       countedCount: 2,
       uncountedCount: 0,
+      possiblyStoppedCount: 0,
     })
   })
 
@@ -778,6 +798,7 @@ describe('marks: Hannah’s answer wins both ways', () => {
         chargedAgainOn: null,
         perMonthCents: null,
         perYearCents: null,
+        possiblyStopped: false,
       },
     ])
     expect(result.totals).toStrictEqual({
@@ -785,6 +806,7 @@ describe('marks: Hannah’s answer wins both ways', () => {
       perYearCents: 0,
       countedCount: 0,
       uncountedCount: 1,
+      possiblyStoppedCount: 0,
     })
   })
 
@@ -982,6 +1004,7 @@ describe('cancel marks, it never acts', () => {
       perYearCents: 19188,
       countedCount: 1,
       uncountedCount: 0,
+      possiblyStoppedCount: 0,
     })
   })
 
@@ -1023,12 +1046,14 @@ describe('cancel marks, it never acts', () => {
         chargedAgainOn: AGAIN,
         perMonthCents: 1799,
         perYearCents: 21588,
+        possiblyStopped: false,
       })
       expect(result.totals).toStrictEqual({
         perMonthCents: 1799,
         perYearCents: 21588,
         countedCount: 1,
         uncountedCount: 0,
+        possiblyStoppedCount: 0,
       })
     })
 
@@ -1214,6 +1239,7 @@ describe('totals: integer cents, rounded half-up once per subscription', () => {
         perYearCents: perYear,
         countedCount: 1,
         uncountedCount: 0,
+        possiblyStoppedCount: 0,
       })
     },
   )
@@ -1270,6 +1296,7 @@ describe('totals: integer cents, rounded half-up once per subscription', () => {
       perYearCents: 86004,
       countedCount: 3,
       uncountedCount: 0,
+      possiblyStoppedCount: 0,
     })
     // 19188 + 65004 + 1812 = 86004: the row figures sum to the same total.
     expect(result.subscriptions.map((r) => r.perYearCents)).toStrictEqual([
@@ -1297,6 +1324,7 @@ describe('totals: integer cents, rounded half-up once per subscription', () => {
       perYearCents: 19188,
       countedCount: 1,
       uncountedCount: 1,
+      possiblyStoppedCount: 0,
     })
   })
 
@@ -1580,6 +1608,7 @@ describe('#391 regression: what detection today must keep', () => {
           perMonthCents: 1599,
           // 12 × 1599 = 19188
           perYearCents: 19188,
+          possiblyStopped: false,
         },
       ])
       expect(result.questions).toStrictEqual([])
@@ -1611,6 +1640,7 @@ describe('#391 regression: what detection today must keep', () => {
           perMonthCents: 5417,
           // 12 × 5417 = 65004
           perYearCents: 65004,
+          possiblyStopped: false,
         },
       ])
       expect(result.totals).toStrictEqual({
@@ -1618,6 +1648,7 @@ describe('#391 regression: what detection today must keep', () => {
         perYearCents: 65004,
         countedCount: 1,
         uncountedCount: 0,
+        possiblyStoppedCount: 0,
       })
     })
 
@@ -1646,6 +1677,7 @@ describe('#391 regression: what detection today must keep', () => {
           perMonthCents: 151,
           // 12 × 151 = 1812
           perYearCents: 1812,
+          possiblyStopped: false,
         },
       ])
       expect(result.totals).toStrictEqual({
@@ -1653,6 +1685,7 @@ describe('#391 regression: what detection today must keep', () => {
         perYearCents: 1812,
         countedCount: 1,
         uncountedCount: 0,
+        possiblyStoppedCount: 0,
       })
     })
 
@@ -1692,6 +1725,7 @@ describe('#391 regression: what detection today must keep', () => {
           perMonthCents: 2000,
           // 12 × 2000 = 24000
           perYearCents: 24000,
+          possiblyStopped: false,
         },
       ])
     })
@@ -1739,6 +1773,7 @@ describe('#391 regression: what detection today must keep', () => {
         perYearCents: 110004,
         countedCount: 4,
         uncountedCount: 0,
+        possiblyStoppedCount: 0,
       })
     })
   })
@@ -1773,6 +1808,7 @@ describe('#391 regression: what detection today must keep', () => {
           perMonthCents: 1799,
           // 12 × 1799 = 21588
           perYearCents: 21588,
+          possiblyStopped: false,
         },
       ])
       expect(result.totals).toStrictEqual({
@@ -1780,6 +1816,7 @@ describe('#391 regression: what detection today must keep', () => {
         perYearCents: 21588,
         countedCount: 1,
         uncountedCount: 0,
+        possiblyStoppedCount: 0,
       })
     })
 
@@ -1827,6 +1864,7 @@ describe('#391 regression: what detection today must keep', () => {
           perMonthCents: 11917,
           // 12 × 11917 = 143004
           perYearCents: 143004,
+          possiblyStopped: false,
         },
       ])
       expect(result.questions).toStrictEqual([])
@@ -1836,6 +1874,7 @@ describe('#391 regression: what detection today must keep', () => {
         perYearCents: 143004,
         countedCount: 1,
         uncountedCount: 0,
+        possiblyStoppedCount: 0,
       })
     })
 
@@ -1868,6 +1907,7 @@ describe('#391 regression: what detection today must keep', () => {
           chargedAgainOn: null,
           perMonthCents: 1599,
           perYearCents: 19188,
+          possiblyStopped: false,
         },
       ])
       expect(result.totals).toStrictEqual(NOTHING.totals)
@@ -1895,6 +1935,7 @@ describe('#391 regression: what detection today must keep', () => {
           chargedAgainOn: '2026-08-30',
           perMonthCents: 1599,
           perYearCents: 19188,
+          possiblyStopped: false,
         },
       ])
     })
@@ -1925,6 +1966,7 @@ describe('#391 regression: what detection today must keep', () => {
           chargedAgainOn: '2026-06-05',
           perMonthCents: 1799,
           perYearCents: 21588,
+          possiblyStopped: false,
         },
       ])
     })
@@ -2166,6 +2208,7 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
         perYearCents: 103440,
         countedCount: 3,
         uncountedCount: 0,
+        possiblyStoppedCount: 0,
       })
       expect(result.questions).toStrictEqual([])
       expect(result.notSubscriptions).toStrictEqual([])
@@ -2195,6 +2238,7 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
         perMonthCents: 4620,
         // 12 × 4620 = 55440
         perYearCents: 55440,
+        possiblyStopped: false,
       })
     })
 
@@ -2234,6 +2278,7 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
         perYearCents: 39960,
         countedCount: 2,
         uncountedCount: 0,
+        possiblyStoppedCount: 0,
       })
     })
 
@@ -2259,6 +2304,7 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
           perMonthCents: 800,
           // 12 × 800 = 9600
           perYearCents: 9600,
+          possiblyStopped: false,
         },
       ])
       expect(result.totals).toStrictEqual({
@@ -2266,6 +2312,7 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
         perYearCents: 9600,
         countedCount: 1,
         uncountedCount: 0,
+        possiblyStoppedCount: 0,
       })
     })
   })
@@ -2739,6 +2786,7 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
           chargedAgainOn: null,
           perMonthCents: 600,
           perYearCents: 7200,
+          possiblyStopped: false,
         },
       ])
 
@@ -2762,6 +2810,7 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
         chargedAgainOn: '2026-03-06',
         perMonthCents: 1300,
         perYearCents: 15600,
+        possiblyStopped: false,
       } as const
       expect(run(upTo('2026-03-06'), cancel).subscriptions).toStrictEqual([
         bOn6Mar,
@@ -2791,6 +2840,7 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
         chargedAgainOn: null,
         perMonthCents: 1000,
         perYearCents: 12000,
+        possiblyStopped: false,
       } as const
       const on7Apr = run(upTo('2026-04-07'), cancel)
       expect(on7Apr.subscriptions).toStrictEqual([bOn7Apr, aOn7Apr])
@@ -2804,6 +2854,7 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
         perYearCents: 27600,
         countedCount: 2,
         uncountedCount: 0,
+        possiblyStoppedCount: 0,
       })
 
       // Read by read, unmarked: the bare key is A's on the 5 March read
@@ -2868,6 +2919,7 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
       perYearCents: 30000,
       countedCount: 1,
       uncountedCount: 0,
+      possiblyStoppedCount: 0,
     })
     // B never takes the bare key, at any read.
     expect(
@@ -2920,8 +2972,10 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
       ['m:merchant_fixture_app#2026-03-25:2500', 8, '2026-10-25', true, false],
       ['m:merchant_fixture_app#2026-06-15:1000', 5, '2026-10-15', true, false],
     ])
-    // 1000 + 2500 + 1000 = 4500.
-    expect(result.totals.perMonthCents).toBe(4500)
+    // The 5th lane last charged 5 May, 173 days before 25 October: possibly
+    // stopped (#392), so out of the totals. 2500 + 1000 = 3500.
+    expect(result.totals.perMonthCents).toBe(3500)
+    expect(result.totals.possiblyStoppedCount).toBe(1)
   })
 
   it('a key listed at one read is listed at the next, unless its row went stale', () => {
@@ -3345,6 +3399,7 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
         perYearCents: 30696,
         countedCount: 3,
         uncountedCount: 0,
+        possiblyStoppedCount: 0,
       })
     })
 
@@ -3444,7 +3499,7 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
       ])
       // The other lanes are not clear and not pinned: not keys.
       expect(
-        chargeKeys({ scope: 'personal', transactions, marks: [no] }),
+        chargeKeys({ scope: 'personal', transactions, marks: [no], today: TODAY }),
       ).toStrictEqual([
         'm:merchant_fixture_gym',
         'm:merchant_fixture_gym#2026-01-10:2200',
@@ -3528,6 +3583,7 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
           chargedAgainOn: null,
           perMonthCents: null,
           perYearCents: null,
+          possiblyStopped: false,
         },
       ])
       expect(result.questions).toStrictEqual([])
@@ -3537,6 +3593,7 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
         perYearCents: 0,
         countedCount: 0,
         uncountedCount: 1,
+        possiblyStoppedCount: 0,
       })
     })
 
@@ -3596,7 +3653,7 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
         ]),
       ).toStrictEqual(laneKeys.map((k) => [k, 5, false, true]))
       expect(
-        chargeKeys({ scope: 'personal', transactions, marks }),
+        chargeKeys({ scope: 'personal', transactions, marks, today: TODAY }),
       ).toStrictEqual([TOOLS, ...laneKeys])
     })
   })
@@ -3670,6 +3727,7 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
         perYearCents: 48000,
         countedCount: 2,
         uncountedCount: 0,
+        possiblyStoppedCount: 0,
       })
     })
 
@@ -3939,6 +3997,7 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
     it('chargeKeys in the strawb scope names strawb’s lane keys only', () => {
       expect(
         chargeKeys({
+          today: TODAY,
           scope: 'strawb',
           transactions: [...p1(), ...strawb(p1('merchant_fixture_vendor'))],
           marks: [],
@@ -3961,6 +4020,7 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
     it('every charge’s bare key and every listed lane key, in the scope, sorted', () => {
       expect(
         chargeKeys({
+          today: TODAY,
           scope: 'personal',
           transactions: [
             ...p1(),
@@ -3991,10 +4051,11 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
       const B = 'm:merchant_fixture_app#2026-02-20:2500'
 
       expect(
-        chargeKeys({ scope: 'personal', transactions, marks: [] }),
+        chargeKeys({ scope: 'personal', transactions, marks: [], today: TODAY }),
       ).toStrictEqual(['m:merchant_fixture_app'])
       expect(
         chargeKeys({
+          today: TODAY,
           scope: 'personal',
           transactions,
           marks: [mark({ merchantKey: B, cancelledOn: '2026-05-21' })],
@@ -4003,6 +4064,7 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
       // A mark row with neither an answer nor a cancel date pins nothing.
       expect(
         chargeKeys({
+          today: TODAY,
           scope: 'personal',
           transactions,
           marks: [mark({ merchantKey: B })],
@@ -4013,6 +4075,7 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
     it('a lane hidden by not_subscription on its bare key is not one', () => {
       expect(
         chargeKeys({
+          today: TODAY,
           scope: 'personal',
           transactions: p1(),
           marks: [mark({ merchantKey: TOOLS, answer: 'not_subscription' })],
@@ -4023,6 +4086,7 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
     it('a lane listed under notSubscriptions is one, so it can be undone', () => {
       expect(
         chargeKeys({
+          today: TODAY,
           scope: 'personal',
           transactions: p1(),
           marks: [
@@ -4063,13 +4127,14 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
         },
       ])
       expect(
-        chargeKeys({ scope: 'personal', transactions, marks }),
+        chargeKeys({ scope: 'personal', transactions, marks, today: TODAY }),
       ).toStrictEqual(['m:merchant_fixture_app', B])
     })
 
     it('a merchant the all-history rule detects has only its bare key', () => {
       expect(
         chargeKeys({
+          today: TODAY,
           scope: 'personal',
           transactions: charges(MONTHLY),
           marks: [],
@@ -4080,11 +4145,526 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
     it('a scope that is not a row scope is refused', () => {
       expect(() =>
         chargeKeys({
+          today: TODAY,
           scope: 'all' as unknown as RowScope,
           transactions: [],
           marks: [],
         }),
       ).toThrow(/^scope must be personal or strawb, got "all"$/)
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// #392 possibly stopped
+// ---------------------------------------------------------------------------
+
+// Issue #392 (Hannah, 2026-10-26): an active row with a cadence whose own
+// last charge is more than 14, 60 or 730 days (weekly, monthly, yearly)
+// before today is possibly stopped. It stays listed and active with its
+// figures, and leaves the totals. Every today below is written as a literal;
+// the day counts were worked on a calendar and are checked once against
+// `daysBetween`.
+describe('possibly stopped (issue #392)', () => {
+  const CASES = [
+    {
+      cadence: 'weekly',
+      dates: WEEKLY,
+      amount: 1250,
+      // 1250 × 52 = 65000; ÷ 12 = 5416.67 → 5417; × 12 = 65004.
+      perMonth: 5417,
+      perYear: 65004,
+      limit: 14,
+      // 17 Aug + 13, + 14, + 15.
+      short: '2026-08-30',
+      exact: '2026-08-31',
+      over: '2026-09-01',
+    },
+    {
+      cadence: 'monthly',
+      dates: MONTHLY,
+      amount: 1599,
+      perMonth: 1599,
+      perYear: 19188,
+      limit: 60,
+      // 30 Aug + 31 is 30 Sep; + 28, + 29, + 30 more.
+      short: '2026-10-28',
+      exact: '2026-10-29',
+      over: '2026-10-30',
+    },
+    {
+      cadence: 'yearly',
+      dates: YEARLY,
+      amount: 1806,
+      // 1806 ÷ 12 = 150.5 → 151; × 12 = 1812.
+      perMonth: 151,
+      perYear: 1812,
+      limit: 730,
+      // 1 Mar 2026 to 1 Mar 2028 is 365 + 366 = 731 days (29 Feb 2028).
+      short: '2028-02-28',
+      exact: '2028-02-29',
+      over: '2028-03-01',
+    },
+  ] as const
+
+  const counted = (perMonth: number, perYear: number): SubscriptionTotals => ({
+    perMonthCents: perMonth,
+    perYearCents: perYear,
+    countedCount: 1,
+    uncountedCount: 0,
+    possiblyStoppedCount: 0,
+  })
+  const LEFT_OUT: SubscriptionTotals = {
+    perMonthCents: 0,
+    perYearCents: 0,
+    countedCount: 0,
+    uncountedCount: 0,
+    possiblyStoppedCount: 1,
+  }
+
+  /** The detected, unmarked, never-cancelled stream row. */
+  const streamRow = (
+    fields: Pick<
+      SubscriptionRow,
+      | 'chargeCount'
+      | 'lastChargedOn'
+      | 'amountCents'
+      | 'cadence'
+      | 'perMonthCents'
+      | 'perYearCents'
+      | 'possiblyStopped'
+    >,
+  ): SubscriptionRow => ({
+    merchantKey: STREAM,
+    scope: 'personal',
+    name: 'Example Stream',
+    detected: true,
+    marked: false,
+    status: 'active',
+    cancelledOn: null,
+    chargedAgainOn: null,
+    ...fields,
+  })
+
+  it.each(CASES)(
+    '$cadence: the todays are $limit days after the last charge, one less and one more',
+    ({ dates, limit, short, exact, over }) => {
+      const last = dates[dates.length - 1]
+      expect([
+        daysBetween(last, short),
+        daysBetween(last, exact),
+        daysBetween(last, over),
+      ]).toStrictEqual([limit - 1, limit, limit + 1])
+    },
+  )
+
+  it.each(CASES)(
+    '$cadence: one day short of $limit days is not flagged and is counted',
+    ({ dates, amount, perMonth, perYear, short }) => {
+      const result = run(
+        charges(dates, { amountCents: -amount }),
+        [],
+        'personal',
+        short,
+      )
+
+      expect(result.subscriptions.map((r) => r.possiblyStopped)).toStrictEqual(
+        [false],
+      )
+      expect(result.totals).toStrictEqual(counted(perMonth, perYear))
+    },
+  )
+
+  it.each(CASES)(
+    '$cadence: exactly $limit days is not flagged and is counted',
+    ({ dates, amount, perMonth, perYear, exact }) => {
+      const result = run(
+        charges(dates, { amountCents: -amount }),
+        [],
+        'personal',
+        exact,
+      )
+
+      expect(result.subscriptions.map((r) => r.possiblyStopped)).toStrictEqual(
+        [false],
+      )
+      expect(result.totals).toStrictEqual(counted(perMonth, perYear))
+    },
+  )
+
+  it.each(CASES)(
+    '$cadence: one day over $limit days is possibly stopped: listed, active, its figures kept, out of the totals',
+    ({ cadence, dates, amount, perMonth, perYear, over }) => {
+      const result = run(
+        charges(dates, { amountCents: -amount }),
+        [],
+        'personal',
+        over,
+      )
+
+      expect(keys(result)).toEqual(keys(RESPONSE_KEYS))
+      expect(result.subscriptions).toHaveLength(1)
+      expect(keys(result.subscriptions[0])).toEqual(keys(ROW_KEYS))
+      expect(keys(result.totals)).toEqual(keys(TOTAL_KEYS))
+      expect(result).toStrictEqual({
+        subscriptions: [
+          streamRow({
+            chargeCount: 3,
+            lastChargedOn: dates[2],
+            amountCents: amount,
+            cadence,
+            perMonthCents: perMonth,
+            perYearCents: perYear,
+            possiblyStopped: true,
+          }),
+        ],
+        questions: [],
+        notSubscriptions: [],
+        totals: LEFT_OUT,
+      })
+    },
+  )
+
+  it('the flag is computed, never stored: the same rows read with an earlier today are not flagged', () => {
+    const transactions = charges(MONTHLY)
+    const marks = [mark({ answer: 'subscription' })]
+
+    const later = run(transactions, marks, 'personal', '2026-10-30')
+    const earlier = run(transactions, marks, 'personal', '2026-10-29')
+
+    expect(later.subscriptions.map((r) => r.possiblyStopped)).toStrictEqual([
+      true,
+    ])
+    expect(later.totals).toStrictEqual(LEFT_OUT)
+    expect(earlier.subscriptions.map((r) => r.possiblyStopped)).toStrictEqual(
+      [false],
+    )
+    expect(earlier.totals).toStrictEqual(counted(1599, 19188))
+    // Nothing else about the row moved.
+    expect({ ...later.subscriptions[0], possiblyStopped: false }).toStrictEqual(
+      earlier.subscriptions[0],
+    )
+  })
+
+  it('a new charge clears the flag at the same today', () => {
+    // Read on 30 October: 61 days after 30 August, flagged. A charge on 29
+    // September (gap 30, so still monthly) leaves 31 days: not flagged.
+    // A charge that resumes after a gap off the cadence is #409's.
+    const today = '2026-10-30'
+    expect(
+      run(charges(MONTHLY), [], 'personal', today).subscriptions.map(
+        (r) => r.possiblyStopped,
+      ),
+    ).toStrictEqual([true])
+
+    const result = run(
+      charges([...MONTHLY, '2026-09-29']),
+      [],
+      'personal',
+      today,
+    )
+
+    expect(
+      result.subscriptions.map((r) => [
+        r.lastChargedOn,
+        r.status,
+        r.possiblyStopped,
+      ]),
+    ).toStrictEqual([['2026-09-29', 'active', false]])
+    expect(result.totals).toStrictEqual(counted(1599, 19188))
+  })
+
+  it('a stale row with no cadence is never flagged and stays uncounted', () => {
+    const result = run(
+      [tx({ date: '2023-03-11' })],
+      [mark({ answer: 'subscription' })],
+      'personal',
+      TODAY,
+    )
+
+    expect(keys(result.subscriptions[0])).toEqual(keys(ROW_KEYS))
+    expect(result.subscriptions).toStrictEqual([
+      {
+        ...streamRow({
+          chargeCount: 1,
+          lastChargedOn: '2023-03-11',
+          amountCents: 1599,
+          cadence: null,
+          perMonthCents: null,
+          perYearCents: null,
+          possiblyStopped: false,
+        }),
+        detected: false,
+        marked: true,
+      },
+    ])
+    expect(result.totals).toStrictEqual({
+      perMonthCents: 0,
+      perYearCents: 0,
+      countedCount: 0,
+      uncountedCount: 1,
+      possiblyStoppedCount: 0,
+    })
+  })
+
+  it('a stale cancelled row is never flagged and stays cancelled', () => {
+    const result = run(
+      charges(MONTHLY),
+      [mark({ cancelledOn: '2026-08-30' })],
+      'personal',
+      '2026-10-30',
+    )
+
+    expect(
+      result.subscriptions.map((r) => [r.status, r.possiblyStopped]),
+    ).toStrictEqual([['cancelled', false]])
+    expect(result.totals).toStrictEqual(NOTHING.totals)
+  })
+
+  it('today must be a calendar date', () => {
+    expect(() => run(charges(MONTHLY), [], 'personal', '2026-02-30')).toThrow(
+      /^today must be a YYYY-MM-DD calendar date, got "2026-02-30"$/,
+    )
+    expect(() =>
+      chargeKeys({
+        scope: 'personal',
+        transactions: charges(MONTHLY),
+        marks: [],
+        today: '2026-02-30',
+      }),
+    ).toThrow(/^today must be a YYYY-MM-DD calendar date, got "2026-02-30"$/)
+  })
+
+  // Pinned before the build (e78c739) as "counted however old its last
+  // charge (changes in #392)"; these are the same fixtures now.
+  describe('rows last charged long ago', () => {
+    // Gaps 30 (10 Jan to 9 Feb) and 30 (9 Feb to 11 Mar; 2023 has no 29 Feb).
+    const OLD_MONTHLY = ['2023-01-10', '2023-02-09', '2023-03-11']
+    // Gaps 7 and 7.
+    const OLD_WEEKLY = ['2022-05-02', '2022-05-09', '2022-05-16']
+    // Gaps 366 (across 29 Feb 2020) and 365: both in the yearly band.
+    const OLD_YEARLY = ['2019-06-01', '2020-06-01', '2021-06-01']
+
+    it.each([
+      {
+        cadence: 'monthly',
+        dates: OLD_MONTHLY,
+        amount: 1599,
+        perMonth: 1599,
+        perYear: 19188,
+      },
+      {
+        cadence: 'weekly',
+        dates: OLD_WEEKLY,
+        amount: 1250,
+        perMonth: 5417,
+        perYear: 65004,
+      },
+      {
+        cadence: 'yearly',
+        dates: OLD_YEARLY,
+        amount: 1806,
+        perMonth: 151,
+        perYear: 1812,
+      },
+    ] as const)(
+      '$cadence: an active row last charged years ago is possibly stopped and out of the totals',
+      ({ cadence, dates, amount, perMonth, perYear }) => {
+        const result = run(
+          charges(dates, { amountCents: -amount }),
+          [],
+          'personal',
+          TODAY,
+        )
+
+        expect(keys(result.subscriptions[0])).toEqual(keys(ROW_KEYS))
+        expect(result).toStrictEqual({
+          subscriptions: [
+            streamRow({
+              chargeCount: 3,
+              lastChargedOn: dates[2],
+              amountCents: amount,
+              cadence,
+              perMonthCents: perMonth,
+              perYearCents: perYear,
+              possiblyStopped: true,
+            }),
+          ],
+          questions: [],
+          notSubscriptions: [],
+          totals: LEFT_OUT,
+        })
+      },
+    )
+
+    it('an old row leaves the totals while a current one beside it stays', () => {
+      // Read on 17 August 2026, the weekly box's last charge.
+      const result = run([
+        ...charges(OLD_MONTHLY),
+        ...charges(WEEKLY, {
+          merchantId: 'merchant_fixture_weekly_box',
+          merchantName: 'Example Weekly Box',
+          description: 'EXAMPLE WEEKLY BOX 0001',
+          amountCents: -1250,
+        }),
+      ])
+
+      expect(
+        result.subscriptions.map((r) => [
+          r.merchantKey,
+          r.lastChargedOn,
+          r.status,
+          r.perMonthCents,
+          r.possiblyStopped,
+        ]),
+      ).toStrictEqual([
+        [STREAM, '2023-03-11', 'active', 1599, true],
+        ['m:merchant_fixture_weekly_box', '2026-08-17', 'active', 5417, false],
+      ])
+      // Only the weekly box: 5417; 12 × 5417 = 65004.
+      expect(result.totals).toStrictEqual({
+        perMonthCents: 5417,
+        perYearCents: 65004,
+        countedCount: 1,
+        uncountedCount: 0,
+        possiblyStoppedCount: 1,
+      })
+    })
+
+    it('an old charged-again row is possibly stopped', () => {
+      // Gaps 30, 30 and 30 (11 Mar to 10 Apr): monthly over all four.
+      // Cancelled 12 March; 10 April is the earliest charge after it.
+      const result = run(
+        charges([...OLD_MONTHLY, '2023-04-10']),
+        [mark({ cancelledOn: '2023-03-12' })],
+        'personal',
+        TODAY,
+      )
+
+      expect(result.subscriptions).toStrictEqual([
+        {
+          ...streamRow({
+            chargeCount: 4,
+            lastChargedOn: '2023-04-10',
+            amountCents: 1599,
+            cadence: 'monthly',
+            perMonthCents: 1599,
+            perYearCents: 19188,
+            possiblyStopped: true,
+          }),
+          cancelledOn: '2023-03-12',
+          chargedAgainOn: '2023-04-10',
+        },
+      ])
+      expect(result.totals).toStrictEqual(LEFT_OUT)
+    })
+
+    describe('a marked lane whose charges stopped', () => {
+      const GADGET = 'm:merchant_fixture_gadget'
+      const gadget = (date: string, cents: number): SubscriptionTransaction =>
+        tx({
+          date,
+          amountCents: -cents,
+          merchantId: 'merchant_fixture_gadget',
+          merchantName: 'Example Gadget',
+          description: 'EXAMPLE GADGET 0001',
+        })
+      const onDay = (
+        year: string,
+        day: string,
+        cents: number,
+        months: readonly string[],
+      ) => months.map((m) => gadget(`${year}-${m}-${day}`, cents))
+      // A: the 5th, January to May, at 1000. B: the 25th, March to October,
+      // at 2500. Interleaved, the all-history rule sees no band, so it is
+      // read as lanes. A forms first and holds the bare key; it is stale
+      // against B's latest charge, so only her answer lists it.
+      const fixture = (year: string) => [
+        ...onDay(year, '05', 1000, ['01', '02', '03', '04', '05']),
+        ...onDay(year, '25', 2500, [
+          '03',
+          '04',
+          '05',
+          '06',
+          '07',
+          '08',
+          '09',
+          '10',
+        ]),
+      ]
+      const marked = [mark({ merchantKey: GADGET, answer: 'subscription' })]
+
+      const rows = (
+        year: string,
+        aStopped: boolean,
+        bStopped: boolean,
+      ): SubscriptionRow[] => [
+        {
+          merchantKey: GADGET,
+          scope: 'personal',
+          name: 'Example Gadget',
+          chargeCount: 5,
+          lastChargedOn: `${year}-05-05`,
+          amountCents: 1000,
+          cadence: 'monthly',
+          detected: false,
+          marked: true,
+          status: 'active',
+          cancelledOn: null,
+          chargedAgainOn: null,
+          perMonthCents: 1000,
+          perYearCents: 12000,
+          possiblyStopped: aStopped,
+        },
+        {
+          merchantKey: `${GADGET}#${year}-03-25:2500`,
+          scope: 'personal',
+          name: 'Example Gadget',
+          chargeCount: 8,
+          lastChargedOn: `${year}-10-25`,
+          amountCents: 2500,
+          cadence: 'monthly',
+          detected: true,
+          marked: false,
+          status: 'active',
+          cancelledOn: null,
+          chargedAgainOn: null,
+          perMonthCents: 2500,
+          perYearCents: 30000,
+          possiblyStopped: bStopped,
+        },
+      ]
+
+      it('while its sibling runs on: the stopped lane is possibly stopped, the sibling counted', () => {
+        // 5 May to 26 October 2026 is 174 days; 25 October is 1.
+        const result = run(fixture('2026'), marked, 'personal', TODAY)
+
+        for (const row of result.subscriptions)
+          expect(keys(row)).toEqual(keys(ROW_KEYS))
+        expect(result.subscriptions).toStrictEqual(rows('2026', true, false))
+        // 2500; 12 × 2500 = 30000.
+        expect(result.totals).toStrictEqual({
+          perMonthCents: 2500,
+          perYearCents: 30000,
+          countedCount: 1,
+          uncountedCount: 0,
+          possiblyStoppedCount: 1,
+        })
+      })
+
+      it('when the whole merchant stopped years ago: both lanes are possibly stopped', () => {
+        // 2023, like 2026, has no 29 February: the same gaps.
+        const result = run(fixture('2023'), marked, 'personal', TODAY)
+
+        expect(result.subscriptions).toStrictEqual(rows('2023', true, true))
+        expect(result.totals).toStrictEqual({
+          perMonthCents: 0,
+          perYearCents: 0,
+          countedCount: 0,
+          uncountedCount: 0,
+          possiblyStoppedCount: 2,
+        })
+      })
     })
   })
 })

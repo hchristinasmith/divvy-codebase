@@ -203,16 +203,20 @@ async function loadMarks(db: Db): Promise<SubscriptionMark[]> {
 
 /**
  * Subscriptions, questions and not-a-subscription merchants for one scope,
- * with the totals, exactly as `subscriptions` returned them. Reads only.
+ * with the totals, exactly as `subscriptions` returned them. Today, for the
+ * possibly-stopped flag (issue #392), is `now` as an NZ calendar date.
+ * Reads only.
  */
 export async function readSubscriptions(
   scope: Scope,
+  now: Date = new Date(),
   db: Db = connection,
 ): Promise<SubscriptionsResponse> {
+  const today = nzCalendarDate(now)
   const transactions = await loadCharges(scope, db)
   const marks = await loadMarks(db)
   try {
-    return subscriptions({ scope, transactions, marks })
+    return subscriptions({ scope, transactions, marks, today })
   } catch (err) {
     if (err instanceof RangeError || err instanceof TypeError) {
       throw new SubscriptionsDataError('subscription input invalid')
@@ -227,13 +231,21 @@ export async function readSubscriptions(
  * the shared module's answer (`chargeKeys`); nothing is detected here. Its
  * RangeError and TypeError are turned into the fixed text.
  */
-async function knownMerchant(target: MerchantTarget, db: Db): Promise<boolean> {
+async function knownMerchant(
+  target: MerchantTarget,
+  now: Date,
+  db: Db,
+): Promise<boolean> {
+  const today = nzCalendarDate(now)
   const transactions = await loadCharges(target.scope, db)
   const marks = await loadMarks(db)
   try {
-    return chargeKeys({ scope: target.scope, transactions, marks }).includes(
-      target.merchantKey,
-    )
+    return chargeKeys({
+      scope: target.scope,
+      transactions,
+      marks,
+      today,
+    }).includes(target.merchantKey)
   } catch (err) {
     if (err instanceof RangeError || err instanceof TypeError) {
       throw new SubscriptionsDataError('subscription input invalid')
@@ -267,7 +279,7 @@ export async function setAnswer(
   now: Date = new Date(),
   db: Db = connection,
 ): Promise<SubscriptionMarkResponse | 'not_found'> {
-  if (!(await knownMerchant(target, db))) return 'not_found'
+  if (!(await knownMerchant(target, now, db))) return 'not_found'
   const at = now.toISOString()
   const where = { scope: target.scope, merchant_key: target.merchantKey }
   if (answer === null) {
@@ -303,7 +315,7 @@ export async function cancelSubscription(
   if (on !== undefined && !isIsoDate(on)) {
     throw new SubscriptionsDataError('subscription input invalid')
   }
-  if (!(await knownMerchant(target, db))) return 'not_found'
+  if (!(await knownMerchant(target, now, db))) return 'not_found'
   const today = nzCalendarDate(now)
   const day = on ?? today
   if (day > today) return 'future_date'
@@ -328,7 +340,7 @@ export async function uncancelSubscription(
   now: Date = new Date(),
   db: Db = connection,
 ): Promise<SubscriptionMarkResponse | 'not_found'> {
-  if (!(await knownMerchant(target, db))) return 'not_found'
+  if (!(await knownMerchant(target, now, db))) return 'not_found'
   await db('subscription_marks')
     .where({ scope: target.scope, merchant_key: target.merchantKey })
     .update({ cancelled_on: null, updated_at: now.toISOString() })
