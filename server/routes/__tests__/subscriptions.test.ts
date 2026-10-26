@@ -199,12 +199,14 @@ const ROW_KEYS: Record<keyof SubscriptionRow, true> = {
   chargedAgainOn: true,
   perMonthCents: true,
   perYearCents: true,
+  possiblyStopped: true,
 }
 const TOTAL_KEYS: Record<keyof SubscriptionTotals, true> = {
   perMonthCents: true,
   perYearCents: true,
   countedCount: true,
   uncountedCount: true,
+  possiblyStoppedCount: true,
 }
 const MARK_RESPONSE_KEYS: Record<keyof SubscriptionMarkResponse, true> = {
   scope: true,
@@ -230,6 +232,7 @@ const STREAM_ROW: SubscriptionRow = {
   perMonthCents: 1599,
   // 12 × 1599
   perYearCents: 19188,
+  possiblyStopped: false,
 }
 const HOST_ROW: SubscriptionRow = {
   merchantKey: HOST,
@@ -248,6 +251,7 @@ const HOST_ROW: SubscriptionRow = {
   perMonthCents: 4333,
   // 12 × 4333
   perYearCents: 51996,
+  possiblyStopped: false,
 }
 const CLOUD_QUESTION: SubscriptionMerchant = {
   merchantKey: CLOUD,
@@ -281,6 +285,7 @@ describe('GET: the response is the contract', () => {
         perYearCents: 71184,
         countedCount: 2,
         uncountedCount: 0,
+        possiblyStoppedCount: 0,
       },
     })
   })
@@ -297,6 +302,7 @@ describe('GET: the response is the contract', () => {
       perYearCents: 19188,
       countedCount: 1,
       uncountedCount: 0,
+      possiblyStoppedCount: 0,
     })
   })
 
@@ -312,6 +318,7 @@ describe('GET: the response is the contract', () => {
       perYearCents: 51996,
       countedCount: 1,
       uncountedCount: 0,
+      possiblyStoppedCount: 0,
     })
   })
 
@@ -328,6 +335,7 @@ describe('GET: the response is the contract', () => {
         perYearCents: 0,
         countedCount: 0,
         uncountedCount: 0,
+        possiblyStoppedCount: 0,
       },
     })
   })
@@ -677,6 +685,7 @@ describe('round trips', () => {
       perYearCents: 19188,
       countedCount: 1,
       uncountedCount: 1,
+      possiblyStoppedCount: 0,
     })
 
     await mark({ scope: 'personal', merchantKey: CLOUD, answer: null })
@@ -698,6 +707,7 @@ describe('round trips', () => {
       perYearCents: 0,
       countedCount: 0,
       uncountedCount: 0,
+      possiblyStoppedCount: 0,
     })
   })
 

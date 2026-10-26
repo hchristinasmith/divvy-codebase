@@ -56,8 +56,19 @@
 // half-up once: monthly is the amount, weekly is amount × 52 ÷ 12, yearly is
 // amount ÷ 12. Per year is 12 × the per-month figure, never amount × 52, so
 // there is no second rounding. The totals sum those figures over active rows
-// with a cadence. Subscriptions are not part of safe-to-spend: their charges
-// already land as transactions, and future ones are Bills.
+// with a cadence that are not possibly stopped; `totals.uncountedCount` and
+// `totals.possiblyStoppedCount` say how many active rows each rule left out.
+// Subscriptions are not part of safe-to-spend: their charges already land as
+// transactions, and future ones are Bills.
+//
+// Possibly stopped (issue #392, Hannah, 2026-10-26). An active row with a
+// cadence is possibly stopped when today is more than two billing cycles
+// after its own last charge: `POSSIBLY_STOPPED_AFTER_DAYS` for its cadence,
+// strictly more, by `daysBetween`. It stays listed and active with its
+// per-period figures, and leaves the totals until Hannah confirms it: she
+// cancels it, or the next charge clears the flag. A row with no cadence or
+// a cancelled row is never flagged. The flag is computed on read and never
+// stored, and never makes a row cancelled.
 //
 // The merchant key is a stored contract (`subscription_marks.merchant_key`,
 // 20261025170000_subscription_marks.js). Changing `normaliseDescription` or
@@ -213,14 +224,12 @@
 // - A merchant with more than `LANE_MAX_CONCURRENT` subscriptions at once is
 //   never split.
 //
-// Known limits of both rules: a weekly merchant with one skipped week is
-// not detected; and a subscription with no recent charge stays active until
-// she cancels it, because liveness is measured from the merchant's own
-// latest charge, never from today.
+// Known limit of both rules: a weekly merchant with one skipped week is
+// not detected.
 //
 // Dates are `YYYY-MM-DD` calendar dates with no timezone; the caller turns
 // each transaction's instant into Hannah's NZ date. Nothing here reads the
-// clock.
+// clock; today is passed in.
 
 import type {
   Cents,
@@ -281,6 +290,16 @@ export const MONTHS_PER_YEAR = 12
 export const MAX_MERCHANT_KEY_LENGTH = 255
 
 export const UNNAMED_MERCHANT = 'Unnamed merchant'
+
+/**
+ * Days after its last charge past which an active row is possibly stopped:
+ * about two billing cycles (issue #392, Hannah, 2026-10-26).
+ */
+const POSSIBLY_STOPPED_AFTER_DAYS: Record<SubscriptionCadence, number> = {
+  weekly: 14,
+  monthly: 60,
+  yearly: 730,
+}
 
 // ---------------------------------------------------------------------------
 // Constants (prd-02 Ruling 16)
@@ -385,6 +404,8 @@ export interface SubscriptionsInput {
   scope: Scope
   transactions: readonly SubscriptionTransaction[]
   marks: readonly SubscriptionMark[]
+  /** Hannah's NZ calendar date now, for the possibly-stopped flag. */
+  today: IsoDate
 }
 
 // ---------------------------------------------------------------------------
@@ -617,6 +638,7 @@ function subscriptionRow(
   detected: boolean,
   marked: boolean,
   cancelledOn: IsoDate | null,
+  today: IsoDate,
 ): SubscriptionRow {
   const chargedAgainOn =
     cancelledOn === null ? null : (dates.find((d) => d > cancelledOn) ?? null)
@@ -624,17 +646,23 @@ function subscriptionRow(
     cadence === null ? null : perMonthCents(cadence, merchant.amountCents)
   const perYear = perMonth === null ? null : MONTHS_PER_YEAR * perMonth
   if (perYear !== null) assertCents(perYear, 'perYearCents')
+  const status =
+    cancelledOn !== null && chargedAgainOn === null ? 'cancelled' : 'active'
   return {
     ...merchant,
     cadence,
     detected,
     marked,
-    status:
-      cancelledOn !== null && chargedAgainOn === null ? 'cancelled' : 'active',
+    status,
     cancelledOn,
     chargedAgainOn,
     perMonthCents: perMonth,
     perYearCents: perYear,
+    possiblyStopped:
+      status === 'active' &&
+      cadence !== null &&
+      daysBetween(merchant.lastChargedOn, today) >
+        POSSIBLY_STOPPED_AFTER_DAYS[cadence],
   }
 }
 
@@ -1044,6 +1072,7 @@ export function subscriptions(
       `scope must be all, personal or strawb, got "${String(scope)}"`,
     )
   }
+  assertDate(input.today, 'today')
   input.transactions.forEach(validateTransaction)
   input.marks.forEach(validateMark)
 
@@ -1136,6 +1165,7 @@ export function subscriptions(
               lane.detected,
               laneMark?.answer === 'subscription',
               laneMark?.cancelledOn ?? null,
+              input.today,
             ),
           )
         }
@@ -1149,6 +1179,7 @@ export function subscriptions(
           detected,
           answer === 'subscription',
           cancelledOn,
+          input.today,
         ),
       )
     } else if (
@@ -1162,8 +1193,10 @@ export function subscriptions(
   const active = rows.filter((row) => row.status === 'active')
   const counted: Cents[] = []
   let uncountedCount = 0
+  let possiblyStoppedCount = 0
   for (const row of active) {
     if (row.perMonthCents === null) uncountedCount++
+    else if (row.possiblyStopped) possiblyStoppedCount++
     else counted.push(row.perMonthCents)
   }
   const totalPerMonth = sumCents(counted)
@@ -1179,6 +1212,7 @@ export function subscriptions(
       perYearCents: totalPerYear,
       countedCount: counted.length,
       uncountedCount,
+      possiblyStoppedCount,
     },
   }
 }
@@ -1195,6 +1229,7 @@ export function chargeKeys(input: {
   scope: RowScope
   transactions: readonly SubscriptionTransaction[]
   marks: readonly SubscriptionMark[]
+  today: IsoDate
 }): string[] {
   if (!isRowScope(input.scope)) {
     throw new RangeError(

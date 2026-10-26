@@ -206,6 +206,7 @@ describe('the totals', () => {
           perYearCents: 99999,
           countedCount: 1,
           uncountedCount: 0,
+          possiblyStoppedCount: 0,
         },
       }),
     )
@@ -223,6 +224,7 @@ describe('the totals', () => {
           perYearCents: 19188,
           countedCount: 1,
           uncountedCount: 2,
+          possiblyStoppedCount: 0,
         },
       }),
     )
@@ -243,6 +245,7 @@ describe('the totals', () => {
           perYearCents: 19188,
           countedCount: 1,
           uncountedCount: 1,
+          possiblyStoppedCount: 0,
         },
       }),
     )
@@ -880,6 +883,7 @@ describe('the screen states', () => {
           perYearCents: 0,
           countedCount: 0,
           uncountedCount: 0,
+          possiblyStoppedCount: 0,
         },
       }),
     )
@@ -1034,6 +1038,7 @@ describe('the Active / Cancelled toggle', () => {
       perYearCents: 30001,
       countedCount: 2,
       uncountedCount: 1,
+      possiblyStoppedCount: 0,
     },
   })
 
@@ -1230,5 +1235,92 @@ describe('the Active / Cancelled toggle', () => {
         '1 subscription left out of these totals: no regular pattern yet',
       ),
     ).not.toBeNull()
+  })
+})
+
+describe('a possibly-stopped row (issue #392)', () => {
+  const GYM = 'm:merchant_invented_gym'
+  const body = response({
+    subscriptions: [
+      row(),
+      row({
+        merchantKey: GYM,
+        name: 'Sample Gym',
+        lastChargedOn: '2026-07-01',
+        amountCents: 1000,
+        cadence: 'weekly',
+        perMonthCents: 4333,
+        perYearCents: 51996,
+        possiblyStopped: true,
+      }),
+    ],
+    totals: {
+      perMonthCents: 1599,
+      perYearCents: 19188,
+      countedCount: 1,
+      uncountedCount: 0,
+      possiblyStoppedCount: 1,
+    },
+  })
+
+  it('carries a chip under Active, keeps Cancel, and does not say what it counts as a month', async () => {
+    setup(body)
+    await loaded()
+
+    expect(listNames()).toEqual(['Example Stream', 'Sample Gym'])
+    const gym = item('personal', GYM)
+    const chip = within(gym).getByText('Possibly stopped')
+    expect(chip.className.split(' ')).toEqual(
+      expect.arrayContaining(['rounded-pill', 'bg-canvas', 'text-warn']),
+    )
+    const cancel = within(gym).getByRole('button', {
+      name: 'Cancel Sample Gym',
+    }) as HTMLButtonElement
+    expect(cancel.disabled).toBe(false)
+    expect(meta(gym)).toBe(
+      'Weekly · Last charged 1 Jul · 3 charges · Found automatically',
+    )
+
+    expect(
+      within(item('personal', STREAM)).queryByText('Possibly stopped'),
+    ).toBeNull()
+  })
+
+  it('the tiles say how many are left out as possibly stopped', async () => {
+    setup(body)
+    await loaded()
+
+    expect(
+      screen.getByText(
+        '1 subscription left out of these totals: possibly stopped',
+      ),
+    ).not.toBeNull()
+    expect(document.body.textContent).not.toContain('no regular pattern yet')
+  })
+
+  it('says it in the plural, and not at all at zero', async () => {
+    setup(
+      response({
+        totals: {
+          perMonthCents: 0,
+          perYearCents: 0,
+          countedCount: 0,
+          uncountedCount: 0,
+          possiblyStoppedCount: 2,
+        },
+      }),
+    )
+    await loaded()
+
+    expect(
+      screen.getByText(
+        '2 subscriptions left out of these totals: possibly stopped',
+      ),
+    ).not.toBeNull()
+    cleanup()
+
+    setup(response())
+    await loaded()
+    expect(document.body.textContent).not.toContain('possibly stopped')
   })
 })

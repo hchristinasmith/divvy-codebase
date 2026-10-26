@@ -117,7 +117,13 @@ describe('grabSubscriptions', () => {
       ['notSubscriptions', 'questions', 'subscriptions', 'totals'].sort(),
     )
     expect(Object.keys(body.totals).sort()).toEqual(
-      ['countedCount', 'perMonthCents', 'perYearCents', 'uncountedCount'].sort(),
+      [
+        'countedCount',
+        'perMonthCents',
+        'perYearCents',
+        'possiblyStoppedCount',
+        'uncountedCount',
+      ].sort(),
     )
     expect(body.subscriptions.map((r) => [r.merchantKey, r.status])).toEqual([
       [STREAM, 'active'],
@@ -235,6 +241,7 @@ describe('the subscriptions query', () => {
         perYearCents: 0,
         countedCount: 0,
         uncountedCount: 0,
+        possiblyStoppedCount: 0,
       },
     }
     client.setQueryData(personal, empty)
