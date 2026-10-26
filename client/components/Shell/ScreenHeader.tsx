@@ -1,15 +1,20 @@
+import type { ReactNode } from 'react'
 import ScopeToggle from './ScopeToggle.tsx'
 import SyncPill from './SyncPill.tsx'
 
 // The header on every screen (docs/design/handoff.md "Global layout"). Each
 // screen renders its own, so a subtitle that comes from data ("$X due before
 // payday") is that screen's business and never an edit to the route table.
+// `controls` is a screen's own header control, drawn just left of the scope
+// toggle (the Subscriptions screen's Active / Cancelled switch, issue 390).
 export default function ScreenHeader({
   title,
   subtitle,
+  controls,
 }: {
   title: string
   subtitle?: string
+  controls?: ReactNode
 }) {
   return (
     <header className="flex flex-wrap items-end justify-between gap-4">
@@ -25,6 +30,7 @@ export default function ScreenHeader({
         )}
       </div>
       <div className="flex flex-wrap items-center gap-2">
+        {controls}
         <ScopeToggle />
         <SyncPill />
       </div>
