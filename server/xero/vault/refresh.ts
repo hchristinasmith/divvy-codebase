@@ -7,15 +7,18 @@
 // once, encrypt the new pair, and commit it in one UPDATE guarded by the
 // version the pass read (store.ts `commitRefresh`). A pass returns a
 // refreshed token only after its commit has landed. vault.ts runs at most one
-// pass at a time per process, so concurrent callers share one exchange.
+// pass at a time per `Knex` object, across every vault built on it, so
+// concurrent callers share one exchange.
 //
 // THE CRASH WINDOW. Xero issues a new refresh token on every exchange. Once
 // Xero has answered, the token the vault sent may already be spent, and the
 // new pair exists only in this process's memory until the commit lands. A
 // crash after Xero answers and before the commit (the process killed, the
-// machine stopping, the database refusing the write) is the only point at
-// which a refresh can lose a token. No ordering of "ask Xero" and "store the
-// answer" closes it, and this module does not claim to. What it guarantees
+// machine stopping, the database refusing the write) loses the new pair. So
+// do its neighbours: Xero's answer lost on the way back, which the vault can
+// only see as a failed exchange (below), and two refreshers at once (at the
+// end). No ordering of "ask Xero" and "store the answer" closes the window,
+// and this module does not claim to. What it guarantees after such a crash
 // is narrower:
 // - The stored pair is never overwritten or deleted before the new pair is
 //   committed. After such a crash the row still holds the old refresh token,
@@ -58,7 +61,13 @@
 // refresh token to Xero. Divvy runs as one process on one machine with one
 // volume (docs/decisions.md D1), so the in-process single-flight in vault.ts
 // is the guard that matters; the version check is what keeps a second
-// process from overwriting, not from spending a refresh token.
+// process from overwriting, not from spending a refresh token. Without a
+// grace period that race can cost the connection: if the refresher Xero
+// refused marks `needs_reconnect` before the one it answered commits, the
+// answered pair is discarded and both fail `needs_reconnect`. The
+// single-flight is keyed on the `Knex` object, so any number of vaults built
+// on one `Knex` share it; a second `Knex` object on the same database file,
+// or a second process, is a second refresher in exactly this sense.
 
 import type { Knex } from 'knex'
 
@@ -138,9 +147,7 @@ export async function accessTokenOnce(deps: RefreshDeps): Promise<string> {
 
   let grant: unknown = null
   try {
-    // Through a promise, so an exchange that throws before returning one is
-    // a failed exchange too.
-    grant = await Promise.resolve().then(() => deps.exchange(refreshToken))
+    grant = await deps.exchange(refreshToken)
   } catch {
     // The exchange's error is dropped: it may quote the token.
     grant = null

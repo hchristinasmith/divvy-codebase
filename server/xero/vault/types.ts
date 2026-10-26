@@ -8,7 +8,11 @@ import type { Knex } from 'knex'
 export interface XeroTokenGrant {
   accessToken: string
   refreshToken: string
-  /** Xero's `expires_in`: whole seconds from when the refresh was requested. */
+  /**
+   * Xero's `expires_in`: the access token's lifetime in whole seconds. The
+   * vault counts it from when it sent the refresh, which is no later than
+   * when Xero answered.
+   */
   expiresInSeconds: number
 }
 
@@ -16,7 +20,10 @@ export interface XeroTokenGrant {
  * Trades a refresh token for a new pair. The vault calls it at most once per
  * refresh and never retries it. The real one (the HTTP call to Xero's token
  * endpoint) belongs to the connect-routes lane; tests inject a fake. A
- * rejection, of any kind, means the refresh failed (Ruling 3).
+ * rejection, of any kind, means the refresh failed (Ruling 3). It must
+ * settle, so the real one needs a timeout: while it is pending, every
+ * `getAccessToken` caller waits on it, including callers after a new consent
+ * has been stored.
  */
 export type XeroTokenExchange = (refreshToken: string) => Promise<XeroTokenGrant>
 
@@ -40,9 +47,11 @@ export interface XeroVaultOptions {
 }
 
 /**
- * One vault per process. Every member is a plain function that needs no
- * `this`, so `getAccessToken` can be handed on detached (as the Xero client's
- * `getAccessToken` option).
+ * Vaults built on the same `Knex` object share one refresh at a time
+ * (vault.ts); a vault on a second `Knex` object over the same database is a
+ * second refresher, which refresh.ts describes. Every member is a plain
+ * function that needs no `this`, so `getAccessToken` can be handed on
+ * detached (as the Xero client's `getAccessToken` option).
  */
 export interface XeroVault {
   /** A usable access token, refreshing and storing a new pair first if needed. */

@@ -5,8 +5,10 @@
 //
 // The crash tests simulate a crash at each step of a refresh by throwing
 // there, then model the restart with a fresh `createXeroVault` on the same
-// database: its single-flight state is closure state, so a new instance is a
-// new process. An instance that crashed is never used again.
+// database. The single-flight is shared per database, but the crashed pass
+// has settled, and so been cleared, before the restart's first call, so the
+// fresh instance reads the row as a new process would. An instance that
+// crashed is never used again.
 //
 // `FakeXero` stands in for the token endpoint and the API. Whether Xero
 // honours a refresh token it has already rotated, and for how long, is not
@@ -38,6 +40,9 @@ import {
 
 const T0 = Date.parse('2026-10-26T00:00:00.000Z')
 const LIFETIME_SECONDS = 1800
+// The skew refresh.ts refreshes within. Pinned here, not imported, so a
+// change to it fails the boundary tests rather than moving with them.
+const SKEW_MS = 60_000
 
 let db: Knex
 let clock: number
@@ -74,9 +79,13 @@ function expectVaultError(err: unknown, code: string): void {
   expect((err as XeroVaultError).code).toBe(code)
 }
 
-const ABORT_VERSION_BUMP =
-  'CREATE TRIGGER crash_before_commit BEFORE UPDATE ON xero_connection ' +
-  "WHEN new.version <> old.version BEGIN SELECT RAISE(ABORT, 'simulated crash'); END"
+// Fires only on the token columns, which commitRefresh alone writes. A
+// markNeedsReconnect write touches status and version and so gets through,
+// which is what lets a wrong implementation that marks the row after a failed
+// commit be caught here.
+const ABORT_TOKEN_WRITE =
+  'CREATE TRIGGER crash_before_commit BEFORE UPDATE OF access_token_enc, refresh_token_enc ' +
+  "ON xero_connection BEGIN SELECT RAISE(ABORT, 'simulated crash'); END"
 
 describe('a fresh token', () => {
   it('is returned without an exchange or a write while more than the skew remains', async () => {
@@ -98,6 +107,27 @@ describe('a fresh token', () => {
     const token = await vaultWith(xero.exchange).getAccessToken()
     expect(xero.exchangeCalls).toEqual([input.refreshToken])
     expect(token).not.toBe(input.accessToken)
+  })
+
+  it('is refreshed when exactly the skew is left before expiry', async () => {
+    const xero = new FakeXero()
+    const input = await connect(xero)
+    clock += LIFETIME_SECONDS * 1000 - SKEW_MS
+
+    const token = await vaultWith(xero.exchange).getAccessToken()
+    expect(xero.exchangeCalls).toEqual([input.refreshToken])
+    expect(token).not.toBe(input.accessToken)
+  })
+
+  it('is returned without an exchange when one millisecond more than the skew is left', async () => {
+    const xero = new FakeXero()
+    const input = await connect(xero)
+    const writes = countWrites(db)
+    clock += LIFETIME_SECONDS * 1000 - SKEW_MS - 1
+
+    expect(await vaultWith(xero.exchange).getAccessToken()).toBe(input.accessToken)
+    expect(xero.exchangeCalls).toEqual([])
+    expect(writes.count).toBe(0)
   })
 })
 
@@ -206,7 +236,7 @@ describe('crash tests (Done-when 4)', () => {
     const before = await mustRawRow(db)
     expire()
 
-    await db.raw(ABORT_VERSION_BUMP)
+    await db.raw(ABORT_TOKEN_WRITE)
     const crashed = vaultWith(xero.exchange)
     expectVaultError(await rejectionOf(crashed.getAccessToken()), 'storage_failed')
     expect(xero.exchangeCalls).toEqual([input.refreshToken])
@@ -231,7 +261,7 @@ describe('crash tests (Done-when 4)', () => {
     const before = await mustRawRow(db)
     expire()
 
-    await db.raw(ABORT_VERSION_BUMP)
+    await db.raw(ABORT_TOKEN_WRITE)
     expectVaultError(
       await rejectionOf(vaultWith(xero.exchange).getAccessToken()),
       'storage_failed',
@@ -319,6 +349,62 @@ describe('one refresher (Done-when 5)', () => {
     expect(await vault.getAccessToken()).toBe(tokens[0])
     expect(gated.calls).toHaveLength(1)
     expect(writes.count).toBe(0)
+  })
+
+  it('runs one exchange for concurrent callers on two vaults over one database', async () => {
+    const xero = new FakeXero({ grace: false })
+    await connect(xero)
+    const before = await mustRawRow(db)
+    expire()
+    const gatedA = gatedExchange(xero.exchange)
+    const gatedB = gatedExchange(xero.exchange)
+    const vaultA = vaultWith(gatedA.exchange)
+    const vaultB = vaultWith(gatedB.exchange)
+    const exchanges = () => gatedA.calls.length + gatedB.calls.length
+
+    const pending = [vaultA.getAccessToken(), vaultB.getAccessToken()]
+    await vi.waitFor(() => expect(exchanges()).toBeGreaterThan(0))
+    // The pool is one connection, so this read queues behind any read a
+    // second pass started; once it returns, that pass would have exchanged.
+    await mustRawRow(db)
+    expect(exchanges()).toBe(1)
+
+    gatedA.release()
+    gatedB.release()
+    const tokens = await Promise.all(pending)
+    expect(exchanges()).toBe(1)
+    expect(tokens[1]).toBe(tokens[0])
+    expect(xero.apiCall(tokens[0])).toBe('ok')
+    expect(await mustRawRow(db)).toMatchObject({
+      status: 'connected',
+      version: (before.version as number) + 1,
+    })
+  })
+
+  it('does not share a refresh between vaults over two databases', async () => {
+    const xero = new FakeXero()
+    await connect(xero)
+    const other = await openDb()
+    try {
+      const otherInput = xero.consent(connectionInput())
+      await createXeroVault({ db: other, exchange: xero.exchange, now }).storeConnection(otherInput)
+      expire()
+
+      const tokens = await Promise.all([
+        vaultWith(xero.exchange).getAccessToken(),
+        createXeroVault({ db: other, exchange: xero.exchange, now }).getAccessToken(),
+      ])
+      expect(xero.exchangeCalls).toHaveLength(2)
+      expect(tokens[1]).not.toBe(tokens[0])
+      expect(decryptField((await mustRawRow(db)).access_token_enc, 'access_token')).toBe(
+        tokens[0],
+      )
+      expect(decryptField((await mustRawRow(other)).access_token_enc, 'access_token')).toBe(
+        tokens[1],
+      )
+    } finally {
+      await other.destroy()
+    }
   })
 
   it('starts a new refresh once the last one has finished', async () => {
@@ -505,6 +591,12 @@ describe('a failed exchange (Done-when 7)', () => {
     [
       'resolves with an expiry past the last representable date',
       () => malformed({ ...validGrant(), expiresInSeconds: 2 ** 52 }),
+    ],
+    [
+      // A date, but one `toISOString()` writes with an extended year, which
+      // the `expires_at` CHECK would refuse at the commit.
+      'resolves with an expiry past the year 9999',
+      () => malformed({ ...validGrant(), expiresInSeconds: 1e12 }),
     ],
   ]
 

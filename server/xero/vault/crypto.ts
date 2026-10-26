@@ -16,8 +16,10 @@
 //
 // The key is `XERO_TOKEN_KEY`: 32 bytes in standard, padded base64, from the
 // environment only (a Fly secret in production), never the database, the
-// image or the replica. It is read on every call and never cached, so
-// rotating the secret takes effect without a code path to forget. There is
+// image or the replica. It is read on every call and never cached. Nothing
+// re-encrypts under a new key and there is no old-key fallback, so rotating
+// the secret makes every stored blob `decrypt_failed` until a reconnect
+// stores a new consent under the new key. There is
 // no default and no lenient decoding: a key that is unset or empty is
 // `key_missing`, and anything that does not re-encode to exactly itself as
 // 32 bytes (a trailing newline, missing padding, base64url, hex, the wrong

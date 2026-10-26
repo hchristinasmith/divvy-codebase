@@ -141,6 +141,9 @@ describe('storeConnection', () => {
     ['an infinite expiry', { expiresInSeconds: Number.POSITIVE_INFINITY }],
     ['an expiry given as text', { expiresInSeconds: '1800' }],
     ['an expiry past the last representable date', { expiresInSeconds: 2 ** 52 }],
+    // A date, but past the year 9999: `toISOString()` writes it with an
+    // extended year (`+033715-…`), which the `expires_at` CHECK refuses.
+    ['an expiry past the year 9999', { expiresInSeconds: 1e12 }],
     ['no scopes', { scopes: [] }],
     ['scopes that are not a list', { scopes: 'offline_access' }],
     ['an empty scope', { scopes: ['offline_access', ''] }],
@@ -163,6 +166,18 @@ describe('storeConnection', () => {
       expect(await mustRawRow(db)).toEqual(before)
     })
   }
+
+  it('stores an expiry in the last second of the year 9999 and refuses one a second later', async () => {
+    const lastSeconds = Math.floor((Date.parse('9999-12-31T23:59:59.999Z') - NOW) / 1000)
+    await storeConnection(db, connectionInput({ expiresInSeconds: lastSeconds }), NOW)
+    const row = await mustRawRow(db)
+    expect(row.expires_at).toBe(new Date(NOW + lastSeconds * 1000).toISOString())
+    expect(row.expires_at).toMatch(/^9999-12-31T23:59:59\.\d{3}Z$/)
+
+    const later = connectionInput({ expiresInSeconds: lastSeconds + 1 })
+    expectVaultError(await rejectionOf(storeConnection(db, later, NOW)), 'invalid_input')
+    expect(await mustRawRow(db)).toEqual(row)
+  })
 
   it('refuses to store without a key, writing nothing', async () => {
     vi.stubEnv('XERO_TOKEN_KEY', '')

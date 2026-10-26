@@ -88,9 +88,17 @@ export function isToken(value: unknown): value is string {
 }
 
 /**
+ * `toISOString()` text with a four-digit year. Past the year 9999 it writes
+ * an extended year (`+010000-…`), which the `expires_at` CHECK refuses.
+ */
+const PLAIN_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
+
+/**
  * The instant `expiresInSeconds` after `fromMs`, as `toISOString()` text, or
  * null when `expiresInSeconds` is not a positive whole number of seconds or
- * the instant cannot be written as a date.
+ * the instant is not one `expires_at` can hold (no date at all, or a year
+ * past 9999). A null here is refused before anything is written, so an
+ * absurd expiry is a bad grant or bad input, never a failed write.
  */
 export function expiryAfter(fromMs: number, expiresInSeconds: unknown): string | null {
   if (
@@ -101,7 +109,9 @@ export function expiryAfter(fromMs: number, expiresInSeconds: unknown): string |
     return null
   }
   const expiry = new Date(fromMs + expiresInSeconds * 1000)
-  return Number.isNaN(expiry.getTime()) ? null : expiry.toISOString()
+  if (Number.isNaN(expiry.getTime())) return null
+  const text = expiry.toISOString()
+  return PLAIN_INSTANT.test(text) ? text : null
 }
 
 function invalid(message: string): XeroVaultError {
@@ -152,7 +162,9 @@ export async function storeConnection(
   }
   const expiresAt = expiryAfter(nowMs, input.expiresInSeconds)
   if (expiresAt === null) {
-    throw invalid('the expiry to store must be a positive whole number of seconds')
+    throw invalid(
+      'the expiry to store must be a positive whole number of seconds ending before the year 10000',
+    )
   }
   const scopes = scopeText(input.scopes)
   const connectedAt = new Date(nowMs).toISOString()
