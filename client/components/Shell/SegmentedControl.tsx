@@ -5,18 +5,21 @@ import clsx from 'clsx'
 // text. Update 2 (prd-02 Ruling 13) squares the pills to 6px and sets the
 // track on an offset instead of a border. The scope switch and any screen's
 // own header control (passed through ScreenHeader's `controls`) share it, so
-// they cannot drift apart. `onChange` receives the option's value, never its
-// label.
+// they cannot drift apart. Every pill carries the pink keyboard-focus
+// outline. `disabled` locks the whole group while a change is in flight.
+// `onChange` receives the option's value, never its label.
 export default function SegmentedControl<T extends string>({
   label,
   options,
   value,
   onChange,
+  disabled = false,
 }: {
   label: string
   options: readonly { value: T; label: string }[]
   value: T
   onChange: (next: T) => void
+  disabled?: boolean
 }) {
   return (
     <div
@@ -28,10 +31,12 @@ export default function SegmentedControl<T extends string>({
         <button
           key={option.value}
           type="button"
+          disabled={disabled}
           aria-pressed={value === option.value}
           onClick={() => onChange(option.value)}
           className={clsx(
-            'cursor-pointer rounded-pill px-3.5 py-1.5 text-body-13 font-semibold',
+            'cursor-pointer rounded-pill px-3.5 py-1.5 text-body-13 font-semibold focus-visible:outline-2 focus-visible:outline-pink',
+            disabled && 'disabled:cursor-not-allowed disabled:opacity-50',
             value === option.value
               ? 'bg-surface text-deep'
               : 'bg-transparent text-rose',
