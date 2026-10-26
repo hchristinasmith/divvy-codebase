@@ -311,17 +311,59 @@ describe('typed errors (issue #34 done-when 9)', () => {
     })
   })
 
-  it('rejects when fetch itself fails, passing the error through', async () => {
-    const networkDown = new TypeError('fetch failed')
+  it('passes a getAccessToken rejection through unchanged, before any fetch', async () => {
+    const vaultError = new Error('the vault refused')
+    const recorder = recordingFetch([])
+    const client = createXeroClient({
+      getAccessToken: async () => {
+        throw vaultError
+      },
+      tenantId: SENTINEL_TENANT,
+      fetch: recorder.fetch,
+    })
+
+    await expect(client.getReceivableInvoices()).rejects.toBe(vaultError)
+    expect(recorder.calls).toHaveLength(0)
+  })
+
+  it('rejects when fetch itself fails as request_failed, with no status', async () => {
     const client = createXeroClient({
       getAccessToken: async () => SENTINEL_TOKEN,
       tenantId: SENTINEL_TENANT,
       fetch: async () => {
-        throw networkDown
+        throw new TypeError('fetch failed')
       },
     })
 
-    await expect(client.getReceivableInvoices()).rejects.toBe(networkDown)
+    const error = await client.getReceivableInvoices().catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(XeroClientError)
+    expect(error).toMatchObject({ code: 'request_failed', status: null })
+  })
+
+  it("does not carry fetch's own error, quoting the token, into the thrown error", async () => {
+    // undici quotes the rejected header value, which is the bearer token.
+    const client = createXeroClient({
+      getAccessToken: async () => SENTINEL_TOKEN,
+      tenantId: SENTINEL_TENANT,
+      fetch: async () => {
+        throw new TypeError(
+          `Headers.append: "Bearer ${SENTINEL_TOKEN}" is an invalid header value.`,
+        )
+      },
+    })
+
+    const error = await client.getReceivableInvoices().catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(XeroClientError)
+    expect('cause' in (error as object)).toBe(false)
+    const serialised = [
+      (error as Error).message,
+      String(error),
+      (error as Error).stack ?? '',
+      JSON.stringify(error),
+    ].join('\n')
+    expect(serialised).not.toContain(SENTINEL_TOKEN)
   })
 
   it('rejects a failure on page 2 instead of returning page 1 alone', async () => {
