@@ -1128,3 +1128,285 @@ describe('#391 regression: what detection today must keep', () => {
     })
   })
 })
+
+// #391: a merchant the all-history rule misses is read again as lanes, each
+// its own subscription under its own key (prd-02 Ruling 16), and the writes
+// accept exactly the keys the read lists. Every key below is worked by hand
+// in shared/__tests__/subscriptions.test.ts (P1) and written as a literal.
+describe('#391 lanes through the data module (prd-02 Ruling 16)', () => {
+  type Target = { scope: RowScope; merchantKey: string }
+  const TOOLS = 'm:merchant_fixture_tools'
+  const LANE_2000 = 'm:merchant_fixture_tools#2026-01-01:2000'
+  const LANE_4620 = 'm:merchant_fixture_tools#2026-01-01:4620'
+  const tools = (day: string, cents: number) =>
+    tx(EVERYDAY, `${day}T00:00:00.000Z`, -cents, {
+      merchant_id: 'merchant_fixture_tools',
+      merchant_name: 'Example Tools',
+      description: 'EXAMPLE TOOLS 0001',
+    })
+
+  // P1: three subscriptions billed on the 1st, January to May, at 2000,
+  // 2000 and 4620 in that row order, and a one-off on 17 March. Midnight
+  // UTC is midday or later in NZ: the NZ date is the UTC date.
+  async function seedTools() {
+    const rows: Row[] = []
+    for (const month of ['01', '02', '03', '04', '05']) {
+      rows.push(
+        tools(`2026-${month}-01`, 2000),
+        tools(`2026-${month}-01`, 2000),
+        tools(`2026-${month}-01`, 4620),
+      )
+    }
+    rows.push(tools('2026-03-17', 1500))
+    await insertTxs(rows)
+  }
+
+  const lanes = async () =>
+    (await readSubscriptions('personal')).subscriptions.map((r) => [
+      r.merchantKey,
+      r.chargeCount,
+      r.amountCents,
+      r.marked,
+      r.status,
+      r.cancelledOn,
+    ])
+
+  beforeEach(async () => {
+    await seedAccounts()
+    await seedTools()
+  })
+
+  it('the read lists one row per lane, each under its own key', async () => {
+    const result = await readSubscriptions('personal')
+
+    expect(await lanes()).toStrictEqual([
+      [TOOLS, 5, 2000, false, 'active', null],
+      [LANE_2000, 5, 2000, false, 'active', null],
+      [LANE_4620, 5, 4620, false, 'active', null],
+    ])
+    // 2000 + 2000 + 4620 = 8620; 12 × 8620 = 103440.
+    expect(result.totals).toStrictEqual({
+      perMonthCents: 8620,
+      perYearCents: 103440,
+      countedCount: 3,
+      uncountedCount: 0,
+    })
+  })
+
+  it('an answer on a lane key is stored under that key and read back on that lane only', async () => {
+    const res = await setAnswer(
+      { scope: 'personal', merchantKey: LANE_4620 },
+      'not_subscription',
+      NOW,
+    )
+
+    expect(res).toStrictEqual({
+      scope: 'personal',
+      merchantKey: LANE_4620,
+      answer: 'not_subscription',
+      cancelledOn: null,
+    })
+    expect(
+      (await marks()).map((m) => [m.scope, m.merchant_key, m.answer]),
+    ).toStrictEqual([['personal', LANE_4620, 'not_subscription']])
+    const result = await readSubscriptions('personal')
+    expect(result.subscriptions.map((r) => r.merchantKey)).toStrictEqual([
+      TOOLS,
+      LANE_2000,
+    ])
+    expect(
+      result.notSubscriptions.map((r) => [r.merchantKey, r.chargeCount]),
+    ).toStrictEqual([[LANE_4620, 5]])
+
+    await setAnswer({ scope: 'personal', merchantKey: LANE_4620 }, null, LATER)
+    expect((await lanes()).map((r) => r[0])).toStrictEqual([
+      TOOLS,
+      LANE_2000,
+      LANE_4620,
+    ])
+  })
+
+  it('cancel and uncancel on a lane key round-trip on that lane only', async () => {
+    const target = { scope: 'personal' as const, merchantKey: LANE_2000 }
+
+    expect(await cancelSubscription(target, '2026-05-01', NOW)).toStrictEqual({
+      scope: 'personal',
+      merchantKey: LANE_2000,
+      answer: null,
+      cancelledOn: '2026-05-01',
+    })
+    expect(await lanes()).toStrictEqual([
+      [TOOLS, 5, 2000, false, 'active', null],
+      [LANE_2000, 5, 2000, false, 'cancelled', '2026-05-01'],
+      [LANE_4620, 5, 4620, false, 'active', null],
+    ])
+
+    await uncancelSubscription(target, LATER)
+    expect(await lanes()).toStrictEqual([
+      [TOOLS, 5, 2000, false, 'active', null],
+      [LANE_2000, 5, 2000, false, 'active', null],
+      [LANE_4620, 5, 4620, false, 'active', null],
+    ])
+  })
+
+  it.each([
+    ['setAnswer', (t: Target) => setAnswer(t, 'subscription', NOW)],
+    [
+      'cancelSubscription',
+      (t: Target) => cancelSubscription(t, undefined, NOW),
+    ],
+    ['uncancelSubscription', (t: Target) => uncancelSubscription(t, NOW)],
+  ])(
+    '%s: a well-formed lane key no lane has, or one from the other scope, is not_found and writes nothing',
+    async (_why, write) => {
+      for (const merchantKey of [
+        'm:merchant_fixture_tools#2026-01-01:9999',
+        'm:merchant_fixture_tools#2026-01-01:2000.3',
+        'm:merchant_fixture_tools#2026-02-01:2000',
+        'm:merchant_fixture_tools#2026-01-01:2000.2',
+      ]) {
+        expect(
+          await write({ scope: 'personal', merchantKey }),
+          merchantKey,
+        ).toBe('not_found')
+      }
+      expect(await write({ scope: 'strawb', merchantKey: LANE_4620 })).toBe(
+        'not_found',
+      )
+      expect(await marks()).toStrictEqual([])
+    },
+  )
+
+  it('a lane-form key on a merchant the all-history rule detects is not_found', async () => {
+    await seedStream()
+
+    expect(
+      await setAnswer(
+        {
+          scope: 'personal',
+          merchantKey: 'm:merchant_fixture_stream#2026-07-01:1599',
+        },
+        'subscription',
+        NOW,
+      ),
+    ).toBe('not_found')
+    expect(await marks()).toStrictEqual([])
+  })
+
+  it('not_subscription on the bare key hides every lane, and a lane key is then not_found', async () => {
+    await setAnswer(
+      { scope: 'personal', merchantKey: TOOLS },
+      'not_subscription',
+      NOW,
+    )
+
+    const result = await readSubscriptions('personal')
+    expect(result.subscriptions).toStrictEqual([])
+    expect(
+      result.notSubscriptions.map((r) => [r.merchantKey, r.chargeCount]),
+    ).toStrictEqual([[TOOLS, 16]])
+    expect(
+      await cancelSubscription(
+        { scope: 'personal', merchantKey: LANE_4620 },
+        undefined,
+        NOW,
+      ),
+    ).toBe('not_found')
+    expect((await marks()).map((m) => m.merchant_key)).toStrictEqual([TOOLS])
+  })
+
+  // A on the 5th at 1000 and B on the 20th at 2500, both from the read's
+  // own dealing (worked by hand in the shared test 'a stale lane’s key is
+  // one only while a mark pins it'): A forms on 5 March and holds the bare
+  // key; B, February to May, forms on 20 April under its lane key.
+  it('a stale lane key is writable while a mark pins it, and not once nothing does', async () => {
+    const APP = 'm:merchant_fixture_app'
+    const B = 'm:merchant_fixture_app#2026-02-20:2500'
+    const app = (day: string, cents: number) =>
+      tx(EVERYDAY, `${day}T00:00:00.000Z`, -cents, {
+        merchant_id: 'merchant_fixture_app',
+        merchant_name: 'Example App',
+        description: 'EXAMPLE APP 0001',
+      })
+    const appLanes = async () =>
+      (await lanes()).filter((r) => String(r[0]).startsWith(APP))
+    await insertTxs([
+      ...['01', '02', '03', '04', '05'].map((m) => app(`2026-${m}-05`, 1000)),
+      ...['02', '03', '04', '05'].map((m) => app(`2026-${m}-20`, 2500)),
+    ])
+
+    // On 20 May both are live and listed.
+    expect(await appLanes()).toStrictEqual([
+      [APP, 5, 1000, false, 'active', null],
+      [B, 4, 2500, false, 'active', null],
+    ])
+    expect(
+      await cancelSubscription(
+        { scope: 'personal', merchantKey: B },
+        '2026-05-21',
+        NOW,
+      ),
+    ).toStrictEqual({
+      scope: 'personal',
+      merchantKey: B,
+      answer: null,
+      cancelledOn: '2026-05-21',
+    })
+
+    // A runs on to 5 October; B's last charge, 20 May, is then 138 days
+    // back: stale, but the cancel pins it, so it stays listed and writable.
+    await insertTxs(
+      ['06', '07', '08', '09', '10'].map((m) => app(`2026-${m}-05`, 1000)),
+    )
+    expect(await appLanes()).toStrictEqual([
+      [APP, 10, 1000, false, 'active', null],
+      [B, 4, 2500, false, 'cancelled', '2026-05-21'],
+    ])
+    expect(
+      await uncancelSubscription({ scope: 'personal', merchantKey: B }, LATER),
+    ).toStrictEqual({
+      scope: 'personal',
+      merchantKey: B,
+      answer: null,
+      cancelledOn: null,
+    })
+
+    // Now nothing pins B: it is not listed, and a write to it is not_found.
+    expect(await appLanes()).toStrictEqual([
+      [APP, 10, 1000, false, 'active', null],
+    ])
+    expect(
+      await cancelSubscription(
+        { scope: 'personal', merchantKey: B },
+        undefined,
+        LATER,
+      ),
+    ).toBe('not_found')
+    // A's own lane-form key was never a key: A holds the bare key.
+    expect(
+      await setAnswer(
+        {
+          scope: 'personal',
+          merchantKey: 'm:merchant_fixture_app#2026-01-05:1000',
+        },
+        'subscription',
+        LATER,
+      ),
+    ).toBe('not_found')
+    expect(
+      (await marks()).map((m) => [m.merchant_key, m.answer, m.cancelled_on]),
+    ).toStrictEqual([[B, null, null]])
+  })
+
+  it('a stored amount that is not whole cents makes a write a fixed-text error, not the value', async () => {
+    await insertTxs([tx(EVERYDAY, MONTHLY[0], -15.5)])
+
+    await expect(
+      setAnswer({ scope: 'personal', merchantKey: TOOLS }, 'subscription', NOW),
+    ).rejects.toThrow(SubscriptionsDataError)
+    await expect(
+      setAnswer({ scope: 'personal', merchantKey: TOOLS }, 'subscription', NOW),
+    ).rejects.toThrow(/^subscription input invalid$/)
+    expect(await marks()).toStrictEqual([])
+  })
+})
