@@ -1,5 +1,5 @@
 import express from 'express'
-import type { Request, Response } from 'express'
+import type { Response } from 'express'
 
 import type {
   AddGoalContributionResponse,
@@ -19,7 +19,7 @@ import {
   type GoalRefusal,
 } from '../db/goals.ts'
 import { errorClass } from '../error-class.ts'
-import { fromThisSite } from '../http.ts'
+import { fromThisSite, writableId } from '../http.ts'
 
 const router = express.Router()
 
@@ -46,14 +46,6 @@ const router = express.Router()
 // carries one of its own constant messages; anything else is a generic
 // text. Only the error's class is logged.
 
-// A copy of `parseId` in ./bills.ts; change both together (#420 tracks
-// folding them). Digits only:
-// Number() would also accept '1e3', '0x10' and ' 7'.
-function parseId(raw: string): number | null {
-  const id = Number(raw)
-  return /^[1-9]\d*$/.test(raw) && Number.isSafeInteger(id) ? id : null
-}
-
 const REFUSALS: Record<GoalRefusal, { status: number; error: string }> = {
   not_found: { status: 404, error: 'Goal not found' },
 }
@@ -69,24 +61,6 @@ function failed(res: Response, what: string, err: unknown): void {
     error:
       err instanceof GoalsDataError ? err.message : 'Internal server error',
   })
-}
-
-/**
- * The checks every write by id starts with: this site, then the id. Answers
- * the id, or null once a refusal has been sent. A copy of `writableId` in
- * ./bills.ts; change both together (#420 tracks folding them).
- */
-function writableId(req: Request, res: Response): number | null {
-  if (!fromThisSite(req)) {
-    res.status(403).json({ error: 'Forbidden' })
-    return null
-  }
-  const id = parseId(req.params.id)
-  if (id === null) {
-    res.status(400).json({ error: 'id must be a positive integer' })
-    return null
-  }
-  return id
 }
 
 // GET /api/v1/goals
