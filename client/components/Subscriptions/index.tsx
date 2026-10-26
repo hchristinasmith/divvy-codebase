@@ -1,8 +1,13 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import ScreenHeader from '../Shell/ScreenHeader.tsx'
+import SegmentedControl from '../Shell/SegmentedControl.tsx'
 import { subscriptionsQuery } from '../../apis/subscriptions.ts'
 import { useScope } from '../../context/ScopeContext.tsx'
-import type { SubscriptionsResponse } from '../../../shared/contracts.ts'
+import type {
+  SubscriptionStatus,
+  SubscriptionsResponse,
+} from '../../../shared/contracts.ts'
 import { nzCalendarDate } from '../../../shared/nz-dates.ts'
 import AdvisorBanner from './AdvisorBanner.tsx'
 import NotSubscriptionsCard from './NotSubscriptionsCard.tsx'
@@ -23,15 +28,33 @@ import { useSubscriptionActions } from './useSubscriptionActions.ts'
 // that scope's list arrives, never the previous scope's. A failed refetch
 // keeps the last list on screen with a banner saying so. The loading, error
 // and refetch-error states are the Overview's, re-implemented here.
+//
+// The Active / Cancelled choice (issue 390) is the screen's, not the read's,
+// so a switch never refetches and never touches the totals; it survives a
+// scope switch.
+const STATUS_OPTIONS: readonly { value: SubscriptionStatus; label: string }[] = [
+  { value: 'active', label: 'Active' },
+  { value: 'cancelled', label: 'Cancelled' },
+]
+
 export default function Subscriptions() {
   const { scope } = useScope()
   const subscriptions = useQuery(subscriptionsQuery(scope))
+  const [status, setStatus] = useState<SubscriptionStatus>('active')
 
   return (
     <>
       <ScreenHeader
         title="Subscriptions"
         subtitle="Recurring charges, found automatically"
+        controls={
+          <SegmentedControl
+            label="Status"
+            options={STATUS_OPTIONS}
+            value={status}
+            onChange={setStatus}
+          />
+        }
       />
       {subscriptions.isPending ? (
         <p role="status" className={`${CARD} ${MUTED} p-6`}>
@@ -66,14 +89,24 @@ export default function Subscriptions() {
             </div>
           )}
           {/* Keyed by scope, so a switch drops a failed write's message. */}
-          <SubscriptionsBody key={scope} data={subscriptions.data} />
+          <SubscriptionsBody
+            key={scope}
+            data={subscriptions.data}
+            status={status}
+          />
         </>
       )}
     </>
   )
 }
 
-function SubscriptionsBody({ data }: { data: SubscriptionsResponse }) {
+function SubscriptionsBody({
+  data,
+  status,
+}: {
+  data: SubscriptionsResponse
+  status: SubscriptionStatus
+}) {
   const actions = useSubscriptionActions()
   const today = nzCalendarDate(new Date())
   return (
@@ -84,7 +117,12 @@ function SubscriptionsBody({ data }: { data: SubscriptionsResponse }) {
           {actions.error}
         </p>
       )}
-      <SubscriptionsList rows={data.subscriptions} actions={actions} today={today} />
+      <SubscriptionsList
+        rows={data.subscriptions}
+        status={status}
+        actions={actions}
+        today={today}
+      />
       <AdvisorBanner />
       {data.questions.length > 0 && (
         <QuestionsCard questions={data.questions} actions={actions} today={today} />

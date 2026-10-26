@@ -92,6 +92,14 @@ function scopeToggle(label: string): HTMLElement {
   )
 }
 
+/** The header's Active / Cancelled switch (issue 390). */
+function statusToggle(label: string): HTMLElement {
+  return within(screen.getByRole('group', { name: 'Status' })).getByRole(
+    'button',
+    { name: label },
+  )
+}
+
 async function loaded(): Promise<void> {
   await screen.findByRole('region', { name: 'Subscriptions' })
 }
@@ -306,6 +314,7 @@ describe('a cancelled row', () => {
   it('is dimmed and struck through, says when, and still shows its charge', async () => {
     setup(cancelled)
     await loaded()
+    fireEvent.click(statusToggle('Cancelled'))
 
     const stream = item('personal', STREAM)
     expect(stream.classList.contains('opacity-55')).toBe(true)
@@ -343,6 +352,7 @@ describe('a cancelled row', () => {
       }),
     )
     await loaded()
+    fireEvent.click(statusToggle('Cancelled'))
 
     const stream = item('personal', STREAM)
     expect(meta(stream)).toBe(
@@ -429,9 +439,15 @@ describe('cancelling', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Cancel Example Stream' }))
 
-    await screen.findByRole('button', { name: 'Cancelled Example Stream, undo' })
+    // Now cancelled, it leaves the Active list and shows under Cancelled.
+    await waitFor(() => expect(listNames()).toEqual([]))
     expect(fx.callsTo('GET', LIST)).toHaveLength(2)
+    fireEvent.click(statusToggle('Cancelled'))
+    expect(
+      screen.getByRole('button', { name: 'Cancelled Example Stream, undo' }),
+    ).not.toBeNull()
     expect(meta(item('personal', STREAM))).toContain('Cancelled 25 Oct')
+    expect(fx.callsTo('GET', LIST)).toHaveLength(2)
   })
 })
 
@@ -444,12 +460,18 @@ describe('undoing a cancel', () => {
     )
     await loaded()
     fx.handlers.list = serve(response())
+    fireEvent.click(statusToggle('Cancelled'))
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Cancelled Example Stream, undo' }),
     )
 
-    await screen.findByRole('button', { name: 'Cancel Example Stream' })
+    // Active again, it leaves the Cancelled list and shows under Active.
+    await waitFor(() => expect(listNames()).toEqual([]))
+    fireEvent.click(statusToggle('Active'))
+    expect(
+      screen.getByRole('button', { name: 'Cancel Example Stream' }),
+    ).not.toBeNull()
     const [body] = fx.bodiesTo('POST', UNCANCEL)
     expect(Object.keys(body).sort()).toEqual(WRITE_KEYS)
     expect(body).toEqual({ scope: 'personal', merchantKey: STREAM })
@@ -671,6 +693,7 @@ describe('in the All view', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Cancel Example Stream' }))
     await settled()
+    fireEvent.click(statusToggle('Cancelled'))
     fireEvent.click(
       screen.getByRole('button', { name: 'Cancelled Example Host, undo' }),
     )
@@ -863,7 +886,7 @@ describe('the screen states', () => {
     await loaded()
 
     expect(
-      screen.getByText('No regular charges found for this scope yet.'),
+      screen.getByText('No active subscriptions for this scope yet.'),
     ).not.toBeNull()
     expect(screen.getByTestId('total-month').textContent).toBe('$0.00')
     expect(screen.getByTestId('total-year').textContent).toBe('$0.00')
@@ -885,6 +908,7 @@ describe("a date from another year than today's shows its year", () => {
       }),
     )
     await loaded()
+    fireEvent.click(statusToggle('Cancelled'))
 
     const stream = item('personal', STREAM)
     expect(meta(stream)).toContain('Last charged 13 Oct 2025')
@@ -975,5 +999,236 @@ describe('the advisor banner', () => {
       'noreferrer',
     ])
     expect(link.getAttribute('referrerpolicy')).toBe('no-referrer')
+  })
+})
+
+describe('the Active / Cancelled toggle', () => {
+  // Active and cancelled interleaved on purpose, across both scopes, so a
+  // list that grouped by status or by scope would change the order.
+  const mixed = response({
+    subscriptions: [
+      row({ merchantKey: 'm:merchant_invented_north', name: 'North Invented' }),
+      row({
+        merchantKey: 'm:merchant_invented_east',
+        scope: 'strawb',
+        name: 'East Invented',
+        status: 'cancelled',
+        cancelledOn: '2026-10-05',
+      }),
+      row({
+        merchantKey: 'm:merchant_invented_south',
+        scope: 'strawb',
+        name: 'South Invented',
+      }),
+      row({
+        merchantKey: 'm:merchant_invented_west',
+        name: 'West Invented',
+        status: 'cancelled',
+        cancelledOn: '2026-09-20',
+      }),
+    ],
+    // Deliberately not a sum of the rows (each is 1599 a month) and the year
+    // is not 12 x the month.
+    totals: {
+      perMonthCents: 2468,
+      perYearCents: 30001,
+      countedCount: 2,
+      uncountedCount: 1,
+    },
+  })
+
+  const struck = (scope: string, merchantKey: string): boolean =>
+    within(item(scope, merchantKey))
+      .getByTestId('subscription-name')
+      .classList.contains('line-through')
+
+  function pressedStatus(): string[] {
+    return within(screen.getByRole('group', { name: 'Status' }))
+      .getAllByRole('button')
+      .filter((b) => b.getAttribute('aria-pressed') === 'true')
+      .map((b) => b.textContent ?? '')
+  }
+
+  it('lists only the active rows under Active and only the cancelled ones under Cancelled, each in route order, struck through only when cancelled', async () => {
+    setup(mixed)
+    await loaded()
+
+    expect(listNames()).toEqual(['North Invented', 'South Invented'])
+    expect(struck('personal', 'm:merchant_invented_north')).toBe(false)
+    expect(struck('strawb', 'm:merchant_invented_south')).toBe(false)
+
+    fireEvent.click(statusToggle('Cancelled'))
+
+    expect(listNames()).toEqual(['East Invented', 'West Invented'])
+    expect(struck('strawb', 'm:merchant_invented_east')).toBe(true)
+    expect(struck('personal', 'm:merchant_invented_west')).toBe(true)
+  })
+
+  it('offers Active and Cancelled beside the scope toggle, with Active pressed by default', async () => {
+    setup(mixed)
+    await loaded()
+
+    const status = screen.getByRole('group', { name: 'Status' })
+    expect(
+      within(status)
+        .getAllByRole('button')
+        .map((b) => [b.textContent, b.getAttribute('aria-pressed')]),
+    ).toEqual([
+      ['Active', 'true'],
+      ['Cancelled', 'false'],
+    ])
+    // Beside the scope control: the next element in the header's right group.
+    expect(status.nextElementSibling).toBe(
+      screen.getByRole('group', { name: 'Scope' }),
+    )
+  })
+
+  it('shows no active row under Cancelled', async () => {
+    setup(mixed)
+    await loaded()
+
+    fireEvent.click(statusToggle('Cancelled'))
+
+    expect(pressedStatus()).toEqual(['Cancelled'])
+    const list = screen.getByRole('region', { name: 'Subscriptions' })
+    expect(
+      list.querySelector('[data-merchant="personal:m:merchant_invented_north"]'),
+    ).toBeNull()
+    expect(
+      list.querySelector('[data-merchant="strawb:m:merchant_invented_south"]'),
+    ).toBeNull()
+  })
+
+  it("keeps the route's totals whichever status is shown", async () => {
+    setup(mixed)
+    await loaded()
+
+    const totals = (): string[] => [
+      screen.getByTestId('total-month').textContent ?? '',
+      screen.getByTestId('total-year').textContent ?? '',
+      screen.getByText(/left out of these totals/).textContent ?? '',
+    ]
+    const expected = [
+      '$24.68',
+      '$300.01',
+      '1 subscription left out of these totals: no regular pattern yet',
+    ]
+    expect(totals()).toEqual(expected)
+
+    fireEvent.click(statusToggle('Cancelled'))
+    expect(listNames()).toEqual(['East Invented', 'West Invented'])
+    expect(totals()).toEqual(expected)
+
+    fireEvent.click(statusToggle('Active'))
+    expect(listNames()).toEqual(['North Invented', 'South Invented'])
+    expect(totals()).toEqual(expected)
+  })
+
+  it('switching status reads nothing again', async () => {
+    const { fx } = setup(mixed)
+    await loaded()
+    expect(fx.callsTo('GET', LIST)).toHaveLength(1)
+
+    fireEvent.click(statusToggle('Cancelled'))
+    await waitFor(() =>
+      expect(listNames()).toEqual(['East Invented', 'West Invented']),
+    )
+    fireEvent.click(statusToggle('Active'))
+    await waitFor(() =>
+      expect(listNames()).toEqual(['North Invented', 'South Invented']),
+    )
+
+    expect(fx.callsTo('GET', LIST)).toHaveLength(1)
+  })
+
+  it('is there while the list loads, and in the error state', async () => {
+    setup(() => undefined)
+    await screen.findByRole('status')
+    expect(pressedStatus()).toEqual(['Active'])
+    cleanup()
+
+    setup(() => ({ status: 500, body: { error: 'Could not read subscriptions' } }))
+    await screen.findByRole('alert')
+    expect(pressedStatus()).toEqual(['Active'])
+    fireEvent.click(statusToggle('Cancelled'))
+    expect(pressedStatus()).toEqual(['Cancelled'])
+  })
+
+  it('keeps Cancelled through a scope switch', async () => {
+    setup(
+      (call) =>
+        call.url.searchParams.get('scope') === 'strawb'
+          ? {
+              body: response({
+                subscriptions: [
+                  row({ scope: 'strawb', name: 'Strawb Active Invented' }),
+                  row({
+                    merchantKey: 'm:merchant_invented_old_tool',
+                    scope: 'strawb',
+                    name: 'Strawb Cancelled Invented',
+                    status: 'cancelled',
+                    cancelledOn: '2026-10-05',
+                  }),
+                ],
+              }),
+            }
+          : { body: mixed },
+      'all',
+    )
+    await loaded()
+    fireEvent.click(statusToggle('Cancelled'))
+    expect(listNames()).toEqual(['East Invented', 'West Invented'])
+
+    fireEvent.click(scopeToggle('Strawb'))
+
+    await waitFor(() =>
+      expect(listNames()).toEqual(['Strawb Cancelled Invented']),
+    )
+    expect(pressedStatus()).toEqual(['Cancelled'])
+  })
+
+  it('says there are no active subscriptions when every row is cancelled', async () => {
+    setup(
+      response({
+        subscriptions: [row({ status: 'cancelled', cancelledOn: '2026-10-03' })],
+      }),
+    )
+    await loaded()
+
+    expect(listNames()).toEqual([])
+    expect(
+      screen.getByText('No active subscriptions for this scope yet.'),
+    ).not.toBeNull()
+    expect(
+      screen.queryByText('No cancelled subscriptions for this scope.'),
+    ).toBeNull()
+  })
+
+  it('says there are no cancelled subscriptions when every row is active', async () => {
+    setup(response())
+    await loaded()
+
+    fireEvent.click(statusToggle('Cancelled'))
+
+    expect(listNames()).toEqual([])
+    expect(
+      screen.getByText('No cancelled subscriptions for this scope.'),
+    ).not.toBeNull()
+    expect(
+      screen.queryByText('No active subscriptions for this scope yet.'),
+    ).toBeNull()
+  })
+
+  it("the totals are the route's figures, with cancelled rows in the response", async () => {
+    setup(mixed)
+    await loaded()
+
+    expect(screen.getByTestId('total-month').textContent).toBe('$24.68')
+    expect(screen.getByTestId('total-year').textContent).toBe('$300.01')
+    expect(
+      screen.getByText(
+        '1 subscription left out of these totals: no regular pattern yet',
+      ),
+    ).not.toBeNull()
   })
 })
