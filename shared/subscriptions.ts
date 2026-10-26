@@ -91,8 +91,9 @@
 //   same name as it; then lane order and lane order of charges. Amount only
 //   breaks ties: there is no amount tolerance and no percentage.
 // - A lane passes over a charge when a later one, still in its band, lands
-//   nearer the expected day and is no further in cents: it waits, so it does
-//   not take a sibling's charge that happens to come first.
+//   nearer the expected day and is no further in cents than the nearest of
+//   that date's charges: it waits, so it does not take a sibling's charge
+//   that happens to come first.
 // - Weekly is never a lane cadence: weekly stays on the all-history rule, so
 //   frequent visits never become a weekly subscription by skipping (#393).
 //
@@ -106,10 +107,11 @@
 // and keeps it, even once it stops: no rule passes it to a sibling, with
 // one exception, in the read where it first forms. When two subscriptions
 // of one merchant bill within `LANE_MAX_DEVIATION_DAYS` of each other, a
-// lane can form by taking a charge 1 to 3 days before its expected day as
-// its `MIN_CHARGES`-th; when the sibling's charge, nearer that day,
-// arrives, the wait for a nearer charge re-deals it, and the sibling forms
-// first and takes the bare key, with any mark set on it in that read.
+// lane can form by taking a charge 1 to `LANE_MAX_DEVIATION_DAYS` days
+// before its expected day as its `MIN_CHARGES`-th; when the sibling's
+// charge, nearer that day, arrives, the wait for a nearer charge re-deals
+// it, and the sibling forms first and takes the bare key, with any mark set
+// on it in that read.
 // After that read the bare key never moves. Measured in review on
 // 2026-10-26 with invented merchants: 12 of 8000 whose billing days were
 // within 3 days of each other moved it, 0 of 4000 with random billing
@@ -158,7 +160,8 @@
 // merchant: the merchant is listed once, under `notSubscriptions` with its
 // bare key and all its charges, as before Ruling 16, and clearing that
 // answer brings the lanes back. The cancel-date reading above belongs to the
-// all-history rule; a lane is never re-read up to its cancel date.
+// all-history rule, which runs first; a lane is never re-read up to its
+// cancel date.
 //
 // What the lanes can get wrong:
 // - Irregular visitors. A merchant visited about monthly `MIN_CHARGES` or
@@ -195,13 +198,18 @@
 // - Two lanes billed within a few days of each other at near-equal prices
 //   can swap charges, and so their rows and marks; a moved billing day
 //   beside a sibling can do the same.
+// - A cancel date on the bare key can make the all-history rule detect the
+//   merchant (the charges up to that date alone fit one band). Lanes are
+//   then not read: the merchant is one row under its bare key with all its
+//   charges, its other lanes' rows go, and a mark on a lane key is neither
+//   listed nor writable.
 // - The wait for a nearer charge looks ahead within a band, so a new charge
 //   can still change how the latest charges were dealt, and the overlap
 //   rules change as lanes form: an unmarked young or stopped row can drop
 //   off, come back, or take a new key while a sibling forms. A pinned row
 //   never drops off, except on a merchant that is never split (Keys,
-//   above). A charge back-dated into history (a late sync) can
-//   change how every later charge was dealt.
+//   above) or one a cancel date makes detected (above). A charge back-dated
+//   into history (a late sync) can change how every later charge was dealt.
 // - A merchant with more than `LANE_MAX_CONCURRENT` subscriptions at once is
 //   never split.
 //
