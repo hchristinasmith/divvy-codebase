@@ -1,5 +1,5 @@
 import express from 'express'
-import type { Request, Response } from 'express'
+import type { Response } from 'express'
 
 import type { BudgetResponse, BudgetsResponse } from '../../shared/contracts.ts'
 import {
@@ -14,7 +14,7 @@ import {
 } from '../db/budgets.ts'
 import { OverviewDataError } from '../db/overview.ts'
 import { errorClass } from '../error-class.ts'
-import { fromThisSite, parseScope } from '../http.ts'
+import { fromThisSite, parseScope, writableId } from '../http.ts'
 
 const router = express.Router()
 
@@ -41,14 +41,6 @@ const router = express.Router()
 // or an `OverviewDataError` carries one of its own constant messages;
 // anything else is a generic text. Only the error's class is logged.
 
-// A copy of `parseId` in ./bills.ts and ./goals.ts; change all together
-// (#420 tracks folding them). Digits only: Number() would also
-// accept '1e3', '0x10' and ' 7'.
-function parseId(raw: string): number | null {
-  const id = Number(raw)
-  return /^[1-9]\d*$/.test(raw) && Number.isSafeInteger(id) ? id : null
-}
-
 const REFUSALS: Record<BudgetRefusal, { status: number; error: string }> = {
   not_found: { status: 404, error: 'Budget not found' },
   duplicate: {
@@ -70,25 +62,6 @@ function failed(res: Response, what: string, err: unknown): void {
         ? err.message
         : 'Internal server error',
   })
-}
-
-/**
- * The checks every write by id starts with: this site, then the id. Answers
- * the id, or null once a refusal has been sent. A copy of `writableId` in
- * ./bills.ts and ./goals.ts; change all together (#420 tracks folding
- * them).
- */
-function writableId(req: Request, res: Response): number | null {
-  if (!fromThisSite(req)) {
-    res.status(403).json({ error: 'Forbidden' })
-    return null
-  }
-  const id = parseId(req.params.id)
-  if (id === null) {
-    res.status(400).json({ error: 'id must be a positive integer' })
-    return null
-  }
-  return id
 }
 
 // GET /api/v1/budgets?scope=
