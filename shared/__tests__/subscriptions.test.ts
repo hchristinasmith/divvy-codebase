@@ -2531,6 +2531,129 @@ describe('#391 lanes (prd-02 Ruling 16)', () => {
         Z: { keys: ['m:merchant_fixture_tools#2026-01-01:4620'], reads: 4 },
       })
     })
+
+    it('a known, accepted limit: the bare key can move once, in the read a lane forms on a charge days early (decision 4e6a7dcd)', () => {
+      const app = at('merchant_fixture_app', 'Example App')
+      // A on the 7th at 1000, B on the 6th at 1300, a one-off of 600 on
+      // 5 March.
+      const all = [
+        app('2026-01-06', 1300),
+        app('2026-01-07', 1000),
+        app('2026-02-06', 1300),
+        app('2026-02-07', 1000),
+        app('2026-03-05', 600),
+        app('2026-03-06', 1300),
+        app('2026-03-07', 1000),
+        app('2026-04-06', 1300),
+        app('2026-04-07', 1000),
+      ]
+      const upTo = (date: string) => all.filter((t) => t.date <= date)
+      const BARE = 'm:merchant_fixture_app'
+      const LANE_A = 'm:merchant_fixture_app#2026-01-07:1000'
+      const same = {
+        scope: 'personal',
+        name: 'Example App',
+        cadence: 'monthly',
+        marked: false,
+      } as const
+
+      // Read on 5 March. A (last 7 Feb) expects 7 March, 2 days off; B
+      // (last 6 Feb) expects 6 March, 1 day off: both within the 2-day
+      // slack, both two charges long. 600 is 400 from A's 1000 and 700
+      // from B's 1300, so A takes it and forms first: the bare key, at the
+      // one-off's 600. Its span, 7 Jan to 5 Mar, holds one stray (6 Feb):
+      // 2 × 1 ≤ 3, clear. 12 × 600 = 7200.
+      expect(run(upTo('2026-03-05')).subscriptions).toStrictEqual([
+        {
+          ...same,
+          merchantKey: BARE,
+          chargeCount: 3,
+          lastChargedOn: '2026-03-05',
+          amountCents: 600,
+          detected: true,
+          status: 'active',
+          cancelledOn: null,
+          chargedAgainOn: null,
+          perMonthCents: 600,
+          perYearCents: 7200,
+        },
+      ])
+
+      // Hannah cancels that row on the 5 March read. Read on 6 March: 6
+      // March is 1 day from A's expected day (5 March was 2) and 300 cents
+      // from its 1000 (5 March was 400), so A waits and gives 5 March
+      // back; B's wait does the same (0 days, 0 cents). B takes 6 March
+      // and forms first: the bare key, and her cancel with it, now reads
+      // as B charged again on 6 March. B's span holds three strays (7 Jan,
+      // 7 Feb, 5 Mar), 2 × 3 > 3, so only the cancel pins it: not detected.
+      const cancel = [mark({ merchantKey: BARE, cancelledOn: '2026-03-05' })]
+      const bOn6Mar = {
+        ...same,
+        merchantKey: BARE,
+        chargeCount: 3,
+        lastChargedOn: '2026-03-06',
+        amountCents: 1300,
+        detected: false,
+        status: 'active',
+        cancelledOn: '2026-03-05',
+        chargedAgainOn: '2026-03-06',
+        perMonthCents: 1300,
+        perYearCents: 15600,
+      } as const
+      expect(run(upTo('2026-03-06'), cancel).subscriptions).toStrictEqual([
+        bOn6Mar,
+      ])
+      // Unmarked, the 6 March read lists nothing.
+      expect(run(upTo('2026-03-06')).subscriptions).toStrictEqual([])
+
+      // Read on 7 April. A formed on 7 March, after B, and both overlap, so
+      // each needs 4 charges to be clear: B has them from 6 April, A from 7
+      // April, under its lane key. 5 March is the one stray in each span.
+      // The cancel stays on B; A has none.
+      const bOn7Apr = {
+        ...bOn6Mar,
+        chargeCount: 4,
+        lastChargedOn: '2026-04-06',
+        detected: true,
+      } as const
+      const aOn7Apr = {
+        ...same,
+        merchantKey: LANE_A,
+        chargeCount: 4,
+        lastChargedOn: '2026-04-07',
+        amountCents: 1000,
+        detected: true,
+        status: 'active',
+        cancelledOn: null,
+        chargedAgainOn: null,
+        perMonthCents: 1000,
+        perYearCents: 12000,
+      } as const
+      const on7Apr = run(upTo('2026-04-07'), cancel)
+      expect(on7Apr.subscriptions).toStrictEqual([bOn7Apr, aOn7Apr])
+      expect(on7Apr.subscriptions.map((r) => keys(r))).toStrictEqual([
+        keys(ROW_KEYS),
+        keys(ROW_KEYS),
+      ])
+      // 1300 + 1000 = 2300; 12 × 2300 = 27600.
+      expect(on7Apr.totals).toStrictEqual({
+        perMonthCents: 2300,
+        perYearCents: 27600,
+        countedCount: 2,
+        uncountedCount: 0,
+      })
+
+      // Read by read, unmarked: the bare key is A's on the 5 March read
+      // only, B's from then on; A comes back under its lane key and keeps it.
+      expect(
+        keysPerLabel(readsOverTime(all), (r) =>
+          r.amountCents === 1300 ? 'B' : 'A',
+        ),
+      ).toStrictEqual({
+        A: { keys: [BARE, LANE_A], reads: 2 },
+        B: { keys: [BARE], reads: 2 },
+      })
+    })
   })
 
   it('a cancelled bare-key lane that stops stays listed as cancelled; its sibling keeps its key', () => {

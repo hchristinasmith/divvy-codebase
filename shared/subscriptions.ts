@@ -103,12 +103,23 @@
 // lane that has just formed.
 //
 // Keys. The first lane to form holds the bare key, `m:<id>` or `d:<desc>`,
-// and keeps it, even once it stops: no rule passes it to a sibling. Every
-// later lane's key is built from what it is, `<bare key>#<first charge
-// date>:<first charge cents>`, e.g. `m:merchant_a#2026-01-05:1500`; when
-// two later lanes would build the same key, the later formed gets `.2`, the
-// next `.3`. A position is never used, because positions shift and would
-// carry a mark to another lane. Lane keys are a stored contract, held in
+// and keeps it, even once it stops: no rule passes it to a sibling, with
+// one exception, in the read where it first forms. When two subscriptions
+// of one merchant bill within `LANE_MAX_DEVIATION_DAYS` of each other, a
+// lane can form by taking a charge 1 to 3 days before its expected day as
+// its `MIN_CHARGES`-th; when the sibling's charge, nearer that day,
+// arrives, the wait for a nearer charge re-deals it, and the sibling forms
+// first and takes the bare key, with any mark set on it in that read.
+// After that read the bare key never moves. Measured in review on
+// 2026-10-26 with invented merchants: 12 of 8000 whose billing days were
+// within 3 days of each other moved it, 0 of 4000 with random billing
+// days. Hannah accepted this window (Baseline decision 4e6a7dcd, option
+// A); a test pins the example. Every later lane's key is built from what
+// it is, `<bare key>#<first charge date>:<first charge cents>`, e.g.
+// `m:merchant_a#2026-01-05:1500`; when two later lanes would build the
+// same key, the later formed gets `.2`, the next `.3`. A position is never
+// used, because positions shift and would carry a mark to another lane.
+// Lane keys are a stored contract, held in
 // `subscription_marks` beside the bare keys with no migration: the
 // column's CHECK and `isMerchantKey` accept them, and `#` never occurs in a
 // `d:` key. A merchant whose `m:` id holds `#`, whose bare key leaves
