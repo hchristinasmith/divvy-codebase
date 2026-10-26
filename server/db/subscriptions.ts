@@ -9,8 +9,8 @@ import type {
   TransactionStatus,
 } from '../../shared/contracts.ts'
 import {
+  chargeKeys,
   isIsoDate,
-  merchantKeyOf,
   subscriptions,
   type SubscriptionMark,
   type SubscriptionTransaction,
@@ -42,9 +42,11 @@ import { listAccounts } from './synced.ts'
 //
 // Writes go to `subscription_marks` only, one row per scope and merchant
 // key. Cancel and uncancel record a date; nothing is sent to the merchant
-// or the bank. Every write first checks that the merchant has a charge in
-// that scope now, so a junk key or a key from the other scope writes
-// nothing and answers 'not_found'.
+// or the bank. Every write first checks that the key is one the shared
+// module's `chargeKeys` gives for that scope now (a charge's bare key, or a
+// lane key the read lists, prd-02 Ruling 16), so a junk key, a key from the
+// other scope or a lane that is not listed writes nothing and answers
+// 'not_found'.
 //
 // Errors the client may see are `SubscriptionsDataError`s with a fixed
 // text. The shared module's RangeError and TypeError, whose messages name
@@ -219,10 +221,25 @@ export async function readSubscriptions(
   }
 }
 
-/** The merchant has a charge in that scope now. */
+/**
+ * The key is one a write may name in that scope now: a charge's bare key,
+ * or a lane key the read lists (prd-02 Ruling 16). Which keys those are is
+ * the shared module's answer (`chargeKeys`); nothing is detected here. Its
+ * RangeError and TypeError are turned into the fixed text.
+ */
 async function knownMerchant(target: MerchantTarget, db: Db): Promise<boolean> {
-  const charges = await loadCharges(target.scope, db)
-  return charges.some((tx) => merchantKeyOf(tx) === target.merchantKey)
+  const transactions = await loadCharges(target.scope, db)
+  const marks = await loadMarks(db)
+  try {
+    return chargeKeys({ scope: target.scope, transactions, marks }).includes(
+      target.merchantKey,
+    )
+  } catch (err) {
+    if (err instanceof RangeError || err instanceof TypeError) {
+      throw new SubscriptionsDataError('subscription input invalid')
+    }
+    throw err
+  }
 }
 
 async function stored(
