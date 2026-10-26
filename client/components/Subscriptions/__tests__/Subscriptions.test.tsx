@@ -915,13 +915,15 @@ describe("a date from another year than today's shows its year", () => {
     fireEvent.click(statusToggle('Cancelled'))
 
     const stream = item('personal', STREAM)
-    expect(meta(stream)).toContain('Last charged 13 Oct 2025')
-    expect(meta(stream)).toContain('Cancelled 2 Nov 2025')
+    expect(meta(stream)).toContain('Last charged 13 Oct\u00a02025')
+    expect(meta(stream)).toContain('Cancelled 2 Nov\u00a02025')
+    // getByText's default normalizer folds U+00A0 into a space, so the
+    // exact separator is pinned on textContent.
     expect(
       within(stream).getByText(
         'Charged again on 1 Dec 2025 after you cancelled',
-      ),
-    ).not.toBeNull()
+      ).textContent,
+    ).toBe('Charged again on 1 Dec\u00a02025 after you cancelled')
   })
 
   it('shows the year on a merchant in each card, and not on this year', async () => {
@@ -951,7 +953,7 @@ describe("a date from another year than today's shows its year", () => {
       name: 'Is this a subscription?',
     })
     expect(questions.textContent).toContain(
-      'Last charged 4 Sep 2025 · 2 charges',
+      'Last charged 4 Sep\u00a02025 · 2 charges',
     )
     const notSubscriptions = screen.getByRole('region', {
       name: 'Not subscriptions',
@@ -960,7 +962,7 @@ describe("a date from another year than today's shows its year", () => {
       'Last charged 3 Oct · 2 charges',
     )
     expect(notSubscriptions.textContent).toContain(
-      'Last charged 14 Feb 2025 · 2 charges',
+      'Last charged 14 Feb\u00a02025 · 2 charges',
     )
   })
 
@@ -973,7 +975,7 @@ describe("a date from another year than today's shows its year", () => {
     await loaded()
 
     expect(meta(item('personal', STREAM))).toContain(
-      'Last charged 31 Dec 2026',
+      'Last charged 31 Dec\u00a02026',
     )
   })
 })

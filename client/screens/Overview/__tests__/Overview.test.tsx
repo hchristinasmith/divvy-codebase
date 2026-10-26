@@ -389,7 +389,7 @@ describe("a date from another year than today's shows its year", () => {
     })
     await hero()
 
-    expect(paydayLine()).toContain('until payday on 1 Jan 2027 · after tax')
+    expect(paydayLine()).toContain('until payday on 1 Jan\u00a02027 · after tax')
   })
 
   it('leaves the year off a payday in this year', async () => {
@@ -424,14 +424,14 @@ describe("a date from another year than today's shows its year", () => {
     await hero()
 
     expect(alertText('bill_overdue:5:2025-12-18')).toContain(
-      'Old Invented ($18.00) is overdue, due 18 Dec 2025.',
+      'Old Invented ($18.00) is overdue, due 18 Dec\u00a02025.',
     )
     expect(alertText(BILL_SOON.id)).toContain(
       'Rent Invented ($1,200.00) is due 30 Oct.',
     )
-    expect(alertText(BILL_SOON.id)).not.toContain('30 Oct 2026')
+    expect(alertText(BILL_SOON.id)).not.toContain('30 Oct\u00a02026')
     expect(alertText('bill_due_soon:6:2027-01-04')).toContain(
-      'New Invented ($1,200.00) is due 4 Jan 2027.',
+      'New Invented ($1,200.00) is due 4 Jan\u00a02027.',
     )
   })
 
@@ -447,9 +447,15 @@ describe("a date from another year than today's shows its year", () => {
     })
     await hero()
 
-    expect(within(activityRow('201')).getByText('30 Dec 2025')).not.toBeNull()
+    // getByText's default normalizer folds U+00A0 into a space, so the
+    // exact separator is pinned on textContent.
+    expect(
+      within(activityRow('201')).getByText('30 Dec 2025').textContent,
+    ).toBe('30 Dec\u00a02025')
     expect(within(activityRow('202')).getByText('20 Oct')).not.toBeNull()
-    expect(within(activityRow('203')).getByText('2 Jan 2027')).not.toBeNull()
+    expect(
+      within(activityRow('203')).getByText('2 Jan 2027').textContent,
+    ).toBe('2 Jan\u00a02027')
   })
 
   it("takes this year from the server's today, not the browser's clock or the last payday", async () => {
@@ -474,11 +480,11 @@ describe("a date from another year than today's shows its year", () => {
 
     expect(paydayLine()).toContain('until payday on 5 Jan · after tax')
     expect(alertText(BILL_SOON.id)).toContain(
-      'Rent Invented ($1,200.00) is due 30 Oct 2026.',
+      'Rent Invented ($1,200.00) is due 30 Oct\u00a02026.',
     )
     expect(
-      within(activityRow(CAFE_ROW.id)).getByText('21 Oct 2026'),
-    ).not.toBeNull()
+      within(activityRow(CAFE_ROW.id)).getByText('21 Oct 2026').textContent,
+    ).toBe('21 Oct\u00a02026')
   })
 })
 
