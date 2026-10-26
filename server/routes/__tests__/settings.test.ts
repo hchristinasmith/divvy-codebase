@@ -710,7 +710,7 @@ describe('a failing database', () => {
       },
     },
   ])(
-    '$route answers 500 with a fixed error and logs only the stack',
+    '$route answers 500 with a fixed error and logs only the error class',
     async ({ table, label, send }) => {
       const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
       await connection.schema.renameTable(table, `${table}_aside`)
@@ -719,14 +719,10 @@ describe('a failing database', () => {
 
         expect(res.status).toBe(500)
         expect(res.body).toStrictEqual({ error: 'Internal server error' })
-        // The stack as a string, as server.ts logs a 500: never the error
-        // object, whose own fields (errno, code) Node would print beside it.
+        // The error's class only: never the error object, its message or its
+        // stack, which carry knex's SQL and the values being written.
         expect(logged).toHaveBeenCalledTimes(1)
-        const [first, second, ...rest] = logged.mock.calls[0]
-        expect(first).toBe(label)
-        expect(typeof second).toBe('string')
-        expect(second).toMatch(/^Error: /)
-        expect(rest).toEqual([])
+        expect(logged.mock.calls[0]).toEqual([label, 'Error'])
       } finally {
         await connection.schema.renameTable(`${table}_aside`, table)
       }
