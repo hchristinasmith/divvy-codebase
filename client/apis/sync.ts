@@ -21,10 +21,9 @@ const UNREADABLE = 'The server sent a reply Divvy could not read'
 
 // A copy of `call` in ./overview.ts and ./subscriptions.ts (the same
 // messages as `send` in ./settings.ts): the server's text when it sent one,
-// its status when it did not, or that it could not be reached. Unlike those
-// copies, a 200 that is not JSON (a proxy's HTML page) rejects with a fixed
-// message, so the parser's SyntaxError, which quotes the body, never
-// reaches the screen.
+// its status when it did not, or that it could not be reached. A 200 that
+// is not JSON (a proxy's HTML page) rejects with a fixed message, so the
+// parser's SyntaxError, which quotes the body, never reaches the screen.
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response
   try {
