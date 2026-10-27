@@ -14,7 +14,7 @@
 // trailing-month spend, in tenths of a month.
 //
 // - assets: `runwayAssetsCents`, balances of in-scope `current` and
-//   `savings` accounts (see the decision note on it).
+//   `savings` accounts less what is owed on in-scope credit cards.
 // - spend: `trailingSpendCents`, outflow over the last `TRAILING_DAYS` NZ
 //   days, today included, settled and pending, on in-scope accounts of any
 //   role (a credit-card purchase is spend). Money in never nets against it.
@@ -56,8 +56,8 @@
 // scrubbed replica does not keep on its allowlist; `get_habits` cannot
 // compute it from the replica as the allowlist stands.
 //
-// Two definitions are provisional and each sits in one function:
-// `findOwnTransfers` (D1) and `runwayAssetsCents` (D2).
+// Decided 2026-10-28, each in one function: `findOwnTransfers` (D1, pair
+// match) and `runwayAssetsCents` (D2, card debt is subtracted).
 
 import type {
   AccountRole,
@@ -308,9 +308,7 @@ export function habitsReadFrom(today: IsoDate): IsoDate {
  * Category is not read, so it pairs a drawing like any row; the view drops
  * drawings before calling it (prd-02 Ruling 15, see `transferLegsInView`).
  */
-// DECISION PENDING (#52): own-account transfer detection. Provisional
-// option A (pair match). Alternatives: B, Akahu `type === 'TRANSFER'`;
-// C, `other_account` matches one of her accounts' `formatted_account`.
+// Decided 2026-10-28 (#52): pair match.
 export function findOwnTransfers(
   transactions: readonly HabitTransaction[],
 ): Map<string, string> {
@@ -358,23 +356,29 @@ export function findOwnTransfers(
 
 /**
  * The money runway counts: balances of `scope`'s accounts whose role is
- * `current` or `savings`. Tax pots, credit cards and accounts with no role
- * add nothing.
+ * `current` or `savings`, less the debt on `scope`'s `credit_card`
+ * accounts. A card's debt is max(0, −balance): a card in credit adds
+ * nothing. Tax pots and accounts with no role add nothing. The result can
+ * be negative; `runwayTenths` reads that as 0 months.
  */
-// DECISION PENDING (#52): card debt. Provisional: the literal formula,
-// liquid + savings, with card debt not subtracted. Alternative: subtract,
-// over in-scope `credit_card` accounts, max(0, −balance) per card.
+// Decided 2026-10-28 (#52): card debt is subtracted.
 export function runwayAssetsCents(
   accounts: readonly HabitAccount[],
   scope: Scope,
 ): Cents {
   checkAccounts(accounts)
-  return sumCents(
-    accounts
-      .filter((a) => inScope(scope, a.scope))
+  const inView = accounts.filter((a) => inScope(scope, a.scope))
+  const liquid = sumCents(
+    inView
       .filter((a) => a.role === 'current' || a.role === 'savings')
       .map((a) => a.balanceCents),
   )
+  const cardDebt = sumCents(
+    inView
+      .filter((a) => a.role === 'credit_card')
+      .map((a) => Math.max(0, -a.balanceCents)),
+  )
+  return sumCents([liquid, -cardDebt])
 }
 
 // ---------------------------------------------------------------------------

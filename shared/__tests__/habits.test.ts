@@ -157,8 +157,9 @@ describe('runwayTenths: floor(assets × 10 ÷ trailing spend)', () => {
   })
 })
 
-describe('runwayAssetsCents (decision pending: card debt)', () => {
-  // Provisional: Σ current + savings in scope; card debt not subtracted.
+describe('runwayAssetsCents', () => {
+  // Σ current + savings in scope, less Σ max(0, −balance) over in-scope
+  // credit cards.
   const accounts = [
     acct('1', 'personal', 'current', 300_000),
     acct('2', 'personal', 'savings', 200_000),
@@ -169,8 +170,10 @@ describe('runwayAssetsCents (decision pending: card debt)', () => {
     acct('5', 'strawb', 'savings', 20_000),
   ]
 
-  it('personal: current + savings only', () => {
-    expect(runwayAssetsCents(accounts, 'personal')).toBe(500_000)
+  it('personal: current + savings less card debt', () => {
+    // 300,000 + 200,000 − 150,000 = 350,000; the tax pot and the account
+    // with no role add nothing.
+    expect(runwayAssetsCents(accounts, 'personal')).toBe(350_000)
   })
 
   it('strawb: its own current + savings', () => {
@@ -178,20 +181,62 @@ describe('runwayAssetsCents (decision pending: card debt)', () => {
   })
 
   it('all: both scopes', () => {
-    expect(runwayAssetsCents(accounts, 'all')).toBe(600_000)
+    // 300,000 + 200,000 + 80,000 + 20,000 − 150,000 = 450,000
+    expect(runwayAssetsCents(accounts, 'all')).toBe(450_000)
   })
 
-  it('a card owing money does not reduce assets (provisional)', () => {
+  it('a card owing money reduces assets', () => {
     expect(
       runwayAssetsCents(
         [
-          acct('1', 'personal', 'current', 100),
+          acct('1', 'personal', 'current', 10_000),
           CARD,
           acct('8', 'personal', 'credit_card', -999),
         ],
         'personal',
       ),
-    ).toBe(100)
+      // 10,000 − max(0, −0) − max(0, 999) = 10,000 − 0 − 999 = 9,001
+    ).toBe(9_001)
+  })
+
+  it('a card in credit adds nothing', () => {
+    expect(
+      runwayAssetsCents(
+        [
+          acct('1', 'personal', 'current', 10_000),
+          acct('8', 'personal', 'credit_card', 2_500),
+        ],
+        'personal',
+      ),
+      // 10,000 − max(0, −2,500) = 10,000 − 0 = 10,000
+    ).toBe(10_000)
+  })
+
+  it('a card in another scope is ignored', () => {
+    const accounts = [
+      acct('1', 'personal', 'current', 10_000),
+      acct('4', 'strawb', 'current', 6_000),
+      acct('9', 'strawb', 'credit_card', -4_000),
+    ]
+    // Personal: 10,000; Strawb's card is not in view.
+    expect(runwayAssetsCents(accounts, 'personal')).toBe(10_000)
+    // Strawb: 6,000 − 4,000 = 2,000.
+    expect(runwayAssetsCents(accounts, 'strawb')).toBe(2_000)
+    // All: 10,000 + 6,000 − 4,000 = 12,000.
+    expect(runwayAssetsCents(accounts, 'all')).toBe(12_000)
+  })
+
+  it('card debt above current + savings is negative assets and runway 0', () => {
+    const accounts = [
+      acct('1', 'personal', 'current', 3_000),
+      acct('2', 'personal', 'savings', 1_000),
+      acct('3', 'personal', 'credit_card', -5_000),
+    ]
+    // 3,000 + 1,000 − 5,000 = −1,000
+    expect(runwayAssetsCents(accounts, 'personal')).toBe(-1_000)
+    // Assets of 0 or less are 0 months, with spend or without.
+    expect(runwayTenths(input(accounts, [tx('1', TODAY, -100)]))).toBe(0)
+    expect(runwayTenths(input(accounts, []))).toBe(0)
   })
 })
 
@@ -240,8 +285,8 @@ describe('trailingSpendCents', () => {
   })
 })
 
-describe('findOwnTransfers (decision pending: transfer detection)', () => {
-  // Provisional option A: −X and +X on two different accounts within
+describe('findOwnTransfers', () => {
+  // Pair match: −X and +X on two different accounts within
   // TRANSFER_WINDOW_DAYS, one to one, nearest dates first, lowest id on ties.
   const spend = (
     rows: HabitTransaction[],
@@ -667,7 +712,7 @@ describe('recentSpendingIds', () => {
     expect(ids([p, s], 'strawb')).toEqual([s.id])
   })
 
-  it('a transfer leg is not listed (decision pending: transfer detection)', () => {
+  it('a transfer leg is not listed', () => {
     const out = tx('1', TODAY, -7_700)
     const inn = tx('4', TODAY, 7_700)
     expect(ids([out, inn], 'all')).toEqual([])

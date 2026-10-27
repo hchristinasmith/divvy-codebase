@@ -187,9 +187,7 @@ const STRAWB_ROWS = [
 
 // Strawb → Personal on the same day, the same amount: a drawing (prd-02
 // Ruling 15), so both halves show Drawings and neither is spend in any
-// scope. Every test titled "(decision pending: transfer detection)" rests on
-// the provisional transfer option A, pair match (DECISION PENDING in
-// shared/habits.ts `findOwnTransfers`), and changes with that decision.
+// scope.
 const DRAWING_ROWS = [
   tx(203, TRADING, '2026-10-22', -40_000, 396_000),
   tx(104, EVERYDAY, '2026-10-22', 40_000, 912_000),
@@ -453,6 +451,31 @@ describe('GET: the response is the contract', () => {
     },
   )
 
+  it('a Personal card owing money lowers Personal runway and not Strawb’s', async () => {
+    await seed()
+    await connection('accounts').insert(
+      account({
+        id: 3,
+        akahu_id: 'acc_sentinel_card',
+        name: 'Sentinel Card',
+        scope: 'personal',
+        balance_cents: -357_000,
+      }),
+    )
+    await connection('account_settings').insert({
+      account_id: 3,
+      role: 'credit_card',
+      updated_at: STAMP,
+    })
+
+    // (1,000,000 − 357,000) × 10 ÷ 128,500 = 6,430,000 ÷ 128,500 = 50.04 → 50.
+    expect((await get('personal')).body.runwayTenths).toBe(50)
+    // Unchanged from the strawb test: 78.
+    expect((await get('strawb')).body.runwayTenths).toBe(78)
+    // (1,500,000 − 357,000) × 10 ÷ 192,500 = 11,430,000 ÷ 192,500 = 59.37… → 59.
+    expect((await get('all')).body.runwayTenths).toBe(59)
+  })
+
   it('an account with no role adds nothing to runway and is not a current account', async () => {
     await seed()
     // No account_settings row. Were it `current`, its balance would lift
@@ -536,7 +559,7 @@ describe('NZ calendar dates from stored UTC instants', () => {
     ])
   })
 
-  it('the read reaches a leg whose UTC day is before the window’s first NZ day (decision pending: transfer detection)', async () => {
+  it('the read reaches a leg whose UTC day is before the window’s first NZ day', async () => {
     await seedAccounts()
     await connection('accounts').insert(
       account({
@@ -674,7 +697,7 @@ describe('drawings are never spending (prd-02 Ruling 15)', () => {
 })
 
 describe('scope isolation', () => {
-  it('Strawb spend, verdicts and transfers neither appear in nor move Personal (decision pending: transfer detection)', async () => {
+  it('Strawb spend, verdicts and transfers neither appear in nor move Personal', async () => {
     await seedAccounts()
     await insertAll('transactions', PERSONAL_ROWS)
     const before = (await get('personal')).body
@@ -685,7 +708,7 @@ describe('scope isolation', () => {
     expect((await get('personal')).body).toStrictEqual(before)
   })
 
-  it('Personal spend, verdicts and transfers neither appear in nor move Strawb (decision pending: transfer detection)', async () => {
+  it('Personal spend, verdicts and transfers neither appear in nor move Strawb', async () => {
     await seedAccounts()
     await insertAll('transactions', STRAWB_ROWS)
     const before = (await get('strawb')).body
