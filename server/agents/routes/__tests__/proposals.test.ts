@@ -13,7 +13,7 @@ import { at, db, fakeAkahu, MINUTE_MS, page } from '../../../sync/__tests__/harn
 
 // /api/v1/agents/proposals (prd-04 Rulings 2 and 7, #51), over HTTP against
 // the real app and a fresh in-memory database. Accept writes the category
-// through setUserCategory with source `rule`, inside one transaction with
+// through setUserCategory with the proposal's origin as source, inside one transaction with
 // the decision. Every value is invented.
 
 let served: LoopbackApi | undefined
@@ -288,6 +288,40 @@ describe('POST /api/v1/agents/proposals/:id/accept', () => {
     expect(res.body.transaction).toEqual(
       Object.fromEntries(ACCEPT_TRANSACTION_KEYS.map((key) => [key, stored[key]])),
     )
+  })
+
+  it('a rule-origin proposal, named as one, records rule in both columns and one rule correction', async () => {
+    await seedMain()
+    const tx = await seedTransaction('ruled')
+    const id = await seedProposal(proposal(tx, { origin: 'rule' }))
+
+    const res = await accept(id)
+
+    expect(res.status).toBe(200)
+    expect(await transactionRow(tx)).toMatchObject({
+      category: 'Bakeries',
+      category_source: 'rule',
+    })
+    const ours = await connection('category_corrections').where({ transaction_id: tx })
+    expect(ours).toHaveLength(1)
+    expect(ours[0]).toMatchObject({ to_category: 'Bakeries', source: 'rule' })
+  })
+
+  it('a claude-origin proposal records claude in both columns and one claude correction', async () => {
+    await seedMain()
+    const tx = await seedTransaction('claude')
+    const id = await seedProposal(proposal(tx, { origin: 'claude' }))
+
+    const res = await accept(id)
+
+    expect(res.status).toBe(200)
+    expect(await transactionRow(tx)).toMatchObject({
+      category: 'Bakeries',
+      category_source: 'claude',
+    })
+    const ours = await connection('category_corrections').where({ transaction_id: tx })
+    expect(ours).toHaveLength(1)
+    expect(ours[0]).toMatchObject({ to_category: 'Bakeries', source: 'claude' })
   })
 
   it('a second accept is 409 and writes nothing', async () => {

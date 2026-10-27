@@ -19,9 +19,10 @@ import { errorClass } from '../../error-class.ts'
 // ./index.ts, which also refuses a cross-site POST before it reaches here.
 //
 // Accepting a proposal is the one place an agent's output reaches money
-// state, and it does so only through `setUserCategory` with source `rule`
-// (decision 3cb449c6 on #51): the category, `category_source = 'rule'` and a
-// `rule` correction. Ruling 7: no model is called, so `claude` never occurs.
+// state, and it does so only through `setUserCategory` with the proposal's
+// origin as the source (decision 3cb449c6 on #51, prd-04 Ruling 2): the
+// category, `category_source` and a correction, all `claude` for a claude
+// proposal and `rule` for a rule one (Ruling 9, #428, lets origin be `claude`).
 // Everything accept does runs in one database transaction, decision first:
 // a refusal at any later step throws `AcceptRefused`, which rolls back the
 // decision with it, so a refused proposal is still pending.
@@ -151,12 +152,12 @@ router.post('/:id/accept', async (req, res) => {
           )
         }
 
-        // 6. The category, `rule` in both columns, and a correction.
+        // 6. The category, the proposal's origin in both columns, and a correction.
         const transaction = await setUserCategory(
           proposal.transaction_id,
           proposed,
           trx,
-          'rule',
+          proposal.origin === 'claude' ? 'claude' : 'rule',
         )
         if (transaction === undefined) {
           throw new AcceptRefused(404, 'Transaction not found')

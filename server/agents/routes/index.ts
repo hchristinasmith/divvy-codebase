@@ -9,7 +9,7 @@ import proposals from './proposals.ts'
 // what is in it; nothing here runs an agent or calls a model (Ruling 7).
 //
 //   GET  /proposals?status=        list category proposals
-//   POST /proposals/:id/accept     accept one; writes the category as `rule`
+//   POST /proposals/:id/accept     accept one; writes the category as its origin
 //   POST /proposals/:id/reject     reject one
 //   GET  /insights?scope=&kind=    list insights not dismissed
 //   POST /insights/:id/dismiss     dismiss one

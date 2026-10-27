@@ -9,7 +9,8 @@ import { assertInMemory, closeDb } from '../../test-utils/app.ts'
 // prd-04 Done-when 2 and CLAUDE.md (Architecture): nothing under
 // server/agents/ writes money state. Agents write only the inbox tables;
 // the one way an agent's output reaches money state is the accept route
-// calling `setUserCategory` with source `rule` (#51, decision 3cb449c6).
+// calling `setUserCategory` with source `rule` or `claude`, the proposal's
+// origin (prd-04 Ruling 2, #432; #51, decision 3cb449c6).
 //
 // A sibling of the db guard in server/agents/db/__tests__/proposals.test.ts,
 // which pins what server/agents/db/ may name and import. This one covers the
@@ -43,9 +44,10 @@ import { assertInMemory, closeDb } from '../../test-utils/app.ts'
 // one included.
 //
 // The one exemption is the accept route. It may import exactly the names in
-// `EXEMPTION.names` from `EXEMPTION.module`, must pass the literal `'rule'`
-// as setUserCategory's source, may use it only by direct, unaliased call,
-// and may name no table outside the inbox. It
+// `EXEMPTION.names` from `EXEMPTION.module`, must pass as setUserCategory's
+// source the literal `'rule'` or `'claude'`, or a conditional whose two
+// branches are those literals (parentheses allowed), may use it only by
+// direct, unaliased call, and may name no table outside the inbox. It
 // is asserted to be used, so it cannot outlive the route.
 
 const REPO = new URL('../../../', import.meta.url)
@@ -149,6 +151,27 @@ const literalText = (node: ts.Node | undefined): string | undefined =>
   node !== undefined && (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))
     ? node.text
     : undefined
+
+// The sources the accept route may pass (prd-04 Ruling 2, #432).
+const ACCEPT_SOURCES = ['rule', 'claude']
+
+// Parentheses are trivia here: `(x)` is `x`.
+const unwrapParens = (node: ts.Expression): ts.Expression =>
+  ts.isParenthesizedExpression(node) ? unwrapParens(node.expression) : node
+
+// A source the accept route may pass: one of ACCEPT_SOURCES as a literal, or a
+// conditional whose two branches are each one of them. Nothing else, so a
+// variable, a call, or a nested conditional is refused.
+function isAcceptSource(node: ts.Expression | undefined): boolean {
+  if (node === undefined) return false
+  const expr = unwrapParens(node)
+  const isLiteral = (branch: ts.Expression): boolean => {
+    const text = literalText(unwrapParens(branch))
+    return text !== undefined && ACCEPT_SOURCES.includes(text)
+  }
+  if (ts.isConditionalExpression(expr)) return isLiteral(expr.whenTrue) && isLiteral(expr.whenFalse)
+  return isLiteral(expr)
+}
 
 // Where a method chain starts: `trx('t').where({}).update()` starts at the
 // call `trx('t')`; `trx.insert(x).into('t')` at the identifier `trx`.
@@ -415,7 +438,8 @@ function reachProblems(source: ts.SourceFile): string[] {
 }
 
 // The accept route's extra rules: no table outside the inbox named in code,
-// and every setUserCategory call passes the literal source 'rule'.
+// and every setUserCategory call passes a literal source 'rule' or 'claude',
+// or a conditional whose two branches are those literals.
 function exemptionProblems(source: ts.SourceFile, ctx: Context): string[] {
   const found: string[] = []
   const code = codeOf(source)
@@ -432,8 +456,8 @@ function exemptionProblems(source: ts.SourceFile, ctx: Context): string[] {
       node.expression.text === 'setUserCategory'
     ) {
       calls += 1
-      if (literalText(node.arguments[3]) !== 'rule') {
-        found.push("setUserCategory without the literal source 'rule'")
+      if (!isAcceptSource(node.arguments[3])) {
+        found.push("setUserCategory without a literal source 'rule' or 'claude'")
       }
     } else if (ts.isIdentifier(node) && node.text === 'setUserCategory') {
       // Only a direct call is checked for 'rule', so an alias
@@ -666,14 +690,27 @@ describe('planted violations', () => {
       expect(accept([allowed, "// db('transactions')"])).toEqual([])
     })
 
+    const WITHOUT_LITERAL = "setUserCategory without a literal source 'rule' or 'claude'"
+
     it.each([
       ['no source', "await setUserCategory(1, 'Bakeries', trx)"],
       ['source user', "await setUserCategory(1, 'Bakeries', trx, 'user')"],
       ['a source in a variable', "await setUserCategory(1, 'Bakeries', trx, source)"],
-    ])("a call with %s is flagged", (_why, call) => {
-      expect(problemsFor(EXEMPTION.file, [allowed, call].join('\n'), ctx)).toContain(
-        "setUserCategory without the literal source 'rule'",
-      )
+      ['a ternary with a user branch', "await setUserCategory(1, 'Bakeries', trx, c ? 'user' : 'rule')"],
+      ['a ternary with a variable branch', "await setUserCategory(1, 'Bakeries', trx, c ? 'claude' : source)"],
+      ['a nested ternary', "await setUserCategory(1, 'Bakeries', trx, a ? 'rule' : b ? 'claude' : 'rule')"],
+    ])('a call with %s is flagged', (_why, call) => {
+      expect(problemsFor(EXEMPTION.file, [allowed, call].join('\n'), ctx)).toContain(WITHOUT_LITERAL)
+    })
+
+    it.each([
+      ['the literal rule', "'rule'"],
+      ['the literal claude', "'claude'"],
+      ['the origin ternary', "proposal.origin === 'claude' ? 'claude' : 'rule'"],
+      ['the origin ternary in parentheses', "(proposal.origin === 'claude' ? ('claude') : 'rule')"],
+    ])('a call with the source %s passes', (_why, source) => {
+      const call = `await setUserCategory(1, 'Bakeries', trx, ${source})`
+      expect(problemsFor(EXEMPTION.file, [allowed, call].join('\n'), ctx)).toEqual([])
     })
 
     it.each([
