@@ -20,8 +20,9 @@ import { fromThisSite } from '../http.ts'
 // (`STALE_RUN_AFTER_MS`); until then a run is skipped, writing nothing.
 //
 // POST /run starts a run and answers at once (202), or refuses with 409 if
-// one is in flight; it never waits for the sync. There is no server-side
-// auth (prd-01 Ruling 7, D4): the app is reachable only over the tailnet.
+// one is in flight, or 503 once the process is shutting down (#462); it never
+// waits for the sync. There is no server-side auth (prd-01 Ruling 7, D4): the
+// app is reachable only over the tailnet.
 // So that a page on another site cannot start a run from Hannah's browser,
 // a browser's `Sec-Fetch-Site`, which no page can set, decides first:
 // `same-origin` and `none` pass, anything else is 403. Only when it is
@@ -55,6 +56,7 @@ export interface SyncStatus {
 export type SyncRunResponse =
   | { started: true }
   | { started: false; reason: 'already running' }
+  | { started: false; reason: 'shutting down' }
 
 function toRunStatus(row: SyncRun): SyncRunStatus {
   return {
@@ -111,10 +113,19 @@ router.post('/run', (req, res) => {
     return
   }
   const result = syncScheduler.trigger()
-  const body: SyncRunResponse = result.started
-    ? { started: true }
-    : { started: false, reason: 'already running' }
-  res.status(result.started ? 202 : 409).json(body)
+  if (result.started) {
+    const body: SyncRunResponse = { started: true }
+    res.status(202).json(body)
+    return
+  }
+  // Refused, not queued, once the process is draining after SIGTERM (#462).
+  if (result.reason === 'stopped') {
+    const body: SyncRunResponse = { started: false, reason: 'shutting down' }
+    res.status(503).json(body)
+    return
+  }
+  const body: SyncRunResponse = { started: false, reason: 'already running' }
+  res.status(409).json(body)
 })
 
 export default router

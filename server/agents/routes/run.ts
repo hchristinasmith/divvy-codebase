@@ -21,9 +21,11 @@ import {
 // when none is given, over the last complete NZ week.
 //
 // The run goes through the agent scheduler's one-pass guard, so it never
-// overlaps a scheduled pass: 409 while a pass is in flight. A manual run
-// started within MANUAL_RUN_GAP_MS of this request is also 409, so back-to-back
-// calls cannot each add a run row (#454). Unlike POST
+// overlaps a scheduled pass: 409 while a pass is in flight. Once the process
+// is shutting down (SIGTERM, #462) it is 503 and nothing starts, checked
+// before the gap read below. A manual run started within MANUAL_RUN_GAP_MS of
+// this request is also 409, so back-to-back calls cannot each add a run row
+// (#454). Unlike POST
 // /api/v1/sync/run this waits for the run and answers with its result,
 // because an agent run is a few local queries. A run that ended `failed` is
 // a 500 naming the run, whose row is in `agent_runs`; the reason is in the
@@ -74,6 +76,12 @@ async function manualRunStartedMomentsAgo(now: Date): Promise<boolean> {
   return Math.abs(now.getTime() - Date.parse(latest.started_at)) < MANUAL_RUN_GAP_MS
 }
 
+/** Refused while the process drains: the body names no run, as the 409s do. */
+function refuseShuttingDown(res: express.Response): void {
+  const body: RunErrorResponse = { error: 'Server is shutting down', runId: null }
+  res.status(503).json(body)
+}
+
 const router = express.Router()
 
 router.post('/', async (req, res) => {
@@ -88,10 +96,17 @@ router.post('/', async (req, res) => {
     return
   }
   try {
-    // A pass in flight answers first, as it always has; the gap check only
-    // matters for a run that could start now. Inside the try: Express 4 does
-    // not catch a rejected handler, so a failed read must answer here.
-    const idle = !agentScheduler.getState().running
+    // A stopped scheduler answers first, before the gap read, so a draining
+    // process never reports a gap. A pass in flight answers next, as it always
+    // has; the gap check only matters for a run that could start now. Inside
+    // the try: Express 4 does not catch a rejected handler, so a failed read
+    // must answer here.
+    const state = agentScheduler.getState()
+    if (state.stopped) {
+      refuseShuttingDown(res)
+      return
+    }
+    const idle = !state.running
     if (idle && (await manualRunStartedMomentsAgo(new Date()))) {
       const body: RunErrorResponse = {
         error: 'An agent run was started moments ago; try again shortly',
@@ -102,6 +117,11 @@ router.post('/', async (req, res) => {
     }
     const started = agentScheduler.runNow(run)
     if (!started.started) {
+      // The stop can land during the gap read above; runNow still refuses.
+      if (started.reason === 'stopped') {
+        refuseShuttingDown(res)
+        return
+      }
       const body: RunErrorResponse = { error: 'An agent pass is already running', runId: null }
       res.status(409).json(body)
       return

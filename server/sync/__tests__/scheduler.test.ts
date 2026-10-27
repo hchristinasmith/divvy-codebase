@@ -500,6 +500,43 @@ describe('start and stop', () => {
   })
 })
 
+describe('stop() during the shutdown drain (#462)', () => {
+  it('refuses trigger() from stop() on, so no pass begins while the one in flight drains', async () => {
+    const { runSync, pending } = heldRunSync()
+    const s = scheduler({ runSync })
+    s.start()
+    expect(s.trigger()).toStrictEqual({ started: true })
+
+    s.stop()
+    expect(s.trigger()).toStrictEqual({ started: false, reason: 'stopped' })
+    await vi.advanceTimersByTimeAsync(INTERVAL * 2)
+    expect(runSync).toHaveBeenCalledTimes(1)
+
+    pending[0].resolve(SUCCESS)
+    await s.whenIdle()
+    expect(s.getState().running).toBe(false)
+    // Still refused once the drain has ended, and no tick fires.
+    expect(s.trigger()).toStrictEqual({ started: false, reason: 'stopped' })
+    await vi.advanceTimersByTimeAsync(INTERVAL * 2)
+    expect(runSync).toHaveBeenCalledTimes(1)
+  })
+
+  it('start() after stop() lifts the refusal, and trigger() runs a pass again', async () => {
+    const runSync = succeeding()
+    const s = scheduler({ runSync })
+    s.start()
+    s.stop()
+    expect(s.trigger()).toStrictEqual({ started: false, reason: 'stopped' })
+    expect(runSync).not.toHaveBeenCalled()
+
+    s.start()
+    expect(s.trigger()).toStrictEqual({ started: true })
+    await s.whenIdle()
+    expect(runSync).toHaveBeenCalledTimes(1)
+    s.stop()
+  })
+})
+
 describe('with the real runSync and Akahu client', () => {
   beforeEach(async () => {
     await freshDb()

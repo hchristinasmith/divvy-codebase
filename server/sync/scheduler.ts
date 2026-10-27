@@ -66,6 +66,8 @@ export function parseSyncIntervalMs(raw: string | undefined): {
 export type TriggerResult =
   | { started: true }
   | { started: false; reason: 'already_running' }
+  // Between stop() and start(): the shutdown drain (#462), so no run begins.
+  | { started: false; reason: 'stopped' }
 
 export interface SchedulerState {
   /** True between `start()` and `stop()`. */
@@ -90,11 +92,20 @@ export interface SchedulerDeps {
 }
 
 export interface SyncScheduler {
-  /** Starts the timer. Throws if it is already started. Runs nothing now. */
+  /**
+   * Starts the timer and lifts an earlier `stop()`. Throws if it is already
+   * started. Runs nothing now.
+   */
   start(): void
-  /** Stops the timer. A run in flight finishes. Safe to call twice. */
+  /**
+   * Stops the timer and refuses every new run (`trigger()` answers `stopped`)
+   * until `start()`. A run in flight finishes. Safe to call twice.
+   */
   stop(): void
-  /** Starts a run unless one is in flight. Never waits for the run. */
+  /**
+   * Starts a run unless one is in flight or the scheduler is stopped. Never
+   * waits for the run.
+   */
   trigger(): TriggerResult
   getState(): SchedulerState
   /** Resolves once no run is in flight. Never rejects. */
@@ -117,6 +128,9 @@ export function createSyncScheduler(deps: SchedulerDeps = {}): SyncScheduler {
   let current: Promise<void> | null = null
   let timer: ReturnType<typeof setInterval> | null = null
   let nextTickAt: number | null = null
+  // Set by stop(), cleared by start(). A scheduler never started is not
+  // stopped, so it still triggers (the route tests rely on that).
+  let stopped = false
 
   /** One run. Resolves whatever happens, so `current` never rejects. */
   async function execute(): Promise<void> {
@@ -130,6 +144,7 @@ export function createSyncScheduler(deps: SchedulerDeps = {}): SyncScheduler {
   }
 
   function trigger(): TriggerResult {
+    if (stopped) return { started: false, reason: 'stopped' }
     if (current !== null) return { started: false, reason: 'already_running' }
     current = execute().finally(() => {
       current = null
@@ -140,6 +155,7 @@ export function createSyncScheduler(deps: SchedulerDeps = {}): SyncScheduler {
   return {
     start() {
       if (timer !== null) throw new Error('sync scheduler already started')
+      stopped = false
       let intervalMs = deps.intervalMs
       if (intervalMs === undefined) {
         const parsed = parseSyncIntervalMs(process.env.SYNC_INTERVAL_MS)
@@ -163,6 +179,7 @@ export function createSyncScheduler(deps: SchedulerDeps = {}): SyncScheduler {
       if (timer !== null) clearInterval(timer)
       timer = null
       nextTickAt = null
+      stopped = true
     },
 
     trigger,

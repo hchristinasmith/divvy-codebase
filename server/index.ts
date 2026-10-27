@@ -17,11 +17,18 @@ const httpServer = server.listen(Number(port), host, function () {
   agentScheduler.start()
 })
 
-// Shutdown on SIGTERM or SIGINT (#454). The schedulers stop taking new passes,
-// a pass in flight finishes so its agent_runs row closes as success or failed
-// rather than staying 'running' until the next boot, then the socket closes and
-// the process exits. The drain is bounded: fly.toml's kill_timeout is 30s, so
-// 20s leaves room to close before SIGKILL.
+// Shutdown on SIGTERM or SIGINT (#454). The schedulers stop, and stop() makes
+// them refuse new passes: the HTTP listener stays open until the drain ends,
+// so POST /api/v1/sync/run and POST /api/v1/agents/run answer 503 meanwhile
+// rather than start a pass the drain would not wait for (#462). A pass in
+// flight finishes so its agent_runs row closes as success or failed rather
+// than staying 'running' until the next boot, then the socket closes and the
+// process exits. The drain is bounded: fly.toml's kill_timeout is 30s, so 20s
+// leaves room to close before SIGKILL.
+//
+// The handlers are process.once: each signal is handled once, so a repeat of
+// the same signal is not handled again and falls to Node's default, which ends
+// the process at once. A second, different signal is absorbed by `shuttingDown`.
 const DRAIN_TIMEOUT_MS = 20_000
 let shuttingDown = false
 

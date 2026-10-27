@@ -85,14 +85,19 @@ export type ManualResult =
 export type AgentTriggerResult =
   | { started: true }
   | { started: false; reason: 'already_running' }
+  // Between stop() and start(): the shutdown drain (#462), so no pass begins.
+  | { started: false; reason: 'stopped' }
 
 export type ManualRunResult =
   | { started: true; result: Promise<ManualResult> }
   | { started: false; reason: 'already_running' }
+  | { started: false; reason: 'stopped' }
 
 export interface AgentSchedulerState {
   /** True between `start()` and `stop()`. */
   started: boolean
+  /** True from `stop()` until `start()`: no pass begins. Set by a shutdown. */
+  stopped: boolean
   /** True while a pass started by this process is in flight. */
   running: boolean
   /** When the timer next fires, as ISO-8601 UTC; null when not started. */
@@ -123,15 +128,23 @@ export interface AgentSchedulerDeps {
 
 export interface AgentScheduler {
   /**
-   * Closes stale `running` runs, then starts the timer. Throws if already
-   * started. The close is the first pass in flight; `whenIdle()` waits for it.
+   * Closes stale `running` runs, then starts the timer, and lifts an earlier
+   * `stop()`. Throws if already started. The close is the first pass in
+   * flight; `whenIdle()` waits for it.
    */
   start(): void
-  /** Stops the timer. A pass in flight finishes. Safe to call twice. */
+  /**
+   * Stops the timer and refuses every new pass (`trigger()` and `runNow()`
+   * answer `stopped`) until `start()`. A pass in flight finishes. Safe to call
+   * twice.
+   */
   stop(): void
-  /** Starts one scheduled pass unless one is in flight. Never waits. */
+  /**
+   * Starts one scheduled pass unless one is in flight or the scheduler is
+   * stopped. Never waits.
+   */
   trigger(): AgentTriggerResult
-  /** Starts one manual run unless a pass is in flight. */
+  /** Starts one manual run unless a pass is in flight or the scheduler is stopped. */
   runNow(run: ManualRun): ManualRunResult
   getState(): AgentSchedulerState
   /** Resolves once no pass is in flight. Never rejects. */
@@ -159,6 +172,9 @@ export function createAgentScheduler(
   let current: Promise<unknown> | null = null
   let timer: ReturnType<typeof setInterval> | null = null
   let nextTickAt: number | null = null
+  // Set by stop(), cleared by start(). A scheduler never started is not
+  // stopped, so it still runs passes (the route tests rely on that).
+  let stopped = false
 
   /** Runs `work` as the pass in flight; the caller has checked the guard. */
   function claim<T>(work: () => Promise<T>): Promise<T> {
@@ -286,6 +302,7 @@ export function createAgentScheduler(
   }
 
   function trigger(): AgentTriggerResult {
+    if (stopped) return { started: false, reason: 'stopped' }
     if (current !== null) return { started: false, reason: 'already_running' }
     void claim(scheduledPass)
     return { started: true }
@@ -294,6 +311,7 @@ export function createAgentScheduler(
   return {
     start() {
       if (timer !== null) throw new Error('agent scheduler already started')
+      stopped = false
       const ms = deps.intervalMs ?? AGENT_INTERVAL_MS
       // Nothing is in flight before the timer exists, so the close always runs.
       if (current === null) void claim(closeStaleRuns)
@@ -310,11 +328,13 @@ export function createAgentScheduler(
       if (timer !== null) clearInterval(timer)
       timer = null
       nextTickAt = null
+      stopped = true
     },
 
     trigger,
 
     runNow(run) {
+      if (stopped) return { started: false, reason: 'stopped' }
       if (current !== null) return { started: false, reason: 'already_running' }
       return { started: true, result: claim(() => manualPass(run)) }
     },
@@ -322,6 +342,7 @@ export function createAgentScheduler(
     getState() {
       return {
         started: timer !== null,
+        stopped,
         running: current !== null,
         nextRunAt:
           timer === null || nextTickAt === null
