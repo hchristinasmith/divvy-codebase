@@ -65,8 +65,8 @@ describe('the route table', () => {
 
   it('every stub tells you it is not built yet rather than showing numbers', () => {
     // Goals is mocked above; Overview (issue 45), Bills (issue 54),
-    // Subscriptions (issue 230), Advisor and Privacy (issue 60), and
-    // Sync (issue 59) are built.
+    // Subscriptions (issue 230), Advisor and Privacy (issue 60), Sync (issue 59)
+    // and Habits (issue 57) are built.
     for (const [, path] of HANDOFF.filter(
       ([key]) =>
         key !== 'goals' &&
@@ -75,7 +75,8 @@ describe('the route table', () => {
         key !== 'subscriptions' &&
         key !== 'advisor' &&
         key !== 'privacy' &&
-        key !== 'sync',
+        key !== 'sync' &&
+        key !== 'habits',
     )) {
       renderWithProviders(
         <Shell>
