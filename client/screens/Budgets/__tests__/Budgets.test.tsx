@@ -475,6 +475,24 @@ describe('delete', () => {
     const alert = await within(cafes).findByRole('alert')
     expect(alert.textContent).toBe('Budget not found')
   })
+
+  it('a refused delete reads the budgets again but not the overview', async () => {
+    const { fx } = setup(THREE)
+    fx.handlers.remove = () => ({ status: 404, body: { error: 'Budget not found' } })
+    await loaded()
+    await waitFor(() => expect(fx.callsTo('GET', OVERVIEW)).toHaveLength(1))
+    expect(fx.callsTo('GET', LIST)).toHaveLength(1)
+    // The budget was already gone: the server's list no longer has it.
+    fx.handlers.list = serve(response({ items: [GROCERIES, SOFTWARE] }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete the Cafes and restaurants budget' }))
+    fireEvent.click(within(card('Cafes and restaurants')).getByRole('button', { name: 'Delete' }))
+
+    await waitFor(() => expect(fx.callsTo('GET', LIST)).toHaveLength(2))
+    await waitFor(() => expect(names()).not.toContain('Cafes and restaurants'))
+    expect(fx.callsTo('DELETE', budgetPath('8'))).toHaveLength(1)
+    expect(fx.callsTo('GET', OVERVIEW)).toHaveLength(1)
+  })
 })
 
 describe('what the PRD overrides', () => {

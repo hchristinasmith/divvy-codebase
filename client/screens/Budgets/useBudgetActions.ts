@@ -87,6 +87,13 @@ export function useBudgetWrite(): BudgetFormWrite {
     mutationKey: BUDGET_WRITES,
     mutationFn: send,
     onSuccess: () => invalidateBudgets(client),
+    // As for a step: a refusal (a delete of a budget that is gone, a
+    // duplicate on create) means the list on screen may be out of date, so
+    // it is read again. A refused write moved nothing, so the overview is
+    // left alone.
+    onError: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.budgets.all })
+    },
   })
   const { mutate, reset } = write
   return {
