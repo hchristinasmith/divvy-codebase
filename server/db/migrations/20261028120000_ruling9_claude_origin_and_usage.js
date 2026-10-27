@@ -30,7 +30,9 @@
 // purpose; copying it would fail an immediate check. Deferred, the copy's
 // violation is cancelled by dropping the old copy's identical row, so the
 // rebuild keeps such a row as it found it rather than losing it or throwing.
-// Any violation the rebuild did not inherit still fails the commit.
+// Switching the deferral OFF forgets every violation it counted, so before
+// that the rebuild compares `PRAGMA foreign_key_check` with what it found and
+// throws on any violation it did not inherit.
 //
 // Both tables are children only: nothing references `category_proposals` or
 // `agent_runs`, so dropping their old copies cascades nothing. Their parents,
@@ -187,6 +189,9 @@ async function restoreSequence(knex, table, seq) {
 async function rebuild(knex, { table, columns, indexes, create }) {
   const seq = await readSequence(knex, table)
   const aside = `${table}_before_rebuild`
+  const violations = async () =>
+    JSON.stringify(await knex.raw('PRAGMA foreign_key_check(??)', [table]))
+  const inherited = await violations()
 
   await knex.schema.renameTable(table, aside)
   for (const index of indexes) await knex.raw('DROP INDEX ??', [index])
@@ -201,6 +206,9 @@ async function rebuild(knex, { table, columns, indexes, create }) {
     aside,
   ])
   await knex.schema.dropTable(aside)
+  if ((await violations()) !== inherited) {
+    throw new Error(`rebuilding ${table} broke a foreign key`)
+  }
   await knex.raw('PRAGMA defer_foreign_keys = OFF')
 
   await restoreSequence(knex, table, seq)
