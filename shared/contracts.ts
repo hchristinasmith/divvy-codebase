@@ -270,7 +270,12 @@ export interface AccountSummary {
   balanceCents: Cents
 }
 
-export type AlertKind = 'over_budget' | 'bill_due_soon' | 'bill_overdue'
+/** `bill_too_many_unpaid`: a bill left out of the totals (#247). */
+export type AlertKind =
+  | 'over_budget'
+  | 'bill_due_soon'
+  | 'bill_overdue'
+  | 'bill_too_many_unpaid'
 
 /** Alerts are derived on read; only a dismissal is stored. */
 export interface Alert {
@@ -282,7 +287,7 @@ export interface Alert {
   subject: string
   /** Amount over budget, or the bill's amount. */
   amountCents: Cents
-  /** The bill's due date; null for a budget alert. */
+  /** The bill's due date; null for a budget or too-many-unpaid alert. */
   dueDate: IsoDate | null
 }
 
