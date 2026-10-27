@@ -73,10 +73,23 @@ describe('formatRate', () => {
 })
 
 describe('barPercent', () => {
-  it('is the rounded share of the whole', () => {
+  it('is the floored share of the whole', () => {
     expect(barPercent(1, 3)).toBe(33)
-    expect(barPercent(2, 3)).toBe(67)
+    expect(barPercent(2, 3)).toBe(66)
     expect(barPercent(555000, 850000)).toBe(65)
+  })
+
+  it('reads 100 only when the part has reached the whole', () => {
+    // Rounding gave 100 for 299999 of 300000 (99.99966 → 100), a full bar
+    // on a goal one cent short of its target.
+    expect(barPercent(299999, 300000)).toBe(99)
+    expect(barPercent(300000, 300000)).toBe(100)
+  })
+
+  it('does not drop a whole percent to floating-point error', () => {
+    // (29 / 50) * 100 is 57.99999999999999 in floating point; 29 of 50 is 58%.
+    expect(barPercent(29, 50)).toBe(58)
+    expect(barPercent(57, 100)).toBe(57)
   })
 
   it('clamps to 0 and 100', () => {

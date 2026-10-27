@@ -31,10 +31,11 @@ export const INPUT = `${FIELD_SHAPE} font-mono ${FIELD_FOCUS}`
 export const SELECT = `${FIELD_SHAPE} font-sans ${FIELD_FOCUS}`
 
 const BUTTON_SHAPE =
-  'cursor-pointer rounded-button px-4 py-2.5 text-body-14 font-semibold disabled:cursor-not-allowed disabled:opacity-50'
+  'cursor-pointer rounded-pill px-4 py-2.5 text-body-14 font-semibold disabled:cursor-not-allowed disabled:opacity-50'
 
-// Solid pink: Save, the one primary action.
-export const PRIMARY_BUTTON = `${BUTTON_SHAPE} bg-pink text-surface hover:bg-pink-hover ${FOCUS}`
+// Solid pink: Save, the one primary action. Carries the theme's small
+// offset, as the other pink buttons do (client/components/Subscriptions/styles.ts).
+export const PRIMARY_BUTTON = `${BUTTON_SHAPE} bg-pink text-surface shadow-pill hover:bg-pink-hover ${FOCUS}`
 
 // Blush: a lesser action such as "Try again".
 export const SECONDARY_BUTTON = `${BUTTON_SHAPE} bg-blush text-rose hover:bg-blush-hover ${FOCUS}`
