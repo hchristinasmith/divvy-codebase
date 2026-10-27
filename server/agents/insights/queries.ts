@@ -15,29 +15,28 @@
 // not categorised by hand, or any row whose category is Drawings. A half she
 // categorised by hand stays and counts under her category. Finding the halves
 // needs both scopes' rows, so a `strawb` run makes one more read: every
-// candidate half, all-time, as server/db/drawings.ts reads them, taking only
-// id, scope, date and amount (so a personal inflow's merchant, category and
-// description are never read). A `personal` run never makes that read and
-// reads no strawb row: a personal half is an inflow, which is never spend.
-// It therefore cannot tell a drawing's in half from any other inflow, so the
-// interim own-account transfer rule (`excludeOwnAccountTransfers`, below)
-// may pair it with a personal outflow of equal cents on another personal
-// account, and that outflow is then not counted as spend. The strawb side
-// has no such gap. server/db/drawings.ts is not imported because it imports
-// server/db/overview.ts, which writes.
+// candidate half, all-time, through `loadDrawingIds` (server/db/drawings.ts,
+// which only reads), taking only id, scope, date and amount (so a personal
+// inflow's merchant, category and description are never read). A `personal`
+// run never makes that read and reads no strawb row: a personal half is an
+// inflow, which is never spend. It therefore cannot tell a drawing's in half
+// from any other inflow, so the interim own-account transfer rule
+// (`excludeOwnAccountTransfers`, below) may pair it with a personal outflow
+// of equal cents on another personal account, and that outflow is then not
+// counted as spend. The strawb side has no such gap.
 //
 // Own-account transfers. How a transfer between the scope's own accounts is
 // told from spending is not set by #47 or prd-04; it is the open question on
 // #52 (Baseline decision 0a37d21b). The rule here is an interim one the #47
 // lane chose, and it lives in one place: `excludeOwnAccountTransfers` and
-// the TRANSFER_WINDOW_DAYS it reads (which `collectAggregates` also uses to
+// the TRANSFER_WINDOW_DAYS it reads (which `analysisWindow` also uses to
 // pad the ledger read). When #52 is answered, that function's body is what
 // changes.
 //
 // Days are Pacific/Auckland calendar days (YYYY-MM-DD), bucketed here in JS:
 // SQL date functions would need raw SQL, which nothing under server/agents/
-// may use. The NZ date code mirrors server/db/overview.ts rather than
-// importing it, because that module writes.
+// may use. Parsing a date, adding days and the NZ calendar date come from
+// shared/nz-dates.ts; the ISO-week arithmetic is here.
 //
 // Money is integer cents. Spend is an outflow's amount made positive;
 // inflows are never netted against spend. Totals go through `sumCents`, and
@@ -48,15 +47,11 @@
 // name the field, never its value.
 import type { InsightScope } from '../../../models/insights.ts'
 import type { CategorySource } from '../../../models/transactions.ts'
-import type { RowScope } from '../../../shared/contracts.ts'
-import {
-  effectiveCategory,
-  findDrawingIds,
-  isDrawingCategory,
-  type DrawingCandidate,
-} from '../../../shared/drawings.ts'
+import { effectiveCategory, isDrawingCategory } from '../../../shared/drawings.ts'
 import { sumCents } from '../../../shared/money.ts'
+import { addDaysIso, nzCalendarDate, parseIsoDate } from '../../../shared/nz-dates.ts'
 import connection from '../../db/connection.ts'
+import { loadDrawingIds } from '../../db/drawings.ts'
 
 /** A Pacific/Auckland calendar date, `YYYY-MM-DD`. */
 export type IsoDate = string
@@ -77,7 +72,7 @@ export interface LedgerRow {
 // not set by #47 or prd-04: it follows #52's answer (Baseline decision
 // 0a37d21b). Two legs of a transfer between the scope's own accounts may
 // post on different days; legs further apart than this are not paired.
-// `collectAggregates` also pads the ledger read by it, so a leg just outside
+// `analysisWindow` also pads the ledger read by it, so a leg just outside
 // the window still pairs; if #52's rule needs no window, drop the padding
 // with it.
 export const TRANSFER_WINDOW_DAYS = 2
@@ -102,66 +97,10 @@ const SCOPES: Record<InsightScope, true> = { personal: true, strawb: true }
 // Dates
 // ---------------------------------------------------------------------------
 
-// Built once. `formatToParts` is read field by field rather than trusting a
-// locale's string order (as server/db/overview.ts does).
-const NZ_DATE = new Intl.DateTimeFormat('en-NZ', {
-  timeZone: 'Pacific/Auckland',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-})
-
-/** The calendar date `at` falls on in Pacific/Auckland, as `YYYY-MM-DD`. */
-export function nzCalendarDate(at: Date): IsoDate {
-  if (Number.isNaN(at.getTime())) {
-    throw new RangeError('date is not a valid instant')
-  }
-  let year = ''
-  let month = ''
-  let day = ''
-  for (const part of NZ_DATE.formatToParts(at)) {
-    if (part.type === 'year') year = part.value
-    else if (part.type === 'month') month = part.value
-    else if (part.type === 'day') day = part.value
-  }
-  return `${year.padStart(4, '0')}-${month}-${day}`
-}
-
-const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
 const MS_PER_DAY = 86_400_000
-
-interface CivilDate {
-  year: number
-  month: number // 1 to 12
-  day: number
-}
-
-function daysInMonth(year: number, month: number): number {
-  const d = new Date(0)
-  d.setUTCFullYear(year, month, 0)
-  return d.getUTCDate()
-}
-
-function parseIsoDate(value: IsoDate): CivilDate {
-  const match = ISO_DATE.exec(value)
-  if (match) {
-    const [, y, m, d] = match
-    const year = Number(y)
-    const month = Number(m)
-    const day = Number(d)
-    if (month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth(year, month)) {
-      return { year, month, day }
-    }
-  }
-  throw new RangeError('date must be a YYYY-MM-DD calendar date')
-}
 
 function pad(value: number, width: number): string {
   return String(value).padStart(width, '0')
-}
-
-function formatIsoDate({ year, month, day }: CivilDate): IsoDate {
-  return `${pad(year, 4)}-${pad(month, 2)}-${pad(day, 2)}`
 }
 
 // UTC midnight of the civil date. Built with `setUTCFullYear`, never
@@ -178,12 +117,6 @@ function dayIndex(date: IsoDate): number {
   return Math.round(civilInstant(date).getTime() / MS_PER_DAY)
 }
 
-function addDays(date: IsoDate, days: number): IsoDate {
-  const d = civilInstant(date)
-  d.setUTCDate(d.getUTCDate() + days)
-  return formatIsoDate({ year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() })
-}
-
 // 1 for Monday to 7 for Sunday.
 function isoWeekday(date: IsoDate): number {
   return ((civilInstant(date).getUTCDay() + 6) % 7) + 1
@@ -191,7 +124,7 @@ function isoWeekday(date: IsoDate): number {
 
 /** The ISO-8601 week a date falls in, e.g. "2026-W43" (the week's Thursday names the year). */
 export function isoWeekOf(date: IsoDate): string {
-  const thursday = addDays(date, 4 - isoWeekday(date))
+  const thursday = addDaysIso(date, 4 - isoWeekday(date))
   const { year } = parseIsoDate(thursday)
   const week = Math.floor((dayIndex(thursday) - dayIndex(`${pad(year, 4)}-01-01`)) / 7) + 1
   return `${pad(year, 4)}-W${pad(week, 2)}`
@@ -207,36 +140,105 @@ export interface WeekRange {
   end: IsoDate
 }
 
-/** The Monday and Sunday of an ISO week label. Throws on a label that names no week. */
+function periodRefusal(): RangeError {
+  return new RangeError('period must be an ISO week label (YYYY-Www)')
+}
+
+/**
+ * The Monday and Sunday of an ISO week label. Refuses, with the period text,
+ * a label that names no week, or whose analysis window (`analysisWindow`:
+ * the monthly months, the unusual-spend lookback and the ledger read's
+ * padding) leaves the years 0000 to 9999. So a week it returns is one
+ * `collectAggregates` can read, and a run is never logged for one it cannot
+ * (#349).
+ */
 export function weekRange(label: string): WeekRange {
-  const refused = new RangeError('period must be an ISO week label (YYYY-Www)')
+  const range = weekDays(label)
+  analysisWindow(range)
+  return range
+}
+
+// The Monday and Sunday of an ISO week label, refused only when the label
+// names no week. `weekRange` adds the analysis-window check.
+function weekDays(label: string): WeekRange {
+  const refused = periodRefusal()
   const match = typeof label === 'string' ? WEEK_LABEL.exec(label) : null
   if (!match) throw refused
   const [, y, w] = match
   const week = Number(w)
   if (week < 1) throw refused
-  const jan4 = `${y}-01-04`
-  const firstMonday = addDays(jan4, 1 - isoWeekday(jan4))
-  const start = addDays(firstMonday, 7 * (week - 1))
-  // Week 53 exists only in some years; a label past the year's last week
-  // round-trips to the next year's week and is refused.
-  if (isoWeekOf(start) !== label) throw refused
-  return { label, start, end: addDays(start, 6) }
+  try {
+    const jan4 = `${y}-01-04`
+    const firstMonday = addDaysIso(jan4, 1 - isoWeekday(jan4))
+    const start = addDaysIso(firstMonday, 7 * (week - 1))
+    // Week 53 exists only in some years; a label past the year's last week
+    // round-trips to the next year's week and is refused.
+    if (isoWeekOf(start) !== label) throw refused
+    return { label, start, end: addDaysIso(start, 6) }
+  } catch (err) {
+    // A week whose days leave the years 0000 to 9999 makes a date helper
+    // throw its own RangeError (#337). The caller gets this refusal instead.
+    if (err instanceof RangeError) throw refused
+    throw err
+  }
+}
+
+interface AnalysisWindow {
+  // The months the monthly chart covers, ascending, ending with the month
+  // the week's Sunday falls in.
+  months: string[]
+  // The earlier of the first monthly month's first day and the start of the
+  // unusual-spend lookback.
+  start: IsoDate
+  // The ledger read: `start` to the week's Sunday, TRANSFER_WINDOW_DAYS wider
+  // on both sides so a transfer whose other leg falls just outside still pairs.
+  readFrom: IsoDate
+  readTo: IsoDate
+}
+
+// Every day one `collectAggregates` run touches for a week, built in this one
+// place so `weekRange`'s check and the read cannot drift (#349). It also
+// builds the read's own UTC-day padding (`ledgerDayBounds`). A day outside the
+// years 0000 to 9999 makes a date helper (or `monthsEnding`) throw its own
+// RangeError; the caller gets the period refusal instead.
+function analysisWindow(range: WeekRange): AnalysisWindow {
+  try {
+    const months = monthsEnding(range.end, MONTHLY_MONTHS)
+    const [firstMonth] = months
+    const monthStart = `${firstMonth}-01`
+    const lookbackStart = addDaysIso(range.start, -7 * UNUSUAL_LOOKBACK_WEEKS)
+    const start = monthStart < lookbackStart ? monthStart : lookbackStart
+    const readFrom = addDaysIso(start, -TRANSFER_WINDOW_DAYS)
+    const readTo = addDaysIso(range.end, TRANSFER_WINDOW_DAYS)
+    // Built only so a padded read that leaves the years is refused here.
+    ledgerDayBounds(readFrom, readTo)
+    return { months, start, readFrom, readTo }
+  } catch (err) {
+    if (err instanceof RangeError) throw periodRefusal()
+    throw err
+  }
 }
 
 /** The last full Monday-to-Sunday NZ week strictly before the NZ week `now` falls in. */
 export function lastCompleteWeek(now: Date): string {
   const today = nzCalendarDate(now)
-  const thisMonday = addDays(today, 1 - isoWeekday(today))
-  return isoWeekOf(addDays(thisMonday, -7))
+  const thisMonday = addDaysIso(today, 1 - isoWeekday(today))
+  return isoWeekOf(addDaysIso(thisMonday, -7))
 }
 
-/** The `n` calendar months ending with the one `end` falls in, ascending, as `YYYY-MM`. */
+/**
+ * The `n` calendar months ending with the one `end` falls in, ascending, as `YYYY-MM`.
+ * Throws when the window would start before 0000-01, which has no label.
+ */
 export function monthsEnding(end: IsoDate, n: number = MONTHLY_MONTHS): string[] {
   const { year, month } = parseIsoDate(end)
   const last = year * 12 + (month - 1)
+  const first = last - n + 1
+  if (first < 0) {
+    throw new RangeError('end leaves no room for the months asked: the window would start before 0000-01')
+  }
   const months: string[] = []
-  for (let index = last - n + 1; index <= last; index += 1) {
+  for (let index = first; index <= last; index += 1) {
     months.push(`${pad(Math.floor(index / 12), 4)}-${pad((index % 12) + 1, 2)}`)
   }
   return months
@@ -246,12 +248,52 @@ export function monthsEnding(end: IsoDate, n: number = MONTHLY_MONTHS): string[]
 // Labels
 // ---------------------------------------------------------------------------
 
-// Letters, digits, the ASCII space and a few marks merchant names use. Every
-// other character becomes a space: `:` and `/` (so no URL scheme or path
+// Letters, digits, the ASCII space and a few punctuation marks merchant
+// names use. Every other character becomes a space, except the combining
+// marks LABEL_MARK allows (below): `:` and `/` (so no URL scheme or path
 // survives), `<` `>` `\` and the backtick (no markup and no way out of a
-// markdown code span), brackets, `*` `|` `~` `!`, and every control, format
-// and bidi character.
-const LABEL_CHAR = /[\p{L}\p{N} &'.,\-+()#@%_]/u
+// markdown code span), brackets, `*` `|` `~` `!`, every control, format
+// and bidi character, and every default-ignorable character, letters
+// included (#312). The Hangul fillers are letters that draw nothing: kept,
+// one between digit groups would end LONG_DIGIT_RUN without showing, and a
+// label of only fillers would look blank instead of being the fallback.
+// NFKC folds some fillers into others before this filter, so the rule is
+// the property, not a list of code points.
+const LABEL_CHAR = /(?!\p{DI})[\p{L}\p{N} &'.,\-+()#@%_]/u
+
+// Combining marks (#304). Scripts such as Devanagari, Thai and Tibetan need
+// them: without them "हिन्दी" would read "ह न द". A mark is kept only on a base,
+// which is a kept letter or number that is not default-ignorable. LABEL_CHAR
+// already keeps no default-ignorable character; LABEL_BASE excludes them
+// again, so a mark never lands on a character that draws nothing (where it
+// would draw over the character before), even if LABEL_CHAR is widened.
+// A mark straight after a base, or after a mark kept on that base, is kept,
+// up to LABEL_MAX_MARKS_PER_BASE; one past the cap, or one with no base (at
+// the start, or after a space, a punctuation mark or a dropped character),
+// is dropped, not turned into a space, so a word is never split by it.
+//
+// Only non-spacing (Mn) and spacing (Mc) marks are allowed, and not the
+// default-ignorable ones among them: the combining grapheme joiner, the
+// variation selectors (including the Mongolian ones) and the invisible
+// Khmer vowels, which draw nothing and could hide inside a label. Enclosing
+// marks (Me) draw a circle, box or screen over the whole base, so they are
+// not allowed either. A disallowed mark becomes a space, as any other
+// disallowed character does.
+const LABEL_MARK = /^(?!\p{DI})[\p{Mn}\p{Mc}]$/u
+const LABEL_BASE = /^(?!\p{DI})[\p{L}\p{N}]$/u
+
+// The most combining marks kept on one base. Stacked marks ("Zalgo") draw
+// above and below the line over the text around them; the cap bounds that
+// to the height real scripts reach after NFKC. The value is what common words
+// need: Hindi "ज़िंदगी" is ज with a nukta (NFKC decomposes ज़, a composition
+// exclusion), a vowel sign and an anusvara, and Tibetan stacks such as
+// "སྒྲུབ" carry two subjoined letters and a vowel sign, and pointed Hebrew
+// "שָּׁ" a shin dot, a dagesh and a vowel. Thai (vowel and tone) and pointed
+// Arabic (shadda and vowel) need at most two; Vietnamese and Māori compose
+// to precomposed letters under NFKC and keep none. Burmese "မြို့" needs four,
+// and loses its last mark (the dot below); a higher cap was not worth the
+// extra overdraw for it.
+const LABEL_MAX_MARKS_PER_BASE = 3
 
 // Only this many UTF-16 units of a label are read, so a huge feed string
 // costs bounded work: NFKC and the character filter never see the rest.
@@ -259,21 +301,28 @@ const LABEL_CHAR = /[\p{L}\p{N} &'.,\-+()#@%_]/u
 const LABEL_MAX_INPUT_UNITS = 400
 
 // Eight or more decimal digits, counting through spaces and hyphens between
-// groups: an account number ("12-3456-0123456-00") or a card number. Run
-// after the filter, so a slash or an invisible character between groups has
-// already become a space and is counted through too. A dot or a comma, which
-// the filter keeps, ends a run: "1,234,567.89" is left as it is.
-const LONG_DIGIT_RUN = /\p{Nd}(?:[ -]*\p{Nd}){7,}/gu
+// groups and through the marks kept on a digit: an account number
+// ("12-3456-0123456-00") or a card number, also one with a combining mark on
+// every digit, which would otherwise end the run at each digit and leave the
+// number readable. A digit's marks are masked with it. Run after the filter,
+// so a slash or a default-ignorable character between groups (a zero-width
+// space, a Hangul filler) has already become a space and is counted through
+// too. A dot or a comma, which the filter keeps, ends a run: "1,234,567.89"
+// is left as it is.
+const LONG_DIGIT_RUN = /\p{Nd}\p{M}*(?:[ -]*\p{Nd}\p{M}*){7,}/gu
 const DIGIT_MASK = '####'
 
 /**
  * Merchant or category text made safe to show: cut to a bounded prefix
  * (never splitting a surrogate pair), NFKC-folded (so a full-width colon is
- * a colon before it is dropped, and full-width digits are digits),
- * disallowed characters replaced by spaces, whitespace collapsed, every
- * LONG_DIGIT_RUN masked (so no account or card number is stored),
- * and cut to a maximum number of code points without splitting a surrogate
- * pair. Empty after that, it is `fallback`.
+ * a colon before it is dropped, full-width digits are digits, and a base
+ * letter and a mark that compose are one letter before marks are counted),
+ * disallowed characters replaced by spaces, combining marks kept only on a
+ * base and at most LABEL_MAX_MARKS_PER_BASE on one (the rest dropped),
+ * whitespace collapsed, every LONG_DIGIT_RUN masked (so no account or card
+ * number is stored), and cut to a maximum number of code points without
+ * splitting a surrogate pair. A cut keeps a prefix, so it never leaves a mark
+ * without its base. Empty after that, it is `fallback`.
  */
 export function cleanLabel(text: string | null, fallback: string): string {
   if (typeof text !== 'string') return fallback
@@ -281,7 +330,23 @@ export function cleanLabel(text: string | null, fallback: string): string {
   const last = text.charCodeAt(end - 1)
   if (end < text.length && last >= 0xd800 && last <= 0xdbff) end -= 1
   let kept = ''
-  for (const char of text.slice(0, end).normalize('NFKC')) kept += LABEL_CHAR.test(char) ? char : ' '
+  // How many more marks the last kept character may carry: 0 after anything
+  // that is not a base, or once its base is at the cap.
+  let marksLeft = 0
+  for (const char of text.slice(0, end).normalize('NFKC')) {
+    if (LABEL_MARK.test(char)) {
+      if (marksLeft > 0) {
+        kept += char
+        marksLeft -= 1
+      }
+    } else if (LABEL_CHAR.test(char)) {
+      kept += char
+      marksLeft = LABEL_BASE.test(char) ? LABEL_MAX_MARKS_PER_BASE : 0
+    } else {
+      kept += ' '
+      marksLeft = 0
+    }
+  }
   const collapsed = kept.replace(/\s+/g, ' ').trim()
   const masked = collapsed.replace(LONG_DIGIT_RUN, DIGIT_MASK)
   const cut = Array.from(masked).slice(0, LABEL_MAX_CODE_POINTS).join('').trim()
@@ -291,48 +356,6 @@ export function cleanLabel(text: string | null, fallback: string): string {
 // ---------------------------------------------------------------------------
 // The one read
 // ---------------------------------------------------------------------------
-
-// The only date shape the shared drawings matcher accepts.
-const NZ_DAY = /^\d{4}-\d{2}-\d{2}$/
-
-interface CandidateRow {
-  id: number
-  scope: RowScope
-  date: string
-  amount_cents: number
-}
-
-// The ids of both halves of every drawing in the database. Mirrors
-// `loadDrawingIds` (server/db/drawings.ts) row for row: all-time, so no
-// window edge changes the greedy pairing; Akahu rows on stored Akahu
-// accounts, settled and pending; strawb outflows and personal inflows. A row
-// the matcher cannot place (an unparseable date, a year past 9999, an amount
-// that is not whole cents) is skipped, as there: `findDrawingIds` throws on
-// a non-integer amount, so that skip is what keeps a run alive. The amount
-// signs only narrow the read: `findDrawingIds` itself ignores any row that
-// is not a strawb outflow or a personal inflow, so they change no result.
-async function readDrawingIds(db: typeof connection): Promise<Set<number>> {
-  const rows: CandidateRow[] = await db('transactions as t')
-    .join('accounts as a', 'a.akahu_id', 't.account_id')
-    .where('t.source', 'akahu')
-    .where('a.source', 'akahu')
-    .whereNotNull('t.date')
-    .where((q) =>
-      q
-        .where((out) => out.where('a.scope', 'strawb').where('t.amount_cents', '<', 0))
-        .orWhere((into) => into.where('a.scope', 'personal').where('t.amount_cents', '>', 0)),
-    )
-    .select('t.id', 'a.scope', 't.date', 't.amount_cents')
-  const candidates: DrawingCandidate[] = []
-  for (const row of rows) {
-    const at = new Date(row.date)
-    if (Number.isNaN(at.getTime())) continue
-    const date = nzCalendarDate(at)
-    if (!NZ_DAY.test(date) || !Number.isSafeInteger(row.amount_cents)) continue
-    candidates.push({ id: row.id, scope: row.scope, date, amountCents: row.amount_cents })
-  }
-  return findDrawingIds(candidates)
-}
 
 interface StoredRow {
   id: number
@@ -365,6 +388,15 @@ export async function loadLedger(
   return (await readLedger(scope, from, to, db)).rows
 }
 
+// `date` is stored as UTC ISO-8601 text. The SQL bounds are whole UTC days
+// padded past the NZ offset either way (`upperDay` is exclusive); the exact
+// NZ day is applied after conversion. `analysisWindow` builds them too, so a
+// week whose padded read would leave the years 0000 to 9999 is refused
+// before a run.
+function ledgerDayBounds(from: IsoDate, to: IsoDate): { lowerDay: IsoDate; upperDay: IsoDate } {
+  return { lowerDay: addDaysIso(from, -1), upperDay: addDaysIso(to, 2) }
+}
+
 async function readLedger(
   scope: InsightScope,
   from: IsoDate,
@@ -376,12 +408,8 @@ async function readLedger(
   }
   // A personal run never reads the candidates, which hold strawb rows; a
   // hand-set Drawings category still drops a personal row below.
-  const drawingIds = scope === 'strawb' ? await readDrawingIds(db) : new Set<number>()
-  // `date` is stored as UTC ISO-8601 text. The SQL bounds are whole UTC
-  // days padded past the NZ offset either way; the exact NZ day is applied
-  // below, after conversion.
-  const lowerDay = addDays(from, -1)
-  const upperDay = addDays(to, 2)
+  const drawingIds = scope === 'strawb' ? await loadDrawingIds(db) : new Set<number>()
+  const { lowerDay, upperDay } = ledgerDayBounds(from, to)
   const stored: StoredRow[] = await db('transactions as t')
     .join('accounts as a', 't.account_id', 'a.akahu_id')
     .where({ 'a.scope': scope, 'a.source': 'akahu', 't.source': 'akahu', 't.status': 'settled' })
@@ -460,7 +488,7 @@ function push<K>(map: Map<K, number[]>, key: K, value: number): void {
  * (Baseline decision 0a37d21b, which weighs pairing on amounts, Akahu's
  * TRANSFER type and the other account's number). This function is the one
  * place the rule lives; when #52 is answered, replace its body (and the
- * TRANSFER_WINDOW_DAYS read padding in `collectAggregates`, if the new rule
+ * TRANSFER_WINDOW_DAYS read padding in `analysisWindow`, if the new rule
  * needs none).
  *
  * Today's rule pairs on amounts. An outflow pairs with an
@@ -622,7 +650,11 @@ export interface WeekOverWeek {
 /** Spend in the week against the week before it, in total and per category. */
 export function weekOverWeek(rows: readonly LedgerRow[], week: string): WeekOverWeek {
   const current = weekRange(week)
-  const previous = weekRange(isoWeekOf(addDays(current.start, -7)))
+  // `weekDays`, not `weekRange`: the previous week's own window may start
+  // before 0000-01-01 when this week's does not. Its days lie inside this
+  // week's analysis window, so for a week `weekRange` accepted this step back
+  // cannot leave the years; for one it refused, `current` has already thrown.
+  const previous = weekDays(isoWeekOf(addDaysIso(current.start, -7)))
   const thisWeek = new Map<string, number[]>()
   const lastWeek = new Map<string, number[]>()
   for (const row of rows) {
@@ -679,8 +711,8 @@ export function unusualSpends(
   limit: number = UNUSUAL_LIMIT,
 ): UnusualSpend[] {
   const { start, end } = weekRange(week)
-  const historyStart = addDays(start, -7 * UNUSUAL_LOOKBACK_WEEKS)
-  const historyEnd = addDays(start, -1)
+  const historyStart = addDaysIso(start, -7 * UNUSUAL_LOOKBACK_WEEKS)
+  const historyEnd = addDaysIso(start, -1)
   const history = new Map<string, number[]>()
   for (const row of rows) {
     const spend = spendIn(row, historyStart, historyEnd)
@@ -754,18 +786,9 @@ export async function collectAggregates(
   db = connection,
 ): Promise<Aggregates> {
   const range = weekRange(weekLabel)
-  const months = monthsEnding(range.end, MONTHLY_MONTHS)
-  const [firstMonth] = months
-  const monthStart = `${firstMonth}-01`
-  const lookbackStart = addDays(range.start, -7 * UNUSUAL_LOOKBACK_WEEKS)
-  const windowStart = monthStart < lookbackStart ? monthStart : lookbackStart
+  const { months, start: windowStart, readFrom, readTo } = analysisWindow(range)
 
-  const { rows: loaded, drawingDays } = await readLedger(
-    scope,
-    addDays(windowStart, -TRANSFER_WINDOW_DAYS),
-    addDays(range.end, TRANSFER_WINDOW_DAYS),
-    db,
-  )
+  const { rows: loaded, drawingDays } = await readLedger(scope, readFrom, readTo, db)
   const inWindow = (r: LedgerRow) => inRange(r, windowStart, range.end)
   const kept = excludeOwnAccountTransfers(loaded).filter(inWindow)
   const drawingsInWindow = drawingDays.filter((d) => d >= windowStart && d <= range.end).length

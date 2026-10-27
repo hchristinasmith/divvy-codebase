@@ -6,7 +6,7 @@ import {
 } from '../../apis/categorise.ts'
 
 // The Sort screen's one write: a category for a whole merchant group
-// (prd-02 Ruling 16). One mutation key, so one pending flag disables every
+// (prd-02 Ruling 17). One mutation key, so one pending flag disables every
 // control on the card and a second tap in the gap before the next render is
 // dropped.
 //

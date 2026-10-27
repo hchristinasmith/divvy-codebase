@@ -12,7 +12,7 @@ import Sort from './Sort/index.tsx'
 import Sync from './Sync/index.tsx'
 import Privacy from './Privacy/index.tsx'
 
-// The one route table for the handoff's screens, and Sort (prd-02 Ruling 16),
+// The one route table for the handoff's screens, and Sort (prd-02 Ruling 17),
 // which the handoff does not have. The sidebar, the phone tab
 // bar and App.tsx's routes all read it. A screen's issue replaces the default
 // export of its stub, ./<Name>/index.tsx, and leaves this file and App.tsx

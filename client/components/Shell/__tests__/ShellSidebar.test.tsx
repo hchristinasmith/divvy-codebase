@@ -19,7 +19,7 @@ function links() {
 }
 
 describe('the desktop sidebar', () => {
-  it('lists the shell screens in sidebar order, then Wishlist and Settings', () => {
+  it('lists the shell screens in sidebar order, then Settings', () => {
     renderWithProviders(<ShellSidebar />)
     expect(links().map((a) => a.textContent)).toEqual([
       'Overview',
@@ -32,7 +32,6 @@ describe('the desktop sidebar', () => {
       'Sort',
       'Sync',
       'Privacy',
-      'Wishlist',
       'Settings',
     ])
     expect(links().map((a) => a.getAttribute('href'))).toEqual([
@@ -46,7 +45,6 @@ describe('the desktop sidebar', () => {
       '/sort',
       '/sync',
       '/privacy',
-      '/wishlist',
       '/settings',
     ])
   })

@@ -1,12 +1,8 @@
-// Imported first, before anything that imports overview.ts: drawings.ts and
-// overview.ts import each other, and this file proves the cycle loads from
-// the drawings side (the route tests load it from the overview side).
-import { applyDrawings, loadDrawingIds } from '../drawings.ts'
-
 import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 
 import connection from '../connection.ts'
-import { nzCalendarDate } from '../overview.ts'
+import { applyDrawings, loadDrawingIds } from '../drawings.ts'
+import { nzCalendarDate } from '../../../shared/nz-dates.ts'
 import { assertInMemory } from '../../test-utils/app.ts'
 
 // Drawings on read (prd-02 Ruling 15, issue #264): server/db/drawings.ts

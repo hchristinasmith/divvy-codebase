@@ -6,7 +6,7 @@ import { useScope } from '../../context/ScopeContext.tsx'
 import { CARD, ERROR, MUTED, SECONDARY_BUTTON } from '../Overview/styles.ts'
 import SortQueue from './SortQueue.tsx'
 
-// The Sort screen (prd-02 Ruling 16, issue 259): uncategorised settled
+// The Sort screen (prd-02 Ruling 17, issue 259): uncategorised settled
 // transactions, one merchant card at a time, largest total first. Every
 // figure comes from one read for the chosen scope
 // (server/routes/categorise.ts); this screen does no arithmetic.

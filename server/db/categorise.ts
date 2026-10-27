@@ -19,7 +19,7 @@ import { nzCalendarDate } from './overview.ts'
 import { listAccounts } from './synced.ts'
 import { setUserCategory } from './transactions.ts'
 
-// The Sort screen's data module (prd-02 Ruling 16, issue #259): the read
+// The Sort screen's data module (prd-02 Ruling 17, issue #259): the read
 // behind GET /api/v1/categorise/groups and the write behind POST
 // /api/v1/categorise/groups/apply.
 //
@@ -186,7 +186,7 @@ function addCents(a: Cents, b: Cents): Cents {
 }
 
 /**
- * The one definition of a group's totals (prd-02 Ruling 16, "total spend").
+ * The one definition of a group's totals (prd-02 Ruling 17, "total spend").
  * `totalCents` is the money out, as a positive amount, the way
  * `budgetSpentCents` in shared/safe-to-spend.ts counts spend: money in
  * never offsets it. `receivedCents` is the money in, as a positive amount,

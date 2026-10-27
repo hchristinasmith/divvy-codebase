@@ -10,7 +10,7 @@ The operator runbook for the first deploy (prd-01 w4) and every one after it. Ev
 - The server binds `127.0.0.1:3005`, and `start.sh` refuses to boot with `HOST` set to anything else. That bind is what keeps `fly proxy` and the rest of Fly's private network from reaching the app. `tailscale serve`, in the same machine, proxies the tailnet to it.
 - In userspace networking mode, `tailscaled` forwards a tailnet connection on *any* port to the same port on loopback. So the bind does nothing against tailnet peers: the tailnet policy is what decides which devices reach the app and on which port. Without the section 2 policy, every device on the tailnet reaches `http://divvy:3005` (plain HTTP, no TLS) as well as 443 (checked in section 8).
 
-The image's CMD is `scripts/start.sh`. It refuses to start without `TS_AUTHKEY`, or with `HOST` set to anything but `127.0.0.1`, starts `tailscaled` in userspace networking mode with none of the app's environment (only `PATH`), joins the tailnet, publishes the app with `tailscale serve`, checks that the serve config proxies to the app with Funnel off, and only then runs the migrations (`npm run migrate:latest`) and the server (`node dist/server.js`), under Litestream if `/app/litestream.yml` exists. The server runs without npm in between, so the SIGTERM Fly sends on a stop or deploy reaches it. If any tailnet step fails, the app never starts.
+The image's CMD is `scripts/start.sh`. It refuses to start without `TS_AUTHKEY`, or with `HOST` set to anything but `127.0.0.1`, starts `tailscaled` in userspace networking mode with none of the app's environment (only `PATH`), joins the tailnet, publishes the app with `tailscale serve` (every `tailscale` command, and the `timeout` that bounds two of them, also gets only `PATH`), checks that the serve config proxies to the app with Funnel off, and only then runs the migrations (`npm run migrate:latest`) and the server (`node dist/server.js`), under Litestream if `/app/litestream.yml` exists. The server runs without npm in between, so the SIGTERM Fly sends on a stop or deploy reaches it. Before the migrations, the app's command removes every `LITESTREAM_` and `AWS_` variable from its environment and refuses to go on if one is left (restore.md, "What backs up what"). If any tailnet step fails, the app never starts.
 
 ## 2. Prerequisites
 
@@ -73,7 +73,13 @@ This has been done once: `TS_AUTHKEY` is staged on `divvy-strawb`. Run it again 
 
 The database backup needs three more secrets: `LITESTREAM_REPLICA_URL`, `LITESTREAM_ACCESS_KEY_ID` and `LITESTREAM_SECRET_ACCESS_KEY`. Set them before deploying an image that contains `litestream.yml`: without `LITESTREAM_REPLICA_URL` the machine does not boot. Setting them, and restoring from the backup, is in [restore.md](restore.md), section 1.
 
+The Xero connection needs `XERO_TOKEN_KEY`, which encrypts the stored Xero tokens. Generate it with `openssl rand -base64 32`: it must be 32 bytes in standard, padded base64. The vault refuses anything else as `key_invalid` (a trailing newline, missing padding, base64url, hex, the wrong length), and an unset key is `key_missing`. It is a Fly secret only, never in the image or the database. Write a copy in the password manager before you set it, separate from the database backup: the replica holds the encrypted tokens, so the key and the replica together give anyone the tokens. Losing the key, or rotating it, makes every stored token fail to decrypt (`decrypt_failed`). The vault does not re-encrypt or fall back to an old key, so the fix is to reconnect Xero.
+
+`XERO_CLIENT_ID` and `XERO_CLIENT_SECRET` are the Xero app's OAuth credentials from the Xero developer portal (prd-05). No code reads them yet: the connect flow is issue #65, so set them when that lands. Keep them out of shell history as for `TS_AUTHKEY`, with a leading space.
+
 ## 5. Deploy
+
+Before this command, the Litestream secrets must be set (section 4, [restore.md](restore.md) section 1). The image always starts under Litestream, and without them the machine does not boot.
 
 ```sh
 fly deploy --ha=false --no-public-ips -a divvy-strawb
@@ -100,8 +106,10 @@ fly logs -a divvy-strawb
 - If there is more than one machine, run `fly scale count 1 -a divvy-strawb`. A second machine would get a fresh, empty volume and a second database.
 - `fly logs` should show, in this order:
   - `start.sh: serving http://127.0.0.1:3005 on the tailnet as divvy`
-  - `start.sh: WARNING: backups are OFF: ...` (until #24 ships the Litestream config)
+  - `start.sh: backups ON (litestream, /app/litestream.yml)`
+  - Litestream's own lines. On a fresh volume they are the restore: see [restore.md](restore.md) section 5b.
   - `Listening on 127.0.0.1:3005`
+- If a `start.sh: WARNING: backups are OFF` line appears, the image lacks `/app/litestream.yml`. That is wrong for this deploy.
 
 Check the node from inside the machine:
 
@@ -146,6 +154,8 @@ If a stale node named `divvy` already exists on the tailnet (from an earlier att
 - **`tailscale serve status failed`.** The command that reads the serve config back failed, so `start.sh` cannot confirm the proxy or that Funnel is off, and it does not start the app. Read the lines before it in `fly logs`, then `fly machine restart -a divvy-strawb`.
 - **`start.sh: ERROR: leftover database files with no database`.** The volume holds a `-wal`, `-shm` or `-journal` (named in the message) but no `/data/divvy.sqlite3`, so someone deleted the database without its files. Booting would replay them onto the restored or new database. The machine exits 1 before it joins the tailnet. Move the named files off the volume, keeping them, then restart (restore.md, "What backs up what").
 - **`serve status does not show a proxy` or `Funnel is on`.** The serve config is not what `start.sh` set. It resets the config on every boot, so this means something else changed it; check `serve status` (section 6).
+- **A start.sh error line ending "Refusing to start the app."** The command that removes the `LITESTREAM_` and `AWS_` variables stopped the boot before the migrations ran. The message names which check failed: `env` failed, `env` printed no `PATH` line, or a variable with one of those prefixes was still set after the scrub. That means a broken image or environment, not a secret to set. Setting or unsetting a secret does not fix it. Read the lines before it in `fly logs`, and redeploy a known-good image (section 12).
+- **Litestream fails, or the boot hangs before the app starts.** Its messages and their fixes are in [restore.md](restore.md), section 8.
 
 ## 11. Bumping Tailscale or Litestream
 
@@ -165,4 +175,4 @@ fly machine stop <machine id> -a divvy-strawb                 # stop without del
 fly machine destroy <machine id> -a divvy-strawb              # the volume survives
 ```
 
-`fly volumes destroy` and `fly apps destroy` delete the volume, which holds the database and the node's identity. That is data loss, and until #24 there is no backup.
+`fly volumes destroy` and `fly apps destroy` delete the volume, which holds the database and the node's identity. That is data loss. The database can be restored from the replica ([restore.md](restore.md) section 5b; that procedure is not yet run on Fly) if the Litestream secrets were set and replication ran. The tailnet node cannot be restored: it registers again only with a valid `TS_AUTHKEY` (section 3).

@@ -30,7 +30,7 @@ vi.mock('../../db/drawings.ts', async (importOriginal) => {
   return { ...real, loadDrawingIds: vi.fn(real.loadDrawingIds) }
 })
 
-// The Sort screen's routes (prd-02 Ruling 16, issue #259), over HTTP
+// The Sort screen's routes (prd-02 Ruling 17, issue #259), over HTTP
 // against the real app and a fresh in-memory database migrated in
 // `beforeEach` (Done-when 7). Every account, merchant, description and
 // amount below is invented.

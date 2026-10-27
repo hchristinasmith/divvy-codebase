@@ -1,5 +1,5 @@
 import type { Account, SyncRun } from '../../models/sync.ts'
-import type { Bill, BillRepeat } from '../../models/planning.ts'
+import type { BillRepeat } from '../../models/planning.ts'
 import type { CategorySource } from '../../models/transactions.ts'
 import {
   SETTING_KEYS,
@@ -18,7 +18,6 @@ import {
   type TransactionStatus,
 } from '../../shared/contracts.ts'
 import {
-  daysInMonth,
   lastPayday,
   nextPayday,
   safeToSpend,
@@ -28,18 +27,26 @@ import {
   type SafeToSpendTransaction,
 } from '../../shared/safe-to-spend.ts'
 import { effectiveCategory } from '../../shared/drawings.ts'
+import {
+  MAX_UNPAID_OCCURRENCES,
+  addDaysIso,
+  billOccurrencesThrough,
+  nzCalendarDate as sharedNzCalendarDate,
+} from '../../shared/nz-dates.ts'
 import connection from './connection.ts'
 import { loadDrawingIds } from './drawings.ts'
 import { listAccounts } from './synced.ts'
+import { rankByStartedAt } from '../sync/ranked-runs.ts'
 
 // The overview's data module (prd-02, issue #44): every read behind
 // GET /api/v1/overview and the one write behind dismissing an alert.
 //
 // This module does no money arithmetic. Every figure it sends is either a
 // stored value passed through (a balance, a bill's amount) or read off what
-// `safeToSpend` in shared/safe-to-spend.ts returned (prd-02 Ruling 1). The
-// only things computed here are calendar dates: today in Hannah's timezone,
-// and which occurrences of a repeating bill are due.
+// `safeToSpend` in shared/safe-to-spend.ts returned (prd-02 Ruling 1).
+// Calendar dates are not computed here either: today in Hannah's timezone,
+// which occurrences of a repeating bill are due, and the limit on unpaid
+// ones come from shared/nz-dates.ts, the module the Bills screen reads too.
 //
 // Inputs. `safeToSpend` is handed every stored Akahu account, bill
 // occurrence, budget and window transaction, whatever the scope asked for;
@@ -73,6 +80,9 @@ import { listAccounts } from './synced.ts'
 // - `bill_overdue:<billId>:<dueDate>`: an unpaid occurrence before today.
 // - `bill_due_soon:<billId>:<dueDate>`: an unpaid occurrence from today to
 //   the next payday.
+// - `bill_too_many_unpaid:<billId>:<lastPayday>`: a bill past the
+//   unpaid-occurrence limit, left out of the totals (#247). Like
+//   over_budget, a dismissal lasts one pay period.
 
 /**
  * A failure the route may name to the client. The message is one of a closed
@@ -84,7 +94,6 @@ export type OverviewDataErrorMessage =
   | 'a stored setting is not valid'
   | 'an account has no balance'
   | 'a transaction is incomplete'
-  | 'a bill has too many unpaid occurrences'
 
 export class OverviewDataError extends Error {
   constructor(message: OverviewDataErrorMessage) {
@@ -97,135 +106,24 @@ export class OverviewDataError extends Error {
 // Dates
 // ---------------------------------------------------------------------------
 
-// Built once. `formatToParts` is read field by field rather than trusting a
-// locale's string order.
-const NZ_DATE = new Intl.DateTimeFormat('en-NZ', {
-  timeZone: 'Pacific/Auckland',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-})
-
+// Stays exported because ./goals.ts and ./subscriptions.ts (and an open
+// PR's spending.ts) import it from here, and ./goals.ts catches its
+// OverviewDataError. #322 retires this wrapper.
 /**
- * The calendar date `at` falls on in Pacific/Auckland, as `YYYY-MM-DD`.
- * Safe-to-spend takes `today` in Hannah's timezone (shared/safe-to-spend.ts),
- * and a transaction's date is read the same way, so a purchase at 9am NZ on
- * a Tuesday is Tuesday's spend even though it is Monday in UTC.
+ * The calendar date `at` falls on in Pacific/Auckland (shared/nz-dates.ts),
+ * with the shared module's RangeError for an invalid Date turned into the
+ * fixed text `a transaction is incomplete`. Every call here goes through it,
+ * so nothing this module returns changed when the date code moved to
+ * shared/.
  */
 export function nzCalendarDate(at: Date): IsoDate {
-  if (Number.isNaN(at.getTime())) {
-    throw new OverviewDataError('a transaction is incomplete')
-  }
-  let year = ''
-  let month = ''
-  let day = ''
-  for (const part of NZ_DATE.formatToParts(at)) {
-    if (part.type === 'year') year = part.value
-    else if (part.type === 'month') month = part.value
-    else if (part.type === 'day') day = part.value
-  }
-  return `${year.padStart(4, '0')}-${month}-${day}`
-}
-
-const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
-
-interface CivilDate {
-  year: number
-  month: number // 1 to 12
-  day: number
-}
-
-function parseIsoDate(value: IsoDate): CivilDate {
-  const match = ISO_DATE.exec(value)
-  if (match) {
-    const year = Number(match[1])
-    const month = Number(match[2])
-    const day = Number(match[3])
-    if (
-      month >= 1 &&
-      month <= 12 &&
-      day >= 1 &&
-      day <= daysInMonth(year, month)
-    ) {
-      return { year, month, day }
+  try {
+    return sharedNzCalendarDate(at)
+  } catch (err) {
+    if (err instanceof RangeError) {
+      throw new OverviewDataError('a transaction is incomplete')
     }
-  }
-  // The value is not echoed: the route turns this into a fixed text.
-  throw new RangeError('a bill date is not a YYYY-MM-DD calendar date')
-}
-
-function formatIsoDate({ year, month, day }: CivilDate): IsoDate {
-  if (year < 0 || year > 9999) {
-    throw new RangeError('a bill date falls outside the years 0000 to 9999')
-  }
-  const yyyy = String(year).padStart(4, '0')
-  const mm = String(month).padStart(2, '0')
-  const dd = String(day).padStart(2, '0')
-  return `${yyyy}-${mm}-${dd}`
-}
-
-/**
- * `date` moved by `days` calendar days. Built with `setUTCFullYear`, as
- * shared/safe-to-spend.ts does, never `Date.UTC`, which reads the years 0 to
- * 99 as 1900 to 1999.
- */
-function addDaysIso(date: IsoDate, days: number): IsoDate {
-  const { year, month, day } = parseIsoDate(date)
-  const d = new Date(0)
-  d.setUTCFullYear(year, month - 1, day + days)
-  return formatIsoDate({
-    year: d.getUTCFullYear(),
-    month: d.getUTCMonth() + 1,
-    day: d.getUTCDate(),
-  })
-}
-
-/**
- * The anchor moved by `months` whole months, keeping the anchor's day of
- * month clamped to the end of a shorter month: the 31st falls on the 30th,
- * 29th or 28th, and on the 31st again the month after. 29 February moved by
- * twelve months falls on 28 February in a year that is not a leap year.
- */
-function addMonthsClamped(anchor: CivilDate, months: number): IsoDate {
-  const index = anchor.year * 12 + (anchor.month - 1) + months
-  const year = Math.floor(index / 12)
-  const month = (index % 12) + 1
-  const day = Math.min(anchor.day, daysInMonth(year, month))
-  return formatIsoDate({ year, month, day })
-}
-
-/**
- * Every occurrence of a bill from its anchor (`first_due_date`) up to and
- * including `through`, ascending (#35 option C). Each occurrence is computed
- * from the anchor, never from the previous occurrence, so nothing drifts:
- *
- * - `none`: the anchor alone, if it is not after `through`.
- * - `weekly`: anchor + 7n days.
- * - `monthly`: the anchor's day of month, clamped to the month's end.
- * - `yearly`: the anchor's month and day, clamped the same way.
- *
- * Paid occurrences are included; dropping them is the caller's job.
- */
-export function billOccurrencesThrough(
-  bill: Pick<Bill, 'repeat' | 'first_due_date'>,
-  through: IsoDate,
-): IsoDate[] {
-  parseIsoDate(through)
-  const anchorDate = parseIsoDate(bill.first_due_date)
-  const anchor = formatIsoDate(anchorDate)
-  const occurrences: IsoDate[] = []
-  if (anchor > through) return occurrences
-  if (bill.repeat === 'none') return [anchor]
-  for (let n = 0; ; n += 1) {
-    let next: IsoDate
-    if (bill.repeat === 'weekly') next = addDaysIso(anchor, 7 * n)
-    else if (bill.repeat === 'monthly') next = addMonthsClamped(anchorDate, n)
-    else if (bill.repeat === 'yearly')
-      next = addMonthsClamped(anchorDate, 12 * n)
-    else throw new RangeError('a bill has an unknown repeat')
-    // ISO dates compare correctly as strings.
-    if (next > through) return occurrences
-    occurrences.push(next)
+    throw err
   }
 }
 
@@ -236,15 +134,12 @@ export function billOccurrencesThrough(
 /** How many rows the overview's recent activity list shows. */
 export const RECENT_ACTIVITY_LIMIT = 10
 
-// A bill with more unpaid occurrences than this is refused rather than
-// truncated: a truncated list would be a fake number.
-const MAX_UNPAID_OCCURRENCES = 1000
-
 type Db = typeof connection
 
 /**
  * Runs a call into shared date or money code, turning its RangeError or
  * TypeError (whose messages name ids and values) into the fixed text.
+ * Copied as `guard` in ./bills.ts and ./goals.ts; change all together.
  */
 function guard<T>(fn: () => T): T {
   try {
@@ -289,11 +184,12 @@ const NUMERIC_SETTINGS = [
 const WHOLE_NUMBER = /^-?\d+$/
 
 /**
- * The settings safe-to-spend needs. Several rows may hold one key (the
- * table has no uniqueness on it and a `user_id` Divvy no longer has); the
- * one with the newest `updated_at` wins, then the higher `id` (a text
- * column, so compared as text). An absent key takes its default; a present
- * one must be a whole number. Range is left to the shared module.
+ * The settings safe-to-spend needs. `settings` has a UNIQUE `key`
+ * (migration 20261025150000, #46), so a key has at most one row; the query's
+ * ordering (newest `updated_at`, then higher integer `id`) picks between rows
+ * only on a table without that constraint, and is kept as a guard. An absent
+ * key takes its default; a present one must be a whole number. Range is left
+ * to the shared module.
  */
 async function readSettings(db: Db): Promise<Settings> {
   const rows: { key: string; value: unknown }[] = await db('settings')
@@ -321,7 +217,8 @@ async function readSettings(db: Db): Promise<Settings> {
     const key = SETTING_KEYS[field]
     if (!newest.has(key)) continue
     const value = newest.get(key)
-    // A NULL value is a row that is present and says nothing usable.
+    // `value` is NOT NULL (#46), so the type test is a guard; the whole-number
+    // test is live, since stored text such as a blank or a decimal reaches it.
     if (typeof value !== 'string' || !WHOLE_NUMBER.test(value)) {
       throw new OverviewDataError('a stored setting is not valid')
     }
@@ -332,6 +229,18 @@ async function readSettings(db: Db): Promise<Settings> {
     settings[field] = parsed
   }
   return settings
+}
+
+/**
+ * A bill with more unpaid occurrences than `MAX_UNPAID_OCCURRENCES`. None of
+ * its occurrences reach safe-to-spend or the alerts; it is named by its own
+ * alert instead (#247, ruled by Hannah 2026-10-26).
+ */
+interface LeftOutBill {
+  id: number
+  name: string
+  scope: RowScope
+  amount_cents: number
 }
 
 /** One unpaid occurrence of a bill, as the alerts need it. */
@@ -372,6 +281,8 @@ interface Inputs {
   accounts: SafeToSpendAccount[]
   bills: SafeToSpendBill[]
   occurrences: BillOccurrence[]
+  /** Bills past the unpaid-occurrence limit, in id order. */
+  leftOutBills: LeftOutBill[]
   budgets: SafeToSpendBudget[]
   transactions: SafeToSpendTransaction[]
   /** Both halves of every drawing (prd-02 Ruling 15), loaded once per read. */
@@ -423,12 +334,21 @@ async function loadInputs(now: Date, db: Db): Promise<Inputs> {
   const paid = new Set(paymentRows.map((p) => `${p.bill_id}|${p.due_date}`))
   const bills: SafeToSpendBill[] = []
   const occurrences: BillOccurrence[] = []
+  const leftOutBills: LeftOutBill[] = []
   for (const bill of billRows) {
     const unpaid = guard(() => billOccurrencesThrough(bill, next)).filter(
       (dueDate) => !paid.has(`${bill.id}|${dueDate}`),
     )
+    // Past the limit the bill is left out whole, never truncated, and
+    // named by an alert so the missing amount is visible (#247).
     if (unpaid.length > MAX_UNPAID_OCCURRENCES) {
-      throw new OverviewDataError('a bill has too many unpaid occurrences')
+      leftOutBills.push({
+        id: bill.id,
+        name: bill.name,
+        scope: bill.scope,
+        amount_cents: bill.amount_cents,
+      })
+      continue
     }
     for (const dueDate of unpaid) {
       bills.push({
@@ -519,6 +439,7 @@ async function loadInputs(now: Date, db: Db): Promise<Inputs> {
     accounts,
     bills,
     occurrences,
+    leftOutBills,
     budgets,
     transactions,
     drawingIds,
@@ -542,10 +463,12 @@ function computeSafeToSpend(scope: Scope, inputs: Inputs): SafeToSpendResult {
   )
 }
 
+// A left-out bill comes first: it means the totals are missing a bill.
 const KIND_ORDER: Record<AlertKind, number> = {
-  over_budget: 0,
-  bill_overdue: 1,
-  bill_due_soon: 2,
+  bill_too_many_unpaid: 0,
+  over_budget: 1,
+  bill_overdue: 2,
+  bill_due_soon: 3,
 }
 
 function compareText(a: string, b: string): number {
@@ -558,7 +481,8 @@ function compareText(a: string, b: string): number {
 const SUBJECT_ORDER = new Intl.Collator('en')
 
 /**
- * The alerts for a safe-to-spend result, before dismissals: a budget line
+ * The alerts for a safe-to-spend result, before dismissals: a bill in the
+ * result's scope left out for too many unpaid occurrences, a budget line
  * the result says is over, and every unpaid bill occurrence in the result's
  * scope that is overdue or due by the next payday. Ordered by kind, then
  * due date, then subject (the bill's name or the budget's category), then
@@ -568,8 +492,20 @@ const SUBJECT_ORDER = new Intl.Collator('en')
 function deriveAlerts(
   result: SafeToSpendResult,
   occurrences: readonly BillOccurrence[],
+  leftOutBills: readonly LeftOutBill[],
 ): Alert[] {
   const alerts: Alert[] = []
+  for (const bill of leftOutBills) {
+    if (result.scope !== 'all' && bill.scope !== result.scope) continue
+    alerts.push({
+      id: `bill_too_many_unpaid:${bill.id}:${result.lastPayday}`,
+      kind: 'bill_too_many_unpaid',
+      scope: bill.scope,
+      subject: bill.name,
+      amountCents: bill.amount_cents,
+      dueDate: null,
+    })
+  }
   // `result.budgets` is already scoped by the shared module.
   for (const line of result.budgets) {
     if (line.overCents <= 0) continue
@@ -630,7 +566,7 @@ export async function readOverview(
   const inputs = await loadInputs(now, db)
   const result = computeSafeToSpend(scope, inputs)
 
-  const derived = deriveAlerts(result, inputs.occurrences)
+  const derived = deriveAlerts(result, inputs.occurrences, inputs.leftOutBills)
   const dismissedRows: { alert_id: string }[] = await db('alert_dismissals')
     .select('alert_id')
     .whereIn(
@@ -697,17 +633,11 @@ export async function readOverview(
     }
   })
 
-  // A copy of `lastSuccessAt` in server/routes/sync.ts GET /status; change
-  // together with it. Only a started_at in the exact toISOString() form is
-  // ranked, by julianday(), so a malformed one never shows as the latest.
-  const lastSuccess: Pick<SyncRun, 'finished_at'> | undefined = await db(
-    'sync_runs',
-  )
-    .where({ outcome: 'success' })
-    .whereRaw("strftime('%Y-%m-%dT%H:%M:%fZ', started_at) = started_at")
-    .orderByRaw('julianday(started_at) DESC')
-    .orderBy('id', 'desc')
-    .first('finished_at')
+  // dataAsOf is the finish time of the latest ranked success (rankByStartedAt).
+  const lastSuccess: Pick<SyncRun, 'finished_at'> | undefined =
+    await rankByStartedAt(db('sync_runs').where({ outcome: 'success' })).first(
+      'finished_at',
+    )
 
   return {
     safeToSpend: result,
@@ -731,7 +661,7 @@ export async function dismissAlert(
   const inputs = await loadInputs(now, db)
   // `all` covers every alert either scope can show.
   const result = computeSafeToSpend('all', inputs)
-  const derived = deriveAlerts(result, inputs.occurrences)
+  const derived = deriveAlerts(result, inputs.occurrences, inputs.leftOutBills)
   if (!derived.some((a) => a.id === alertId)) return null
 
   await db('alert_dismissals')

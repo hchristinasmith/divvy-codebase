@@ -12,9 +12,6 @@ vi.mock('../Dashboard/Dashboard.tsx', () => ({
 vi.mock('../Transactions/TransactionsPage.tsx', () => ({
   default: () => <p data-testid="page">Transactions page</p>,
 }))
-vi.mock('../Wishlist/WishlistDashboard.tsx', () => ({
-  default: () => <p data-testid="page">Wishlist page</p>,
-}))
 vi.mock('../Targets/targets.tsx', () => ({
   default: () => <p data-testid="page">Targets page</p>,
 }))
@@ -57,7 +54,6 @@ describe('App routes the old pages', () => {
   it.each([
     ['/dashboard', 'Dashboard page'],
     ['/transactions', 'Transactions page'],
-    ['/wishlist', 'Wishlist page'],
     ['/targets', 'Targets page'],
     ['/manage-subscriptions', 'Subscriptions page'],
     ['/challenges', 'Challenges page'],

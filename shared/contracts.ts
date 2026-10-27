@@ -270,7 +270,12 @@ export interface AccountSummary {
   balanceCents: Cents
 }
 
-export type AlertKind = 'over_budget' | 'bill_due_soon' | 'bill_overdue'
+/** `bill_too_many_unpaid`: a bill left out of the totals (#247). */
+export type AlertKind =
+  | 'over_budget'
+  | 'bill_due_soon'
+  | 'bill_overdue'
+  | 'bill_too_many_unpaid'
 
 /** Alerts are derived on read; only a dismissal is stored. */
 export interface Alert {
@@ -282,7 +287,7 @@ export interface Alert {
   subject: string
   /** Amount over budget, or the bill's amount. */
   amountCents: Cents
-  /** The bill's due date; null for a budget alert. */
+  /** The bill's due date; null for a budget or too-many-unpaid alert. */
   dueDate: IsoDate | null
 }
 
@@ -580,14 +585,24 @@ export interface SubscriptionRow extends SubscriptionMerchant {
   cancelledOn: IsoDate | null
   /** The first charge after `cancelledOn`, which makes it active again. */
   chargedAgainOn: IsoDate | null
-  /** Null exactly when `cadence` is null. */
+  /**
+   * Null exactly when `cadence` is null. A possibly-stopped row keeps its
+   * figures; only the totals leave it out.
+   */
   perMonthCents: Cents | null
   perYearCents: Cents | null
+  /**
+   * Active, with a cadence, and no charge for more than two billing cycles
+   * before today (issue #392). Computed on read, never stored: it clears
+   * when a charge the detector joins to this row lands, and a charge it
+   * does not join (#409) leaves it set. It never makes a row cancelled.
+   */
+  possiblyStopped: boolean
 }
 
 /**
- * Over active rows with a cadence. Cancelled rows, questions and
- * not-a-subscription merchants are never in a total.
+ * Over active rows with a cadence that are not possibly stopped. Cancelled
+ * rows, questions and not-a-subscription merchants are never in a total.
  */
 export interface SubscriptionTotals {
   perMonthCents: Cents
@@ -597,6 +612,8 @@ export interface SubscriptionTotals {
   countedCount: number
   /** Active rows left out because their cadence is null. */
   uncountedCount: number
+  /** Active rows left out because they are possibly stopped. */
+  possiblyStoppedCount: number
 }
 
 /** GET /api/v1/subscriptions?scope= */
@@ -642,12 +659,50 @@ export interface SubscriptionMarkResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Spending
+// ---------------------------------------------------------------------------
+
+/** One category's outflow in the month, as a positive. */
+export interface SpendingCategoryLine {
+  /** The effective category: the user's over Akahu's (prd-01 Ruling 4). */
+  category: string
+  spentCents: Cents
+}
+
+/**
+ * GET /api/v1/spending/categories?scope=&month=&top=, exactly as
+ * `spendingByCategory` in `./spending.ts` returns it. The client displays
+ * it; it never adds anything up (prd-02 Ruling 1, note of 2026-10-25).
+ *
+ * `sum(categories) + otherCents + uncategorisedCents === totalCents`.
+ */
+export interface SpendingByCategoryResponse {
+  scope: Scope
+  /** `YYYY-MM`, an NZ calendar month; today's month when none was asked. */
+  month: string
+  /** Every counted outflow in the month, as a positive. */
+  totalCents: Cents
+  /**
+   * Largest first, ties by category in code-point order: the first `top`
+   * when `top` was sent, else every category.
+   */
+  categories: SpendingCategoryLine[]
+  /** The categories beyond `top`, summed; 0 when `top` was not sent. */
+  otherCents: Cents
+  /**
+   * Outflow with no effective category. Never inside `categories` or
+   * `otherCents`.
+   */
+  uncategorisedCents: Cents
+}
+
+// ---------------------------------------------------------------------------
 // Categorise
 // ---------------------------------------------------------------------------
 
 /**
  * One merchant's uncategorised settled transactions on the Sort screen
- * (prd-02 Ruling 16). A merchant is its key (`m:<Akahu merchant id>`, else
+ * (prd-02 Ruling 17). A merchant is its key (`m:<Akahu merchant id>`, else
  * `d:<normalised description>`), across every account in the view's scope.
  */
 export interface CategoriseGroupResponse {

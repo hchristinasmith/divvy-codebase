@@ -31,6 +31,7 @@ Rejected alternatives:
 - **The Dashboard is wired to live Akahu calls.** `client/components/Dashboard/Dashboard.tsx:30-33` and `:40-44` call `grabAccounts`/`grabTransactions`; those hit the proxy (`client/apis/apiClient.ts:7`, `:24`). It reads `.items` of an Akahu-shaped envelope (`Dashboard.tsx:53`, `:73`, `:120`).
 - **The proxy ignores the account filter the client sends.** `client/apis/apiClient.ts:18` sends `accountIds`; `server/routes/akahu.ts:33-56` never reads it (audit §1).
 - **Production already points at a volume path and nothing runs a scheduler.** `server/db/knexfile.js:40` uses `/app/storage/prod.sqlite3`; `server/index.ts:5-8` only calls `listen`.
+  — Note (2026-10-26, #238): the production database is now `/data/divvy.sqlite3` (`server/db/knexfile.js:42`; `DATABASE_PATH` overrides it), on the volume `fly.toml` mounts at `/data`. `server/index.ts` now also starts the sync scheduler after `listen` (#27).
 - **The host and backup are already decided.** D1 and D2 in `docs/decisions.md:7-8`; M1 issue #6 stops short of Litestream, Tailscale and the deploy ("belong to M2").
 - **Money must be cents before this writes it.** Issue #8 (float columns replaced with `amount_cents`, `balance_cents`; Akahu dollars converted "at the boundary in the sync/seed code only").
 - **Handoff expects a 15-minute worker and a Sync screen.** `docs/design/handoff.md:67` ("sync worker every 15 min") and `:54-55`.

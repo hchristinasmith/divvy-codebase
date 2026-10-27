@@ -34,7 +34,7 @@ export default function HeroCard({ result }: { result: SafeToSpendResult }) {
           {formatCents(Math.max(0, result.safeCents))}
         </span>
         <span className="text-body-14 text-ink-muted">
-          until payday on {formatDay(result.nextPayday)} · after tax, bills
+          until payday on {formatDay(result.nextPayday, result.today)} · after tax, bills
           and budgets
         </span>
         <div

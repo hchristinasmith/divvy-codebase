@@ -342,6 +342,119 @@ describe('strings carrying URLs or markup', () => {
   })
 })
 
+// #331 guard: every input refused today is still refused. This list is written
+// out as data, not imported, and it must stay green after the build too: the
+// build may refuse more, never less. Each code point is one the hand-written
+// invisible list strips today (C0, DEL and C1, the zero-width and direction
+// marks, the embedding and isolate controls, soft hyphen, combining grapheme
+// joiner, Arabic letter mark, Mongolian vowel separator, byte order mark).
+// Inside `java<c>script:` it is stripped, the scheme shows, and the title is
+// refused; the bidi controls are refused first, as bidi_in_string.
+const range = (from: number, to: number): number[] =>
+  Array.from({ length: to - from + 1 }, (_, i) => from + i)
+
+const STRIPPED_TODAY: number[] = [
+  ...range(0x00, 0x1f),
+  ...range(0x7f, 0x9f),
+  ...range(0x200b, 0x200f),
+  ...range(0x202a, 0x202e),
+  ...range(0x2060, 0x2069),
+  0x00ad,
+  0x034f,
+  0x061c,
+  0x180e,
+  0xfeff,
+]
+const BIDI_TODAY = new Set([0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069])
+
+describe('invisible characters inside a scheme (every input refused today is still refused)', () => {
+  it.each(
+    STRIPPED_TODAY.map((code): [string, number] => [`U+${code.toString(16).toUpperCase().padStart(4, '0')}`, code]),
+  )('refuses a title with %s inside javascript:', (_name, code) => {
+    const spec = base()
+    spec.title = `java${String.fromCodePoint(code)}script:${CANARY}`
+    const result = validateChartSpec(spec)
+    expect(rejection(result)).toEqual({
+      reason: BIDI_TODAY.has(code) ? 'bidi_in_string' : 'url_in_string',
+      path: '$.title',
+    })
+    expect(JSON.stringify(result)).not.toContain(CANARY)
+  })
+})
+
+// #331: the invisible-character rule is the Unicode property
+// Default_Ignorable_Code_Point (/\p{DI}/u), not a hand-written list, so a
+// default-ignorable character inside a scheme or a leading `//` is stripped
+// before the URL check. Stripping is only for that check: a label holding no
+// URL once the character is gone is accepted and returned as given.
+describe('default-ignorable characters are stripped before the URL check', () => {
+  const HANGUL_FILLER = '\u3164'
+  const VS16 = '\ufe0f'
+  const TAG_A = '\u{E0041}'
+  const isDefaultIgnorable = /\p{DI}/u
+
+  it.each([
+    ['a Hangul filler splitting http', `ht${HANGUL_FILLER}tp://${CANARY}.example`],
+    ['a variation selector splitting javascript', `java${VS16}script:${CANARY}`],
+    ['a tag character splitting javascript', `java${TAG_A}script:${CANARY}`],
+    ['a Hangul filler splitting a leading //', `/${HANGUL_FILLER}/${CANARY}.example`],
+    // NFKC runs before the strip; U+FFA0 folds to U+1160, itself
+    // default-ignorable, so the fold does not let it through.
+    ['a halfwidth Hangul filler (U+FFA0) splitting javascript', `java\uffa0script:${CANARY}`],
+    // Two default-ignorable characters in a row: each one must be stripped on its own.
+    ['two zero-width spaces splitting javascript', `java\u200b\u200bscript:${CANARY}`],
+    ['a Hangul filler and a variation selector splitting http', `ht\u3164\ufe0ftp://${CANARY}.example`],
+  ])('refuses a title with %s', (_name, title) => {
+    const spec = base()
+    spec.title = title
+    const result = validateChartSpec(spec)
+    expect(rejection(result)).toEqual({ reason: 'url_in_string', path: '$.title' })
+    expect(JSON.stringify(result)).not.toContain(CANARY)
+  })
+
+  it.each([
+    ['a Hangul filler between letters', `A${HANGUL_FILLER}B`],
+    ['a variation selector between letters', `A${VS16}B`],
+  ])('accepts a title with %s and returns it unchanged', (_name, title) => {
+    const spec = base()
+    spec.title = title
+    const result = validateChartSpec(spec)
+    if (!result.ok) throw new Error(`expected ok, got ${result.reason}`)
+    expect(result.spec.title).toBe(title)
+  })
+
+  // Every default-ignorable code point, at a title and at a data value. One
+  // test per site rather than one per code point, so the sweep stays fast;
+  // a failure lists the code points that got through.
+  const DEFAULT_IGNORABLE: number[] = []
+  for (let code = 0; code <= 0x10ffff; code += 1) {
+    if (code >= 0xd800 && code <= 0xdfff) continue
+    if (isDefaultIgnorable.test(String.fromCodePoint(code))) DEFAULT_IGNORABLE.push(code)
+  }
+
+  it('finds default-ignorable code points to sweep', () => {
+    expect(DEFAULT_IGNORABLE).toContain(0x3164)
+    expect(DEFAULT_IGNORABLE).toContain(0xe0041)
+  })
+
+  it.each(TEXT_SITES.filter(([site]) => site === 'title' || site === 'a data value'))(
+    'refuses every default-ignorable code point inside javascript: at %s',
+    (_site, put, path) => {
+      const wrong: string[] = []
+      for (const code of DEFAULT_IGNORABLE) {
+        const spec = base()
+        put(spec, `java${String.fromCodePoint(code)}script:${CANARY}`)
+        const result = validateChartSpec(spec)
+        const reason = BIDI_TODAY.has(code) ? 'bidi_in_string' : 'url_in_string'
+        if (result.ok || result.reason !== reason || result.path !== path || JSON.stringify(result).includes(CANARY)) {
+          wrong.push(`U+${code.toString(16).toUpperCase().padStart(4, '0')}`)
+        }
+      }
+      expect(wrong).toEqual([])
+    },
+  )
+})
+
 describe('row key hygiene', () => {
   it.each(['constructor', 'toString', 'hasOwnProperty', 'valueOf'])('rejects row key %s', (key) => {
     const spec = base()

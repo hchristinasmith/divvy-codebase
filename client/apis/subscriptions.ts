@@ -17,8 +17,8 @@ import type {
 // the server's own `{ error }` text, so the screen can show it as it is.
 //
 // A write names one merchant in one row scope, never `all`; `Target` makes
-// that a compile error. The cancel never sends `on`: the server records
-// today in NZ, so the client computes no dates.
+// that a compile error. The cancel request sends no `on` date; the server
+// records today in NZ.
 
 const rootURL = new URL('/api/v1', document.baseURI)
 

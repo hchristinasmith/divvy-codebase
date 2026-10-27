@@ -112,6 +112,19 @@ describe('insertInsight', () => {
     expect(read).toStrictEqual(stored)
   })
 
+  // The insights agent stamps every draft with the ISO week it covers
+  // (buildDrafts in server/agents/insights/prompt.ts), so that label must
+  // store; a month label must too, for a draft that covers a month.
+  it.each([
+    ['an ISO week', '2026-W43'],
+    ['a month', '2026-10'],
+  ])('stores %s period label unchanged', async (_, period) => {
+    const id = await inserted(insight({ period }))
+
+    expect((await getInsight(id))?.period).toBe(period)
+    expect((await storedRows())[0].period).toBe(period)
+  })
+
   const HOSTILE: [name: string, input: unknown, reason: string, marker: string][] = [
     ['a data URL', spec({ data: { url: 'https://example.invalid/rows.json' } }), 'forbidden_key', 'example.invalid'],
     ['an unknown mark', spec({ mark: 'rect' }), 'bad_mark', 'rect'],
@@ -129,7 +142,7 @@ describe('insertInsight', () => {
     ],
     [
       'a bidi override in a label',
-      spec({ data: { values: [{ merchant: 'Fixture ‮yrekaB', total: 1 }] } }),
+      spec({ data: { values: [{ merchant: 'Fixture \u202EyrekaB', total: 1 }] } }),
       'bidi_in_string',
       'yrekaB',
     ],
@@ -188,10 +201,163 @@ describe('insertInsight', () => {
     ['blank title', { title: '  ' }, /^title must not be blank$/],
     ['blank body_md', { body_md: '' }, /^body_md must not be blank$/],
     ['blank period', { period: '\t' }, /^period must not be blank$/],
+    ['title U+3164 only', { title: '\u3164' }, /^title must not be blank$/],
+    ['body_md U+200B only', { body_md: '\u200b' }, /^body_md must not be blank$/],
+    ['period U+3164 and spaces', { period: '\u3164 \u3164' }, /^period must not be blank$/],
+    ['title tag characters (non-BMP)', { title: '\u{E0041}\u{E0042}' }, /^title must not be blank$/],
+    ['body_md a variation selector', { body_md: '\ufe0f' }, /^body_md must not be blank$/],
+    ['period U+200B, space, U+3164 and tab', { period: '\u200b \u3164\t' }, /^period must not be blank$/],
+    // The blank check runs before the cap: a blank value over the cap is blank.
+    ['title 201 spaces', { title: ' '.repeat(201) }, /^title must not be blank$/],
+    ['title 201 U+200B', { title: '\u200b'.repeat(201) }, /^title must not be blank$/],
+    ['body_md 20,001 spaces', { body_md: ' '.repeat(20_001) }, /^body_md must not be blank$/],
+    ['period 33 spaces', { period: ' '.repeat(33) }, /^period must not be blank$/],
+    ['period 33 U+0001', { period: '\u0001'.repeat(33) }, /^period must not be blank$/],
+    ['title 42', { title: 42 as unknown as string }, /^title must not be blank$/],
   ]
 
   it.each(BAD)('throws on a bad %s, and writes nothing', async (_, fields, message) => {
     await expect(insertInsight(insight({ chart_spec: spec(), ...fields }), NOW)).rejects.toThrow(message)
+    expect(await storedRows()).toEqual([])
+  })
+
+  // The caps (#303; the period cap, #340) are counted in code points. Each
+  // field's cap is pinned here as a literal: the constants are not exported.
+  const CAPS: [field: 'title' | 'body_md' | 'period', max: number][] = [
+    ['title', 200],
+    ['body_md', 20_000],
+    ['period', 32],
+  ]
+  const withText = (field: 'title' | 'body_md' | 'period', text: string): NewInsight =>
+    insight({ [field]: text })
+
+  it.each(CAPS)('accepts a %s of exactly %i code points, and stores it whole', async (field, max) => {
+    const text = 'a'.repeat(max)
+    expect(Array.from(text)).toHaveLength(max)
+
+    const result = await insertInsight(withText(field, text), NOW)
+    expect(result).toStrictEqual({ ok: true, id: expect.any(Number) })
+
+    const [stored] = await storedRows()
+    expect(Object.keys(stored).sort()).toEqual(INSIGHT_KEYS)
+    expect(stored[field]).toBe(text)
+  })
+
+  // Non-BMP characters are two UTF-16 units each, so this string is over the
+  // cap by `.length` and exactly at it by code points. A cap counted in
+  // `.length` refuses it; the code-point cap must accept it.
+  it.each(CAPS)('counts a %s in code points, not UTF-16 units: non-BMP text at the cap is accepted', async (field, max) => {
+    const text = '\u{20000}'.repeat(max)
+    expect(Array.from(text)).toHaveLength(max)
+    expect(text.length).toBeGreaterThan(max)
+
+    const result = await insertInsight(withText(field, text), NOW)
+    expect(result).toStrictEqual({ ok: true, id: expect.any(Number) })
+
+    const [stored] = await storedRows()
+    expect(stored[field]).toBe(text)
+  })
+
+  it.each(CAPS)('refuses a %s one code point over the cap, and writes nothing', async (field, max) => {
+    const result = await insertInsight(withText(field, 'a'.repeat(max + 1)), NOW).catch((e: unknown) => e)
+    expect(result).toBeInstanceOf(Error)
+    expect(await storedRows()).toEqual([])
+  })
+
+  it.each(CAPS)('refuses non-BMP %s text one code point over the cap, and writes nothing', async (field, max) => {
+    await expect(insertInsight(withText(field, '\u{20000}'.repeat(max + 1)), NOW)).rejects.toThrow(
+      new RegExp(`^${field} must be at most ${max} characters$`),
+    )
+    expect(await storedRows()).toEqual([])
+  })
+
+  // The message names the field and the cap. An exact match also proves it
+  // carries none of the refused value, which here holds a sentinel.
+  it.each(CAPS)('names the %s and its cap in the refusal, never the value', async (field, max) => {
+    const sentinel = 'Fixture Merchant 4419'
+    const text = sentinel.padEnd(max + 1, 'x')
+    const error = await insertInsight(withText(field, text), NOW).then(
+      () => new Error('expected a refusal'),
+      (e: unknown) => e,
+    )
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toBe(`${field} must be at most ${max} characters`)
+    expect((error as Error).message).not.toContain(sentinel)
+  })
+
+  // The blank check counts visible characters only: a value made of default-
+  // ignorable characters and whitespace is refused like an empty one.
+  const BLANK_LIKE: [field: 'title' | 'body_md' | 'period', name: string, text: string][] = (
+    ['title', 'body_md', 'period'] as const
+  ).flatMap((field): [typeof field, string, string][] => [
+    [field, 'U+3164', '\u3164'],
+    [field, 'U+200B', '\u200b'],
+    [field, 'tag characters (non-BMP)', '\u{E0041}\u{E0042}'],
+    [field, 'a variation selector', '\ufe0f'],
+    [field, 'U+200B, space, U+3164 and tab', '\u200b \u3164\t'],
+  ])
+
+  it.each(BLANK_LIKE)('refuses a %s made only of %s, and writes nothing', async (field, _, text) => {
+    await expect(insertInsight(insight({ [field]: text }), NOW)).rejects.toThrow(
+      new RegExp(`^${field} must not be blank$`),
+    )
+    expect(await storedRows()).toEqual([])
+  })
+
+  // Visible text keeps its invisible characters as given: only a value with
+  // nothing visible is refused, and nothing is stripped.
+  const KEPT: [field: 'title' | 'body_md' | 'period', text: string][] = [
+    ['title', 'Moved\u3164 twice'],
+    ['body_md', 'Most\u200b of the week went to **Fixture Bakery**.'],
+    ['period', '2026-W43\u3164'],
+    ['title', '\u200bx\u200b'],
+    ['title', 'Fixture\u0001 Bakery'],
+    ['period', '2026-W43\u0090'],
+    ['body_md', 'Line one\n\nFixture\u0001 Bakery\tpaid'],
+  ]
+
+  it.each(KEPT)('stores a %s with visible text among invisible characters, unchanged', async (field, text) => {
+    const result = await insertInsight(insight({ [field]: text }), NOW)
+    expect(result).toStrictEqual({ ok: true, id: expect.any(Number) })
+
+    const [stored] = await storedRows()
+    expect(stored[field]).toBe(text)
+  })
+})
+
+// A period past its cap is refused (#340). The blank check runs first, then
+// the cap, and nothing is written.
+describe('insertInsight refuses a period past its cap (#340)', () => {
+  it('refuses a period of 10,000 characters with the field and the cap, and writes nothing', async () => {
+    const period = '2026-W43'.padEnd(10_000, 'x')
+    expect(period).toHaveLength(10_000)
+
+    await expect(insertInsight(insight({ period }), NOW)).rejects.toThrow(
+      /^period must be at most 32 characters$/,
+    )
+    expect(await storedRows()).toEqual([])
+  })
+})
+
+// A control character is invisible to the blank check (#342): a title,
+// body_md or period made only of control characters, whitespace and tabs is
+// refused, and nothing is written. Nothing is stripped, so a value with
+// visible text among its controls is stored as given (see KEPT above).
+describe('insertInsight refuses a title, body_md or period made only of control characters (#342)', () => {
+  const CONTROL: [field: 'title' | 'body_md' | 'period', name: string, text: string][] = (
+    ['title', 'body_md', 'period'] as const
+  ).flatMap((field): [typeof field, string, string][] => [
+    [field, 'U+0001', '\u0001'],
+    [field, 'U+0085', '\u0085'],
+    [field, 'U+0090', '\u0090'],
+    [field, 'DEL', '\u007f'],
+    [field, 'U+0001, space, U+0085 and tab', '\u0001 \u0085\t'],
+  ])
+
+  it.each(CONTROL)('refuses a %s made only of %s, and writes nothing', async (field, _, text) => {
+    await expect(insertInsight(insight({ [field]: text }), NOW)).rejects.toThrow(
+      new RegExp(`^${field} must not be blank$`),
+    )
     expect(await storedRows()).toEqual([])
   })
 })

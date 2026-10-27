@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   act,
   cleanup,
@@ -28,8 +28,17 @@ import {
 // stub (./fixtures.ts). The sync pill's fetch never settles. Every value is
 // invented.
 
+// The screen reads today from the clock, in Auckland. 23:00 UTC on 27 Oct is
+// 12:00 on 28 Oct there, so the screen's today is 28 Oct 2026. Only Date is
+// faked, so react-query and waitFor keep real timers.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2026-10-27T23:00:00Z'))
+})
+
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
@@ -78,6 +87,14 @@ function meta(li: HTMLElement): string {
 
 function scopeToggle(label: string): HTMLElement {
   return within(screen.getByRole('group', { name: 'Scope' })).getByRole(
+    'button',
+    { name: label },
+  )
+}
+
+/** The header's Active / Cancelled switch (issue 390). */
+function statusToggle(label: string): HTMLElement {
+  return within(screen.getByRole('group', { name: 'Status' })).getByRole(
     'button',
     { name: label },
   )
@@ -189,6 +206,7 @@ describe('the totals', () => {
           perYearCents: 99999,
           countedCount: 1,
           uncountedCount: 0,
+          possiblyStoppedCount: 0,
         },
       }),
     )
@@ -206,6 +224,7 @@ describe('the totals', () => {
           perYearCents: 19188,
           countedCount: 1,
           uncountedCount: 2,
+          possiblyStoppedCount: 0,
         },
       }),
     )
@@ -226,6 +245,7 @@ describe('the totals', () => {
           perYearCents: 19188,
           countedCount: 1,
           uncountedCount: 1,
+          possiblyStoppedCount: 0,
         },
       }),
     )
@@ -297,6 +317,7 @@ describe('a cancelled row', () => {
   it('is dimmed and struck through, says when, and still shows its charge', async () => {
     setup(cancelled)
     await loaded()
+    fireEvent.click(statusToggle('Cancelled'))
 
     const stream = item('personal', STREAM)
     expect(stream.classList.contains('opacity-55')).toBe(true)
@@ -334,6 +355,7 @@ describe('a cancelled row', () => {
       }),
     )
     await loaded()
+    fireEvent.click(statusToggle('Cancelled'))
 
     const stream = item('personal', STREAM)
     expect(meta(stream)).toBe(
@@ -420,9 +442,15 @@ describe('cancelling', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Cancel Example Stream' }))
 
-    await screen.findByRole('button', { name: 'Cancelled Example Stream, undo' })
+    // Now cancelled, it leaves the Active list and shows under Cancelled.
+    await waitFor(() => expect(listNames()).toEqual([]))
     expect(fx.callsTo('GET', LIST)).toHaveLength(2)
+    fireEvent.click(statusToggle('Cancelled'))
+    expect(
+      screen.getByRole('button', { name: 'Cancelled Example Stream, undo' }),
+    ).not.toBeNull()
     expect(meta(item('personal', STREAM))).toContain('Cancelled 25 Oct')
+    expect(fx.callsTo('GET', LIST)).toHaveLength(2)
   })
 })
 
@@ -435,12 +463,18 @@ describe('undoing a cancel', () => {
     )
     await loaded()
     fx.handlers.list = serve(response())
+    fireEvent.click(statusToggle('Cancelled'))
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Cancelled Example Stream, undo' }),
     )
 
-    await screen.findByRole('button', { name: 'Cancel Example Stream' })
+    // Active again, it leaves the Cancelled list and shows under Active.
+    await waitFor(() => expect(listNames()).toEqual([]))
+    fireEvent.click(statusToggle('Active'))
+    expect(
+      screen.getByRole('button', { name: 'Cancel Example Stream' }),
+    ).not.toBeNull()
     const [body] = fx.bodiesTo('POST', UNCANCEL)
     expect(Object.keys(body).sort()).toEqual(WRITE_KEYS)
     expect(body).toEqual({ scope: 'personal', merchantKey: STREAM })
@@ -640,6 +674,85 @@ describe('taking a row out of the list', () => {
   })
 })
 
+describe('a part of a split merchant (issue 400)', () => {
+  // prd-02 Ruling 16: a merchant's later parts carry its plain key plus
+  // `#<first date>:<first cents>`, and an optional `.<n>` tie number.
+  it.each([
+    ['a part', `${STREAM}#2026-02-20:2500`, STREAM],
+    ['a part with a tie number', `${STREAM}#2026-02-20:2500.2`, STREAM],
+    ['the plain key', STREAM, STREAM],
+    [
+      'a plain key holding a # that is not a part suffix',
+      'm:merchant_invented#stream',
+      'm:merchant_invented#stream',
+    ],
+    [
+      'a plain key holding a date with no cents',
+      'm:merchant_invented#2026-02-20',
+      'm:merchant_invented#2026-02-20',
+    ],
+    [
+      'a part suffix that is not at the end',
+      'm:merchant_invented#2026-02-20:2500#x',
+      'm:merchant_invented#2026-02-20:2500#x',
+    ],
+  ])(
+    'Not a subscription on %s sends the merchant key it should',
+    async (_label, rowKey, sentKey) => {
+      const { fx } = setup(
+        response({ subscriptions: [row({ merchantKey: rowKey })] }),
+      )
+      await loaded()
+
+      fireEvent.click(
+        within(item('personal', rowKey)).getByRole('button', {
+          name: 'Not a subscription: Example Stream',
+        }),
+      )
+
+      await waitFor(() => expect(fx.callsTo('PUT', MARK)).toHaveLength(1))
+      const [body] = fx.bodiesTo('PUT', MARK)
+      expect(Object.keys(body).sort()).toEqual(MARK_KEYS)
+      expect(body).toEqual({
+        scope: 'personal',
+        merchantKey: sentKey,
+        answer: 'not_subscription',
+      })
+    },
+  )
+
+  it('Cancel and Unmark on a part keep the part’s own key', async () => {
+    const PART = `${STREAM}#2026-02-20:2500`
+    const { fx } = setup(
+      response({
+        subscriptions: [row({ merchantKey: PART, detected: false, marked: true })],
+      }),
+    )
+    await loaded()
+
+    fireEvent.click(
+      within(item('personal', PART)).getByRole('button', {
+        name: 'Cancel Example Stream',
+      }),
+    )
+    await waitFor(() => expect(fx.callsTo('POST', CANCEL)).toHaveLength(1))
+    await settled()
+    fireEvent.click(
+      within(item('personal', PART)).getByRole('button', {
+        name: 'Unmark Example Stream',
+      }),
+    )
+    await waitFor(() => expect(fx.callsTo('PUT', MARK)).toHaveLength(1))
+
+    expect(fx.bodiesTo('POST', CANCEL)).toEqual([
+      { scope: 'personal', merchantKey: PART },
+    ])
+    expect(fx.bodiesTo('PUT', MARK)).toEqual([
+      { scope: 'personal', merchantKey: PART, answer: null },
+    ])
+  })
+})
+
 describe('in the All view', () => {
   it("every write names the row's own scope, never all", async () => {
     const { fx } = setup(
@@ -662,6 +775,7 @@ describe('in the All view', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Cancel Example Stream' }))
     await settled()
+    fireEvent.click(statusToggle('Cancelled'))
     fireEvent.click(
       screen.getByRole('button', { name: 'Cancelled Example Host, undo' }),
     )
@@ -848,16 +962,100 @@ describe('the screen states', () => {
           perYearCents: 0,
           countedCount: 0,
           uncountedCount: 0,
+          possiblyStoppedCount: 0,
         },
       }),
     )
     await loaded()
 
     expect(
-      screen.getByText('No regular charges found for this scope yet.'),
+      screen.getByText('No active subscriptions for this scope yet.'),
     ).not.toBeNull()
     expect(screen.getByTestId('total-month').textContent).toBe('$0.00')
     expect(screen.getByTestId('total-year').textContent).toBe('$0.00')
+  })
+})
+
+describe("a date from another year than today's shows its year", () => {
+  it('shows the year on a last charge, a cancel and a charge after cancelling', async () => {
+    setup(
+      response({
+        subscriptions: [
+          row({
+            status: 'cancelled',
+            lastChargedOn: '2025-10-13',
+            cancelledOn: '2025-11-02',
+            chargedAgainOn: '2025-12-01',
+          }),
+        ],
+      }),
+    )
+    await loaded()
+    fireEvent.click(statusToggle('Cancelled'))
+
+    const stream = item('personal', STREAM)
+    expect(meta(stream)).toContain('Last charged 13 Oct\u00a02025')
+    expect(meta(stream)).toContain('Cancelled 2 Nov\u00a02025')
+    // getByText's default normalizer folds U+00A0 into a space, so the
+    // exact separator is pinned on textContent.
+    expect(
+      within(stream).getByText(
+        'Charged again on 1 Dec 2025 after you cancelled',
+      ).textContent,
+    ).toBe('Charged again on 1 Dec\u00a02025 after you cancelled')
+  })
+
+  it('shows the year on a merchant in each card, and not on this year', async () => {
+    setup(
+      response({
+        subscriptions: [],
+        questions: [merchant({ lastChargedOn: '2025-09-04' })],
+        notSubscriptions: [
+          merchant({
+            merchantKey: 'd:invented demo notes',
+            scope: 'strawb',
+            name: 'Demo Notes',
+            lastChargedOn: '2026-10-03',
+          }),
+          merchant({
+            merchantKey: 'd:invented old notes',
+            scope: 'strawb',
+            name: 'Old Notes',
+            lastChargedOn: '2025-02-14',
+          }),
+        ],
+      }),
+    )
+    await loaded()
+
+    const questions = screen.getByRole('region', {
+      name: 'Is this a subscription?',
+    })
+    expect(questions.textContent).toContain(
+      'Last charged 4 Sep\u00a02025 · 2 charges',
+    )
+    const notSubscriptions = screen.getByRole('region', {
+      name: 'Not subscriptions',
+    })
+    expect(notSubscriptions.textContent).toContain(
+      'Last charged 3 Oct · 2 charges',
+    )
+    expect(notSubscriptions.textContent).toContain(
+      'Last charged 14 Feb\u00a02025 · 2 charges',
+    )
+  })
+
+  it('takes the year from the NZ calendar, not UTC: 1 Jan in Auckland is next year', async () => {
+    // 12:00 UTC on 31 Dec is 01:00 on 1 Jan in Auckland (NZDT), so the
+    // screen's today is in 2027 and a charge on 31 Dec 2026 shows its year.
+    // A screen that read UTC would say 31 Dec.
+    vi.setSystemTime(new Date('2026-12-31T12:00:00Z'))
+    setup(response({ subscriptions: [row({ lastChargedOn: '2026-12-31' })] }))
+    await loaded()
+
+    expect(meta(item('personal', STREAM))).toContain(
+      'Last charged 31 Dec\u00a02026',
+    )
   })
 })
 
@@ -886,5 +1084,324 @@ describe('the advisor banner', () => {
       'noreferrer',
     ])
     expect(link.getAttribute('referrerpolicy')).toBe('no-referrer')
+  })
+})
+
+describe('the Active / Cancelled toggle', () => {
+  // Active and cancelled interleaved on purpose, across both scopes, so a
+  // list that grouped by status or by scope would change the order.
+  const mixed = response({
+    subscriptions: [
+      row({ merchantKey: 'm:merchant_invented_north', name: 'North Invented' }),
+      row({
+        merchantKey: 'm:merchant_invented_east',
+        scope: 'strawb',
+        name: 'East Invented',
+        status: 'cancelled',
+        cancelledOn: '2026-10-05',
+      }),
+      row({
+        merchantKey: 'm:merchant_invented_south',
+        scope: 'strawb',
+        name: 'South Invented',
+      }),
+      row({
+        merchantKey: 'm:merchant_invented_west',
+        name: 'West Invented',
+        status: 'cancelled',
+        cancelledOn: '2026-09-20',
+      }),
+    ],
+    // Deliberately not a sum of the rows (each is 1599 a month) and the year
+    // is not 12 x the month.
+    totals: {
+      perMonthCents: 2468,
+      perYearCents: 30001,
+      countedCount: 2,
+      uncountedCount: 1,
+      possiblyStoppedCount: 0,
+    },
+  })
+
+  const struck = (scope: string, merchantKey: string): boolean =>
+    within(item(scope, merchantKey))
+      .getByTestId('subscription-name')
+      .classList.contains('line-through')
+
+  function pressedStatus(): string[] {
+    return within(screen.getByRole('group', { name: 'Status' }))
+      .getAllByRole('button')
+      .filter((b) => b.getAttribute('aria-pressed') === 'true')
+      .map((b) => b.textContent ?? '')
+  }
+
+  it('lists only the active rows under Active and only the cancelled ones under Cancelled, each in route order, struck through only when cancelled', async () => {
+    setup(mixed)
+    await loaded()
+
+    expect(listNames()).toEqual(['North Invented', 'South Invented'])
+    expect(struck('personal', 'm:merchant_invented_north')).toBe(false)
+    expect(struck('strawb', 'm:merchant_invented_south')).toBe(false)
+
+    fireEvent.click(statusToggle('Cancelled'))
+
+    expect(listNames()).toEqual(['East Invented', 'West Invented'])
+    expect(struck('strawb', 'm:merchant_invented_east')).toBe(true)
+    expect(struck('personal', 'm:merchant_invented_west')).toBe(true)
+  })
+
+  it('offers Active and Cancelled beside the scope toggle, with Active pressed by default', async () => {
+    setup(mixed)
+    await loaded()
+
+    const status = screen.getByRole('group', { name: 'Status' })
+    expect(
+      within(status)
+        .getAllByRole('button')
+        .map((b) => [b.textContent, b.getAttribute('aria-pressed')]),
+    ).toEqual([
+      ['Active', 'true'],
+      ['Cancelled', 'false'],
+    ])
+    // Beside the scope control: the next element in the header's right group.
+    expect(status.nextElementSibling).toBe(
+      screen.getByRole('group', { name: 'Scope' }),
+    )
+  })
+
+  it('shows no active row under Cancelled', async () => {
+    setup(mixed)
+    await loaded()
+
+    fireEvent.click(statusToggle('Cancelled'))
+
+    expect(pressedStatus()).toEqual(['Cancelled'])
+    const list = screen.getByRole('region', { name: 'Subscriptions' })
+    expect(
+      list.querySelector('[data-merchant="personal:m:merchant_invented_north"]'),
+    ).toBeNull()
+    expect(
+      list.querySelector('[data-merchant="strawb:m:merchant_invented_south"]'),
+    ).toBeNull()
+  })
+
+  it("keeps the route's totals whichever status is shown", async () => {
+    setup(mixed)
+    await loaded()
+
+    const totals = (): string[] => [
+      screen.getByTestId('total-month').textContent ?? '',
+      screen.getByTestId('total-year').textContent ?? '',
+      screen.getByText(/left out of these totals/).textContent ?? '',
+    ]
+    const expected = [
+      '$24.68',
+      '$300.01',
+      '1 subscription left out of these totals: no regular pattern yet',
+    ]
+    expect(totals()).toEqual(expected)
+
+    fireEvent.click(statusToggle('Cancelled'))
+    expect(listNames()).toEqual(['East Invented', 'West Invented'])
+    expect(totals()).toEqual(expected)
+
+    fireEvent.click(statusToggle('Active'))
+    expect(listNames()).toEqual(['North Invented', 'South Invented'])
+    expect(totals()).toEqual(expected)
+  })
+
+  it('switching status reads nothing again', async () => {
+    const { fx } = setup(mixed)
+    await loaded()
+    expect(fx.callsTo('GET', LIST)).toHaveLength(1)
+
+    fireEvent.click(statusToggle('Cancelled'))
+    await waitFor(() =>
+      expect(listNames()).toEqual(['East Invented', 'West Invented']),
+    )
+    fireEvent.click(statusToggle('Active'))
+    await waitFor(() =>
+      expect(listNames()).toEqual(['North Invented', 'South Invented']),
+    )
+
+    expect(fx.callsTo('GET', LIST)).toHaveLength(1)
+  })
+
+  it('is there while the list loads, and in the error state', async () => {
+    setup(() => undefined)
+    await screen.findByRole('status')
+    expect(pressedStatus()).toEqual(['Active'])
+    cleanup()
+
+    setup(() => ({ status: 500, body: { error: 'Could not read subscriptions' } }))
+    await screen.findByRole('alert')
+    expect(pressedStatus()).toEqual(['Active'])
+    fireEvent.click(statusToggle('Cancelled'))
+    expect(pressedStatus()).toEqual(['Cancelled'])
+  })
+
+  it('keeps Cancelled through a scope switch', async () => {
+    setup(
+      (call) =>
+        call.url.searchParams.get('scope') === 'strawb'
+          ? {
+              body: response({
+                subscriptions: [
+                  row({ scope: 'strawb', name: 'Strawb Active Invented' }),
+                  row({
+                    merchantKey: 'm:merchant_invented_old_tool',
+                    scope: 'strawb',
+                    name: 'Strawb Cancelled Invented',
+                    status: 'cancelled',
+                    cancelledOn: '2026-10-05',
+                  }),
+                ],
+              }),
+            }
+          : { body: mixed },
+      'all',
+    )
+    await loaded()
+    fireEvent.click(statusToggle('Cancelled'))
+    expect(listNames()).toEqual(['East Invented', 'West Invented'])
+
+    fireEvent.click(scopeToggle('Strawb'))
+
+    await waitFor(() =>
+      expect(listNames()).toEqual(['Strawb Cancelled Invented']),
+    )
+    expect(pressedStatus()).toEqual(['Cancelled'])
+  })
+
+  it('says there are no active subscriptions when every row is cancelled', async () => {
+    setup(
+      response({
+        subscriptions: [row({ status: 'cancelled', cancelledOn: '2026-10-03' })],
+      }),
+    )
+    await loaded()
+
+    expect(listNames()).toEqual([])
+    expect(
+      screen.getByText('No active subscriptions for this scope yet.'),
+    ).not.toBeNull()
+    expect(
+      screen.queryByText('No cancelled subscriptions for this scope.'),
+    ).toBeNull()
+  })
+
+  it('says there are no cancelled subscriptions when every row is active', async () => {
+    setup(response())
+    await loaded()
+
+    fireEvent.click(statusToggle('Cancelled'))
+
+    expect(listNames()).toEqual([])
+    expect(
+      screen.getByText('No cancelled subscriptions for this scope.'),
+    ).not.toBeNull()
+    expect(
+      screen.queryByText('No active subscriptions for this scope yet.'),
+    ).toBeNull()
+  })
+
+  it("the totals are the route's figures, with cancelled rows in the response", async () => {
+    setup(mixed)
+    await loaded()
+
+    expect(screen.getByTestId('total-month').textContent).toBe('$24.68')
+    expect(screen.getByTestId('total-year').textContent).toBe('$300.01')
+    expect(
+      screen.getByText(
+        '1 subscription left out of these totals: no regular pattern yet',
+      ),
+    ).not.toBeNull()
+  })
+})
+
+describe('a possibly-stopped row (issue #392)', () => {
+  const GYM = 'm:merchant_invented_gym'
+  const body = response({
+    subscriptions: [
+      row(),
+      row({
+        merchantKey: GYM,
+        name: 'Sample Gym',
+        lastChargedOn: '2026-07-01',
+        amountCents: 1000,
+        cadence: 'weekly',
+        perMonthCents: 4333,
+        perYearCents: 51996,
+        possiblyStopped: true,
+      }),
+    ],
+    totals: {
+      perMonthCents: 1599,
+      perYearCents: 19188,
+      countedCount: 1,
+      uncountedCount: 0,
+      possiblyStoppedCount: 1,
+    },
+  })
+
+  it('carries a chip under Active, keeps Cancel, and does not say what it counts as a month', async () => {
+    setup(body)
+    await loaded()
+
+    expect(listNames()).toEqual(['Example Stream', 'Sample Gym'])
+    const gym = item('personal', GYM)
+    const chip = within(gym).getByText('Possibly stopped')
+    expect(chip.className.split(' ')).toEqual(
+      expect.arrayContaining(['rounded-pill', 'bg-canvas', 'text-warn']),
+    )
+    const cancel = within(gym).getByRole('button', {
+      name: 'Cancel Sample Gym',
+    }) as HTMLButtonElement
+    expect(cancel.disabled).toBe(false)
+    expect(meta(gym)).toBe(
+      'Weekly · Last charged 1 Jul · 3 charges · Found automatically',
+    )
+
+    expect(
+      within(item('personal', STREAM)).queryByText('Possibly stopped'),
+    ).toBeNull()
+  })
+
+  it('the tiles say how many are left out as possibly stopped', async () => {
+    setup(body)
+    await loaded()
+
+    expect(
+      screen.getByText(
+        '1 subscription left out of these totals: possibly stopped',
+      ),
+    ).not.toBeNull()
+    expect(document.body.textContent).not.toContain('no regular pattern yet')
+  })
+
+  it('says it in the plural, and not at all at zero', async () => {
+    setup(
+      response({
+        totals: {
+          perMonthCents: 0,
+          perYearCents: 0,
+          countedCount: 0,
+          uncountedCount: 0,
+          possiblyStoppedCount: 2,
+        },
+      }),
+    )
+    await loaded()
+
+    expect(
+      screen.getByText(
+        '2 subscriptions left out of these totals: possibly stopped',
+      ),
+    ).not.toBeNull()
+    cleanup()
+
+    setup(response())
+    await loaded()
+    expect(document.body.textContent).not.toContain('possibly stopped')
   })
 })

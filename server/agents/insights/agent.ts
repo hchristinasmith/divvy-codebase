@@ -13,6 +13,11 @@
 // scope and period, dismissed or not, is skipped, so a re-run neither
 // duplicates nor resurrects one (and does not refresh its numbers).
 //
+// The clock is read once at start, and that reading is the run's: the
+// period when none is given, `started_at`, and every insight's `created_at`.
+// It is read once more at finish, for `finished_at`. A caller that wants a
+// fixed time passes a clock that always answers the same instant.
+//
 // Logs name the draft's kind and the validator's reason and path, or a thrown
 // error's class; never a label, an amount or a row, and never an error's
 // message, which for a database error can hold its SQL and bound values.
@@ -22,11 +27,7 @@ import { finishRun, startRun, type StartRun } from '../db/agent-runs.ts'
 import { insertInsight, listInsights } from '../db/insights.ts'
 import { buildDrafts } from './prompt.ts'
 import { collectAggregates, lastCompleteWeek, weekRange } from './queries.ts'
-
-// The class of what was thrown, as the routes log it.
-function errorClass(err: unknown): string {
-  return err instanceof Error ? err.constructor.name : typeof err
-}
+import { errorClass } from '../../error-class.ts'
 
 export interface InsightsRunOptions {
   // An ISO week label; the last complete NZ week before `now` when absent.
@@ -51,7 +52,7 @@ export interface InsightsRunResult {
 export async function runInsightsAgent(
   scope: InsightScope,
   options: InsightsRunOptions = {},
-  now: Date = new Date(),
+  clock: () => Date = () => new Date(),
   db = connection,
 ): Promise<InsightsRunResult> {
   if (scope !== 'personal' && scope !== 'strawb') {
@@ -61,8 +62,12 @@ export async function runInsightsAgent(
   if (trigger !== 'manual' && trigger !== 'weekly') {
     throw new Error('trigger must be manual or weekly')
   }
+  // The one start reading: see the header.
+  const now = clock()
   const period = options.period ?? lastCompleteWeek(now)
-  weekRange(period) // throws naming `period`, before any run is logged
+  // Refuses, with weekRange's own text and before any run is logged, a period
+  // that names no week or whose analysis window leaves the years 0000 to 9999.
+  weekRange(period)
 
   const run = await startRun({ kind: 'insights', trigger }, now, db)
   let outcome: InsightsRunResult['outcome'] = 'success'
@@ -93,9 +98,7 @@ export async function runInsightsAgent(
     outcome = 'failed'
     console.error('insights agent: run failed', errorClass(err))
   } finally {
-    // Never before `now`, which a caller may have set.
-    const finishedAt = new Date(Math.max(Date.now(), now.getTime()))
-    await finishRun(run.id, { outcome, consideredCount: considered, writtenCount: written }, finishedAt, db)
+    await finishRun(run.id, { outcome, consideredCount: considered, writtenCount: written }, clock(), db)
   }
 
   return { runId: run.id, outcome, period, considered, written, skipped, rejected }

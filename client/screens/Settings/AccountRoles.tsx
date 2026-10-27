@@ -13,15 +13,14 @@ import {
   type AccountSettingsRow,
   type RowScope,
 } from '../../../shared/contracts.ts'
+import SegmentedControl from '../../components/Shell/SegmentedControl.tsx'
 import {
   CARD,
   ERROR,
   HEADING,
   HINT,
-  SCOPE_TRACK,
   SECONDARY_BUTTON,
   SELECT,
-  scopeOption,
 } from './styles.ts'
 
 // What each account is for (issue 46; prd-02 Rulings 2, 10 and 11). The
@@ -46,6 +45,11 @@ const SCOPE_LABELS: Record<RowScope, string> = {
   personal: 'Personal',
   strawb: 'Business',
 }
+
+const SCOPE_OPTIONS = ROW_SCOPES.map((scope) => ({
+  value: scope,
+  label: SCOPE_LABELS[scope],
+}))
 
 function toRole(value: string): AccountRole | null {
   return ACCOUNT_ROLES.find((role) => role === value) ?? null
@@ -136,26 +140,15 @@ function AccountRow({ account }: { account: AccountSettingsRow }) {
           {account.name}
         </span>
         <div className="flex flex-wrap items-center gap-2">
-          <div
-            role="group"
-            aria-label={`Scope for ${account.name}`}
-            className={SCOPE_TRACK}
-          >
-            {ROW_SCOPES.map((scope) => (
-              <button
-                key={scope}
-                type="button"
-                aria-pressed={shownScope === scope}
-                className={scopeOption(shownScope === scope)}
-                disabled={scopeMutation.isPending}
-                onClick={() => {
-                  if (scope !== account.scope) scopeMutation.mutate(scope)
-                }}
-              >
-                {SCOPE_LABELS[scope]}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            label={`Scope for ${account.name}`}
+            options={SCOPE_OPTIONS}
+            value={shownScope}
+            disabled={scopeMutation.isPending}
+            onChange={(next) => {
+              if (next !== account.scope) scopeMutation.mutate(next)
+            }}
+          />
           <select
             aria-label={`Role for ${account.name}`}
             className={SELECT}

@@ -8,9 +8,9 @@
 // Every request is a GET (prd-05 done-when 5); see http.ts for how that is
 // enforced. Every amount comes back as integer cents. No failure resolves as
 // an empty list. Every failure Xero reports (a status or a body) rejects with
-// `XeroClientError`; a failure before Xero answers (`getAccessToken`
-// rejecting, or `fetch` itself, such as a network error or a refused
-// redirect) rejects with that error unchanged.
+// `XeroClientError`. A `getAccessToken` rejection propagates unchanged; a
+// `fetch` rejection (a network error or a refused redirect) becomes a
+// `request_failed` `XeroClientError` with fixed text.
 //
 // Plain `fetch`, not the `xero-node` SDK: the SDK deserialises amounts into
 // JavaScript numbers before Divvy can see them, which is the float path

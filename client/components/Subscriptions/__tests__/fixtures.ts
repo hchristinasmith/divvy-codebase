@@ -40,6 +40,7 @@ export function row(fields: Partial<SubscriptionRow> = {}): SubscriptionRow {
     chargedAgainOn: null,
     perMonthCents: 1599,
     perYearCents: 19188,
+    possiblyStopped: false,
     ...fields,
   }
 }
@@ -56,6 +57,7 @@ export function response(
       perYearCents: 19188,
       countedCount: 1,
       uncountedCount: 0,
+      possiblyStoppedCount: 0,
     },
     ...fields,
   }

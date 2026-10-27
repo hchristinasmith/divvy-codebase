@@ -1,6 +1,6 @@
-import { Settings, Wand } from 'lucide-react'
+import { Settings } from 'lucide-react'
 
-// The screens of docs/design/handoff.md, by key, and Sort (prd-02 Ruling 16),
+// The screens of docs/design/handoff.md, by key, and Sort (prd-02 Ruling 17),
 // which the handoff does not have.
 export type ScreenKey =
   | 'overview'
@@ -14,7 +14,7 @@ export type ScreenKey =
   | 'sync'
   | 'privacy'
 
-export type IconName = ScreenKey | 'wishlist' | 'settings'
+export type IconName = ScreenKey | 'settings'
 
 // Copied from `icon()` in docs/design/Divvy.dc.html: 24 viewBox line icons,
 // stroke 2, round caps.
@@ -38,7 +38,7 @@ const PATHS: Record<ScreenKey, string[]> = {
     'M17 12h3',
     'M12 8.5 13.3 10.7 15.5 12 13.3 13.3 12 15.5 10.7 13.3 8.5 12 10.7 10.7z',
   ],
-  // Not a handoff screen (prd-02 Ruling 16), so no handoff icon: a funnel,
+  // Not a handoff screen (prd-02 Ruling 17), so no handoff icon: a funnel,
   // in the same 24 viewBox, stroke 2 line style.
   sort: ['M4 5h16l-6 7.5V19l-4-2v-4.5z'],
   sync: [
@@ -52,9 +52,8 @@ const PATHS: Record<ScreenKey, string[]> = {
 }
 
 export default function NavIcon({ name }: { name: IconName }) {
-  // Wishlist and Settings are not handoff screens and have no handoff icon;
+  // Settings is not a handoff screen and has no handoff icon;
   // lucide's line icons match the stroke style.
-  if (name === 'wishlist') return <Wand size={16} strokeWidth={2} aria-hidden />
   if (name === 'settings') {
     return <Settings size={16} strokeWidth={2} aria-hidden />
   }

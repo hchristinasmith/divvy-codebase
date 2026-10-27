@@ -4,7 +4,10 @@ import connection from '../../../db/connection.ts'
 import { assertInMemory } from '../../../test-utils/app.ts'
 import { validateChartSpec } from '../../../../models/insights.ts'
 import {
+  MONTHLY_MONTHS,
   OTHER_CATEGORIES,
+  TRANSFER_WINDOW_DAYS,
+  UNUSUAL_LOOKBACK_WEEKS,
   cleanLabel,
   collectAggregates,
   excludeOwnAccountTransfers,
@@ -12,7 +15,6 @@ import {
   lastCompleteWeek,
   loadLedger,
   monthsEnding,
-  nzCalendarDate,
   spendByCategoryPerMonth,
   topMerchants,
   unusualSpends,
@@ -20,6 +22,7 @@ import {
   weekRange,
   type LedgerRow,
 } from '../queries.ts'
+import { addDaysIso, nzCalendarDate } from '../../../../shared/nz-dates.ts'
 
 // The insights agent's typed queries (#47; prd-04 Rulings 3, 7 and 8). Each
 // test starts from an empty, freshly migrated in-memory database and inserts
@@ -342,6 +345,26 @@ describe('collectAggregates against the hand-written oracle', () => {
     expect(topMerchants(narrow, WEEK, 50).map((m) => m.merchant)).toContain('Invented Transfer')
   })
 
+  // The start side of the same read padding. The monthly months set the
+  // window's start here, not the unusual-spend lookback, so the window opens
+  // on the first day of the first monthly month.
+  it('a transfer leg posted just before the window start still pairs, because the ledger is read wider', async () => {
+    await seedAccounts()
+    const range = weekRange(WEEK)
+    const windowStart = `${monthsEnding(range.end, MONTHLY_MONTHS)[0]}-01`
+    // Precondition: the monthly months, not the lookback, decide the start.
+    expect(windowStart < addDaysIso(range.start, -7 * UNUSUAL_LOOKBACK_WEEKS)).toBe(true)
+    const inflowDay = addDaysIso(windowStart, -TRANSFER_WINDOW_DAYS)
+    await tx({ at: day(windowStart), cents: -8800, merchant: 'Invented Transfer Early', category: 'Transfers' })
+    await tx({ account: 'acc_p2', at: day(inflowDay), cents: 8800, merchant: 'Invented Transfer Early', category: 'Transfers' })
+    await tx({ at: day(windowStart), cents: -1500, merchant: 'Fixture Bakery', category: 'Cafes' })
+    const a = await collectAggregates('personal', WEEK)
+    expect(a.monthly).toStrictEqual([{ month: windowStart.slice(0, 7), category: 'Cafes', spendCents: 1500 }])
+    // Read from the window start alone, the same outflow has no partner.
+    const narrow = excludeOwnAccountTransfers(await loadLedger('personal', windowStart, range.end))
+    expect(narrow.map((r) => r.merchant)).toContain('Invented Transfer Early')
+  })
+
   it('a strawb inflow of equal cents does not cancel a personal outflow', async () => {
     await seedLedger()
     const a = await collectAggregates('personal', WEEK)
@@ -509,6 +532,22 @@ describe('drawings (prd-02 Ruling 15)', () => {
     expect(a.topMerchants).toStrictEqual([])
   })
 
+  // The other rows the matcher cannot place, beside a real drawing: the run
+  // still resolves, and the real drawing is still dropped. Both dates sort
+  // outside the ledger's SQL bounds, so only the candidate read meets them.
+  it.each([
+    ['a personal inflow whose date is not an instant', 'acc_p1', 'not a date', 31000],
+    ['a strawb outflow whose NZ year is past 9999', 'acc_s1', '+275760-09-13T00:00:00.000Z', -31000],
+  ] as const)('%s is skipped, not thrown on', async (_why, account, at, cents) => {
+    await seedAccounts()
+    await tx({ account, at, cents, merchant: 'Unplaceable Fixture', category: 'Transfers' })
+    await tx({ account: 'acc_s1', at: day('2026-10-20'), cents: -27100, merchant: 'Real Drawing Fixture', category: 'Transfers' })
+    await tx({ at: day('2026-10-21'), cents: 27100, merchant: 'Owner In Fixture' })
+    const a = await collectAggregates('strawb', WEEK)
+    expect(a.topMerchants).toStrictEqual([])
+    expect(a.wow.thisWeekCents).toBe(0)
+  })
+
   it('ledgerRowCount counts drawing rows, as it counts transfer legs', async () => {
     await seedWithDrawings()
     for (const scope of ['personal', 'strawb'] as const) {
@@ -625,6 +664,16 @@ describe('loadLedger', () => {
     await expect(loadLedger('everyone' as 'personal', '2026-10-19', '2026-10-25')).rejects.toThrow(
       'scope must be personal or strawb',
     )
+  })
+
+  // Rolled over, month 13 would read as January 2027 and the read would
+  // return nothing rather than refuse.
+  it('refuses a from that names no calendar date with a RangeError', async () => {
+    await expect(loadLedger('personal', '2026-13-01', '2026-10-25')).rejects.toThrow(RangeError)
+  })
+
+  it('refuses a to that names no calendar date with a RangeError', async () => {
+    await expect(loadLedger('personal', '2026-10-01', '2026-13-01')).rejects.toThrow(RangeError)
   })
 })
 
@@ -950,6 +999,166 @@ describe('dates', () => {
     expect(monthsEnding('2026-10-25')).toEqual(['2026-05', '2026-06', '2026-07', '2026-08', '2026-09', '2026-10'])
     expect(monthsEnding('2026-02-03', 3)).toEqual(['2025-12', '2026-01', '2026-02'])
   })
+
+  // The years 0 to 99 are their own years, not 1900 to 1999 (`Date.UTC`'s
+  // reading). 0050-01-01 is a Saturday (2050's weekday, 400 years on), so
+  // W01 starts Monday 0050-01-03 and W24 on 0050-06-13.
+  it('isoWeekOf and weekRange read a two-digit year as itself', () => {
+    expect(isoWeekOf('0050-06-15')).toBe('0050-W24')
+    expect(isoWeekOf('0050-01-04')).toBe('0050-W01')
+    expect(isoWeekOf('0050-01-01')).toBe('0049-W52')
+    expect(weekRange('0050-W24')).toStrictEqual({ label: '0050-W24', start: '0050-06-13', end: '0050-06-19' })
+    expect(isoWeekOf('0050-06-13')).toBe('0050-W24')
+    expect(isoWeekOf('0050-06-19')).toBe('0050-W24')
+  })
+
+  // A Friday: its week's Thursday is 9999-12-30, so nothing on the way
+  // steps into the year 10000.
+  it('isoWeekOf(9999-12-31) is 9999-W52', () => {
+    expect(isoWeekOf('9999-12-31')).toBe('9999-W52')
+  })
+
+  // The class only: the refusal's text belongs to whichever parser reads the
+  // date, so it is not pinned.
+  it.each(['2026-02-30', '2026-13-01', 'x'])('isoWeekOf and monthsEnding refuse %j with a RangeError', (date) => {
+    expect(() => isoWeekOf(date)).toThrow(RangeError)
+    expect(() => monthsEnding(date)).toThrow(RangeError)
+  })
+
+  // A Saturday: its week's Thursday is in the year -1, which no YYYY-MM-DD names.
+  it('isoWeekOf(0000-01-01) is a RangeError', () => {
+    expect(() => isoWeekOf('0000-01-01')).toThrow(RangeError)
+  })
+
+  // 9999-W52's Sunday is 10000-01-02, which no YYYY-MM-DD names, and a later
+  // week has no day in 9999 at all, so a date helper throws its own
+  // RangeError. weekRange turns it into its own refusal, so the range is
+  // never returned with a five-digit year and the caller gets the period text.
+  it.each(['9999-W52', '9999-W53', '9999-W54'])(
+    'weekRange(%s) refuses with the period message, not a date helper message',
+    (label) => {
+      let caught: unknown
+      try {
+        weekRange(label)
+      } catch (err) {
+        caught = err
+      }
+      expect(caught).toBeInstanceOf(RangeError)
+      expect((caught as Error).message).toBe('period must be an ISO week label (YYYY-Www)')
+    },
+  )
+
+  // 0000-W01 (Monday 0000-01-03 to Sunday 0000-01-09) and 0000-W25 are real
+  // weeks, but their analysis window starts before 0000-01-01: W01's monthly
+  // months, W25's read padding (its months start at 0000-01 exactly). A date
+  // helper or monthsEnding throws its own text; weekRange refuses with the
+  // period text instead (#349).
+  it.each(['0000-W01', '0000-W25'])(
+    'weekRange(%s) refuses a week whose analysis window leaves the year 0000, with the period message',
+    (label) => {
+      let caught: unknown
+      try {
+        weekRange(label)
+      } catch (err) {
+        caught = err
+      }
+      expect(caught).toBeInstanceOf(RangeError)
+      expect((caught as Error).message).toBe('period must be an ISO week label (YYYY-Www)')
+    },
+  )
+
+  it('weekRange(0000-W26) is returned: its analysis window fits after 0000-01-01', () => {
+    expect(weekRange('0000-W26')).toStrictEqual({ label: '0000-W26', start: '0000-06-26', end: '0000-07-02' })
+  })
+
+  // The other end is unchanged: 9999-W51's padded read stops before
+  // 9999-12-30 (the exclusive SQL bound), inside the year 9999.
+  it('weekRange(9999-W51) is returned', () => {
+    expect(weekRange('9999-W51')).toStrictEqual({ label: '9999-W51', start: '9999-12-20', end: '9999-12-26' })
+  })
+
+  // The first week the window math accepts, found by sweeping the year 0000
+  // rather than written down, so a change to MONTHLY_MONTHS,
+  // UNUSUAL_LOOKBACK_WEEKS or TRANSFER_WINDOW_DAYS that moves it fails here.
+  // The year 0000 has no week 53, so its last accepted week is W52.
+  it('sweeping the year 0000, weekRange accepts exactly 0000-W26 to 0000-W52', () => {
+    const labels = Array.from({ length: 53 }, (_, i) => `0000-W${String(i + 1).padStart(2, '0')}`)
+    const accepted = labels.filter((label) => {
+      try {
+        weekRange(label)
+        return true
+      } catch {
+        return false
+      }
+    })
+    expect(accepted[0]).toBe('0000-W26')
+    expect(accepted.at(-1)).toBe('0000-W52')
+    expect(accepted).toStrictEqual(labels.slice(labels.indexOf('0000-W26'), labels.indexOf('0000-W52') + 1))
+  })
+
+  // weekOverWeek refuses a refused week with the period text, before its
+  // step back to the previous week can throw a date helper's text.
+  it('weekOverWeek([], 0000-W01) refuses with the period message', () => {
+    let caught: unknown
+    try {
+      weekOverWeek([], '0000-W01')
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(RangeError)
+    expect((caught as Error).message).toBe('period must be an ISO week label (YYYY-Www)')
+  })
+
+  // The previous week, 0000-W25, is itself one weekRange refuses, so this
+  // returns only because weekOverWeek reads the previous week's days without
+  // the analysis-window check; the 0000-06-20 row shows those days are W25's.
+  it('weekOverWeek over 0000-W26 returns, counting 0000-W25 as last week', () => {
+    const row = (date: string, amountCents: number) => ({
+      date,
+      accountId: 'acc_one',
+      amountCents,
+      category: 'Groceries',
+      merchant: 'Corner Shop',
+    })
+    expect(weekOverWeek([row('0000-06-20', -1000), row('0000-06-27', -3000)], '0000-W26')).toStrictEqual({
+      thisWeekCents: 3000,
+      lastWeekCents: 1000,
+      changeCents: 2000,
+      changePct: 200,
+      byCategory: [{ category: 'Groceries', thisCents: 3000, lastCents: 1000, changeCents: 2000 }],
+    })
+  })
+
+  // A window that would start before 0000-01 has no label for its earliest
+  // months, so it is refused with a fixed text that names `end` and echoes no
+  // value. The boundary cases are the window that starts at 0000-01 exactly
+  // (kept below) and the one that starts one month earlier (refused here).
+  it.each([
+    ['0000-01-01', 3],
+    ['0000-01-01', 2],
+    ['0000-02-01', 3],
+  ])('monthsEnding(%s, %i) refuses a window that starts before 0000-01, naming the field and not the value', (end, n) => {
+    let caught: unknown
+    try {
+      monthsEnding(end, n)
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(RangeError)
+    expect((caught as Error).message).toBe(
+      'end leaves no room for the months asked: the window would start before 0000-01',
+    )
+  })
+
+  it('monthsEnding keeps a window that starts exactly at 0000-01', () => {
+    expect(monthsEnding('0000-03-15', 3)).toStrictEqual(['0000-01', '0000-02', '0000-03'])
+    expect(monthsEnding('0000-02-01', 2)).toStrictEqual(['0000-01', '0000-02'])
+    expect(monthsEnding('0000-01-01', 1)).toStrictEqual(['0000-01'])
+  })
+
+  it('lastCompleteWeek refuses an invalid instant', () => {
+    expect(() => lastCompleteWeek(new Date('not a date'))).toThrow('date is not a valid instant')
+  })
 })
 
 // ---- Labels ----
@@ -986,6 +1195,87 @@ describe('cleanLabel', () => {
 
   it('a null is the fallback', () => {
     expect(cleanLabel(null, FALLBACK)).toBe(FALLBACK)
+  })
+
+  // #304: combining marks are kept on a base (a letter or number), at most
+  // three on one base; a mark past the cap or with no base is dropped, not
+  // turned into a space. NFKC runs first, so marks are counted on its output.
+  it('#304: a Devanagari vowel sign and virama are kept, so the word reads whole', () => {
+    expect(cleanLabel('\u0939\u093F\u0928\u094D\u0926\u0940 Store', FALLBACK)).toBe(
+      '\u0939\u093F\u0928\u094D\u0926\u0940 Store',
+    )
+  })
+
+  it('#304: three marks on one base are kept (Hindi zindagi: a nukta, a vowel sign and an anusvara on ja)', () => {
+    // U+095B (ja with nukta) is a composition exclusion, so NFKC splits it
+    // into ja and a nukta: the input below is already in that form.
+    expect(cleanLabel('\u091C\u093C\u093F\u0902\u0926\u0917\u0940', FALLBACK)).toBe(
+      '\u091C\u093C\u093F\u0902\u0926\u0917\u0940',
+    )
+  })
+
+  it('#304: a hostile stack keeps only the first three marks on its base, and the word is not split', () => {
+    // NFKC composes Z and the acute into U+0179 first; three of the four
+    // marks left survive.
+    expect(cleanLabel('Z\u0301\u0302\u0303\u0304\u0305oo', FALLBACK)).toBe('\u0179\u0302\u0303\u0304oo')
+  })
+
+  it('#304: a mark with no base, at the start, is dropped', () => {
+    expect(cleanLabel('\u0301Shop', FALLBACK)).toBe('Shop')
+    expect(cleanLabel('\u0301\u0302\u0303', FALLBACK)).toBe(FALLBACK)
+  })
+
+  it('#304: a mark after a space is dropped', () => {
+    expect(cleanLabel('a \u0301b', FALLBACK)).toBe('a b')
+  })
+
+  it('#304: a mark after kept punctuation or a dropped character has no base and leaves no space', () => {
+    expect(cleanLabel('A.\u0301B', FALLBACK)).toBe('A.B')
+    expect(cleanLabel('A&\u0301\u0302B', FALLBACK)).toBe('A&B')
+    expect(cleanLabel('a:\u0301b', FALLBACK)).toBe('a b')
+  })
+
+  it('#304: a mark after a default-ignorable letter has no base', () => {
+    // U+115F, a Hangul filler, is a letter that draws nothing. It becomes a
+    // space (#312), so the mark after it has no base and is dropped.
+    expect(cleanLabel('\u115F\u0301x', FALLBACK)).toBe('x')
+    expect(cleanLabel('a\u115F\u0301x', FALLBACK)).toBe('a x')
+  })
+
+  it('#304: a digit is a base, so its marks are kept, up to the cap, outside a long digit run', () => {
+    expect(cleanLabel('Zone 2\u0301', FALLBACK)).toBe('Zone 2\u0301')
+    expect(cleanLabel('Zone 2\u0301\u0302\u0303\u0304', FALLBACK)).toBe('Zone 2\u0301\u0302\u0303')
+    // Seven digits are short of LONG_DIGIT_RUN, so they stay, marks and all.
+    const seven = '1\u03012\u03013\u03014\u03015\u03016\u03017\u0301'
+    expect(cleanLabel(seven, FALLBACK)).toBe(seven)
+  })
+
+  it('#304: NFKC composes before marks are counted, so a composed mark frees a place under the cap', () => {
+    expect(cleanLabel('a\u0301\u0302\u0303\u0304', FALLBACK)).toBe('\u00E1\u0302\u0303\u0304')
+  })
+
+  it('#304: a decomposed Kāpiti is composed by NFKC and keeps no mark', () => {
+    expect(cleanLabel('Ka\u0304piti', FALLBACK)).toBe('K\u0101piti')
+  })
+
+  it('#304: a decomposed Vietnamese name composes whole', () => {
+    expect(cleanLabel('Pho\u031B\u0309 Ha\u0300 No\u0323\u0302i', FALLBACK)).toBe('Ph\u1EDF H\u00E0 N\u1ED9i')
+  })
+
+  it.each([
+    ['the combining grapheme joiner', '\u034F'],
+    ['a variation selector', '\uFE0F'],
+    ['a supplementary variation selector', '\u{E0100}'],
+    ['a Mongolian free variation selector', '\u180B'],
+    ['an invisible Khmer vowel', '\u17B4'],
+    ['an enclosing circle', '\u20DD'],
+    ['an enclosing Cyrillic sign', '\u0488'],
+  ])('#304: %s is not an allowed mark and becomes a space', (_name, mark) => {
+    expect(cleanLabel(`a${mark}b`, FALLBACK)).toBe('a b')
+  })
+
+  it('#304: marks count toward the 40 code point cut, which keeps a base with its first marks', () => {
+    expect(cleanLabel('a'.repeat(38) + 'b\u0301\u0302\u0303', FALLBACK)).toBe('a'.repeat(38) + 'b\u0301')
   })
 
   it('cuts by code point and never splits a surrogate pair', () => {
@@ -1044,9 +1334,15 @@ describe('cleanLabel', () => {
     // NFKC first: full-width digits are digits.
     ['４１１１ １１１１', '####'],
     // A slash or an invisible character between groups is counted through.
-    ['4111​1111/1111-1111', '####'],
+    ['4111\u200B1111/1111-1111', '####'],
     // Masked before the 40 code point cut, so no prefix of the number shows.
     ['a'.repeat(35) + ' 4111111111111111', 'a'.repeat(35) + ' ####'],
+    // #304: a combining mark on every digit is counted through, and masked
+    // with the digits, so it cannot break the run.
+    ['4\u03011\u03011\u03011\u0301 1\u03011\u03011\u03011\u0301 1\u03011\u03011\u03011\u0301 1\u03011\u03011\u03011\u0301', '####'],
+    ['Pay 4\u0301\u0302\u03031\u03011\u03011\u03011\u03011\u03011\u03011\u0301 now', 'Pay #### now'],
+    // Devanagari digits, each with a candrabindu.
+    ['\u096A\u0901\u0967\u0901\u0967\u0901\u0967\u0901\u0967\u0901\u0967\u0901\u0967\u0901\u0967\u0901', '####'],
   ])('a long digit run in %j is masked: %j', (input, output) => {
     const out = cleanLabel(input, FALLBACK)
     expect(out).toBe(output)
@@ -1065,26 +1361,138 @@ describe('cleanLabel', () => {
   })
 
   // The coupling between cleanLabel and the chart validator, pinned for every
-  // BMP code point (lone surrogates skipped), alone, flanked and repeated.
-  // Every output is checked for the banned characters; distinct outputs are
-  // each run through the validator once.
-  it('every BMP code point, cleaned, holds no banned character and passes the chart validator', () => {
+  // BMP code point (lone surrogates skipped), alone, flanked and repeated,
+  // and for every combining mark in the whole code space stacked deep on a
+  // base and placed with no base, plus a Zalgo string (#304), and for every
+  // BMP code point and every default-ignorable one in the whole code space
+  // between the groups of a 16-digit number (#312). Every output is checked
+  // for the banned characters, against the mark rule and for a digit run a
+  // reader would see; distinct outputs are each run through the validator once.
+  it('every BMP code point and every stacked mark, cleaned, holds no banned character, keeps the mark rule, shows no long digit run and passes the chart validator', () => {
     const banned = /[:<>/\\`[\]*|~!\n\r]/
-    const outputs = new Set<string>()
+    const inputs: string[] = []
+    const between = (c: string) => ['5550', '0123', '4567', '8901'].join(c)
     for (let code = 0; code <= 0xffff; code += 1) {
       if (code >= 0xd800 && code <= 0xdfff) continue
       const c = String.fromCharCode(code)
-      for (const input of [c, `a${c}b`, `${c}${c}${c}`]) {
-        const out = cleanLabel(input, FALLBACK)
-        if (banned.test(out)) expect.fail(`U+${code.toString(16)} in ${JSON.stringify(input)} leaves ${JSON.stringify(out)}`)
-        outputs.add(out)
-      }
+      inputs.push(c, `a${c}b`, `${c}${c}${c}`, between(c))
+    }
+    const marks: string[] = []
+    for (let code = 0; code <= 0x10ffff; code += 1) {
+      if (code >= 0xd800 && code <= 0xdfff) continue
+      const c = String.fromCodePoint(code)
+      if (/\p{M}/u.test(c)) marks.push(c)
+      if (code > 0xffff && /\p{DI}/u.test(c)) inputs.push(between(c))
+    }
+    // On a letter and a digit (bases); at the start, after a space, after kept
+    // punctuation and after a Hangul filler, which becomes a space (no base).
+    for (const m of marks) {
+      inputs.push(`a${m.repeat(20)}b`, `1${m.repeat(20)}`, `${m.repeat(20)}a`, ` ${m}${m}`, `a.${m}b`, `\u3164${m}a`)
+    }
+    inputs.push(`Z${marks.slice(0, 30).join('')}algo`, `Z${marks.slice(-30).join('')}algo`)
+    const outputs = new Set<string>()
+    for (const input of inputs) {
+      const out = cleanLabel(input, FALLBACK)
+      if (banned.test(out)) expect.fail(`${JSON.stringify(input)} leaves ${JSON.stringify(out)}`)
+      const broken = markRuleBreak(out)
+      if (broken !== null) expect.fail(`${JSON.stringify(input)} leaves ${JSON.stringify(out)}: ${broken}`)
+      const run = visibleDigitRun(out)
+      if (run !== null) expect.fail(`${JSON.stringify(input)} leaves ${JSON.stringify(out)}, which shows ${run}`)
+      outputs.add(out)
     }
     for (const out of outputs) {
       if (!passesAsValue(out)) expect.fail(`${JSON.stringify(out)} is refused by the chart validator`)
     }
   })
+
+  // #312: the Hangul fillers are letters that draw nothing and are
+  // default-ignorable, so each becomes a space, as any other invisible
+  // character does. NFKC folds U+3164 and U+FFA0 to U+1160 before the filter,
+  // so a rule naming only the code points in the input would miss them. The
+  // digits are invented (not Luhn-valid, not a known test card).
+  const FILLERS: [string, string][] = [
+    ['U+115F', '\u115F'],
+    ['U+1160', '\u1160'],
+    ['U+3164', '\u3164'],
+    ['U+FFA0', '\uFFA0'],
+  ]
+  const GROUPS = ['5550', '0123', '4567', '8901']
+
+  it.each(FILLERS)('#312: a 16-digit number split by %s is masked, as one split by spaces is', (_name, filler) => {
+    expect(cleanLabel(GROUPS.join(filler), FALLBACK)).toBe('####')
+    expect(cleanLabel(`Pay ${GROUPS.join(filler)} now`, FALLBACK)).toBe('Pay #### now')
+    expect(cleanLabel(GROUPS.join(' '), FALLBACK)).toBe('####')
+  })
+
+  it.each(FILLERS)('#312: a label of only %s, once or repeated, is the fallback', (_name, filler) => {
+    expect(cleanLabel(filler, FALLBACK)).toBe(FALLBACK)
+    expect(cleanLabel(filler.repeat(3), FALLBACK)).toBe(FALLBACK)
+    expect(cleanLabel(` ${filler} `, FALLBACK)).toBe(FALLBACK)
+  })
+
+  it.each(FILLERS)('#312: "Shop" with %s before or after it cleans to "Shop"', (_name, filler) => {
+    expect(cleanLabel(`Shop${filler}`, FALLBACK)).toBe(cleanLabel('Shop', FALLBACK))
+    expect(cleanLabel(`${filler}Shop${filler}${filler}`, FALLBACK)).toBe('Shop')
+  })
+
+  it.each(FILLERS)('#312: %s inside a word becomes a space, as any disallowed character does', (_name, filler) => {
+    expect(cleanLabel(`Sh${filler}op`, FALLBACK)).toBe('Sh op')
+  })
+
+  // The sweep's digit-escape check, held to what it must see and must not.
+  // U+FFF9 is a format character that is not default-ignorable, and the
+  // Arabic-Indic digits are decimal digits outside ASCII, so each case pins a
+  // part of the helper no other case reaches.
+  it('visibleDigitRun sees eight digits in any script through what draws nothing, marks, spaces and hyphens, and not through a dot or a comma', () => {
+    for (const label of [
+      '55500123',
+      '\u0665\u0665\u0665\u0660\u0660\u0661\u0662\u0663',
+      '5550\u11600123\u11604567\u11608901',
+      '5550\u31640123',
+      '5550\u200B0123',
+      '5550\uFFF90123',
+      '5550 0123 4567 8901',
+      '5550-0123-4567-8901',
+      '5\u03015\u03015\u03010\u03010\u03011\u03012\u03013\u0301',
+    ]) {
+      expect(visibleDigitRun(label), JSON.stringify(label)).not.toBeNull()
+    }
+    for (const label of ['1,234,567.89', '5550.0123.4567.8901', '1234567', 'Flight NZ 123 4567', 'Pay #### now']) {
+      expect(visibleDigitRun(label), JSON.stringify(label)).toBeNull()
+    }
+  })
 })
+
+// Why a cleaned label breaks #304's mark rule, or null: every run of marks
+// follows a letter or number that is not default-ignorable and holds at most
+// three, and no mark is an enclosing or default-ignorable one.
+function markRuleBreak(label: string): string | null {
+  const chars = Array.from(label)
+  let run = 0
+  for (let i = 0; i < chars.length; i += 1) {
+    if (!/\p{M}/u.test(chars[i])) {
+      run = 0
+      continue
+    }
+    if (/[\p{Me}\p{DI}]/u.test(chars[i])) return 'an enclosing or default-ignorable mark'
+    if (run === 0 && (i === 0 || !/^(?!\p{DI})[\p{L}\p{N}]$/u.test(chars[i - 1]))) return 'a mark with no base'
+    run += 1
+    if (run > 3) return 'more than three marks on one base'
+  }
+  return null
+}
+
+// Eight decimal digits a reader would see as one run in a cleaned label, or
+// null (#312). Written apart from cleanLabel, and sharing none of its
+// patterns, so a gap in the mask cannot hide in both: it removes what draws
+// nothing or only decorates a digit (default-ignorable and format characters,
+// marks) and the separators the mask counts through (whitespace and dashes),
+// then looks for eight digits in a row. A dot or a comma is left in, so
+// "1,234,567.89" ends its runs there, as the mask intends.
+function visibleDigitRun(label: string): string | null {
+  const seen = label.replace(/[\p{DI}\p{M}\p{Cf}\p{White_Space}\p{Pd}]/gu, '')
+  return /\p{Nd}{8}/u.exec(seen)?.[0] ?? null
+}
 
 // A label as a chart data value, as prompt.ts writes it.
 function passesAsValue(label: string): boolean {

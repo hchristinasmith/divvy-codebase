@@ -7,7 +7,7 @@ import type {
   Scope,
 } from '../../shared/contracts.ts'
 
-// The Sort screen's requests (prd-02 Ruling 16, issue 259): the merchant
+// The Sort screen's requests (prd-02 Ruling 17, issue 259): the merchant
 // groups for a scope, and applying one category to a whole group. A refused
 // request rejects with an Error whose message is the server's own
 // `{ error }` text, so the screen can show it as it is. Every figure is the
@@ -15,10 +15,11 @@ import type {
 
 const rootURL = new URL('/api/v1', document.baseURI)
 
-// A copy of `call` in ./overview.ts and ./subscriptions.ts (itself the same
-// messages as `send` in ./settings.ts); change all together: the server's
-// text when it sent one, its status when it did not, or that it could not
-// be reached.
+// A copy of `call` in ./goals.ts, ./overview.ts and ./subscriptions.ts
+// (itself the same messages as `send` in ./settings.ts); ./sync.ts has one
+// more that also refuses a 200 that is not JSON. Change all together (#249
+// tracks lifting it): the server's text when it sent one, its status when
+// it did not, or that it could not be reached.
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response
   try {

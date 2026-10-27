@@ -1,10 +1,9 @@
 import express from 'express'
-import type { Request, Response } from 'express'
+import type { Response } from 'express'
 
 import type {
   ApplyCategoryResponse,
   CategoriseGroupsResponse,
-  Scope,
 } from '../../shared/contracts.ts'
 import {
   CategoriseDataError,
@@ -12,10 +11,12 @@ import {
   listGroups,
   validateApplyRequest,
 } from '../db/categorise.ts'
+import { errorClass } from '../error-class.ts'
+import { fromThisSite, parseScope } from '../http.ts'
 
 const router = express.Router()
 
-// /api/v1/categorise (prd-02 Ruling 16, issue #259): the Sort screen's read
+// /api/v1/categorise (prd-02 Ruling 17, issue #259): the Sort screen's read
 // and its one write. Mounted by ./index.ts.
 //
 // GET /groups?scope=all|personal|strawb answers `CategoriseGroupsResponse`:
@@ -33,50 +34,6 @@ const router = express.Router()
 // Errors are fixed text and never echo what was sent. A
 // `CategoriseDataError` carries one of its own constant messages; anything
 // else is a generic text. Only the error's class is logged.
-
-/**
- * A copy of `parseScope` in ./bills.ts, ./budgets.ts, ./overview.ts,
- * ./subscriptions.ts and ../agents/routes/insights.ts; change all together
- * (#236 tracks folding the route helpers). A plain `all`, `personal` or
- * `strawb`; anything else, a repeated `scope` included, is refused.
- */
-function parseScope(raw: unknown): Scope | null {
-  return raw === 'all' || raw === 'personal' || raw === 'strawb' ? raw : null
-}
-
-/**
- * A copy of `fromThisSite` in ./sync.ts, ./overview.ts, ./subscriptions.ts,
- * ./bills.ts, ./goals.ts, ./budgets.ts and ../agents/routes/index.ts; change
- * all together (#236 tracks folding them).
- * `Sec-Fetch-Site` when the browser sends it; otherwise no `Origin` (curl)
- * passes and an `Origin` must name this host.
- */
-function fromThisSite(req: Request): boolean {
-  const site = req.headers['sec-fetch-site']
-  if (site !== undefined) return site === 'same-origin' || site === 'none'
-  const origin = req.headers.origin
-  if (origin === undefined) return true
-  const host = req.headers.host
-  if (host === undefined) return false
-  try {
-    return new URL(origin).host === host.toLowerCase()
-  } catch {
-    // `Origin: null` (a sandboxed frame, a file: page) and anything else
-    // that is not a URL.
-    return false
-  }
-}
-
-/**
- * A copy of `errorClass` in ./overview.ts, ./accounts.ts, ./subscriptions.ts,
- * ./transactions.ts, ./bills.ts, ./goals.ts, ./budgets.ts,
- * ../sync/scheduler.ts, ../agents/routes/proposals.ts,
- * ../agents/routes/insights.ts and ../agents/insights/agent.ts; change all
- * together (#236 tracks folding them).
- */
-function errorClass(err: unknown): string {
-  return err instanceof Error ? err.constructor.name : typeof err
-}
 
 function failed(
   res: Response,

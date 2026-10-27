@@ -9,6 +9,7 @@ import goals from './goals.ts'
 import habits from './habits.ts'
 import overview from './overview.ts'
 import settings from './settings.ts'
+import spending from './spending.ts'
 import subscriptions from './subscriptions.ts'
 import sync from './sync.ts'
 import transactions from './transactions.ts'
@@ -36,6 +37,7 @@ router.use('/bills', bills)
 router.use('/goals', goals)
 router.use('/habits', habits)
 router.use('/subscriptions', subscriptions)
+router.use('/spending', spending)
 router.use('/categorise', categorise)
 router.use('/agents', agents)
 

@@ -35,7 +35,16 @@ describe('freshApp', () => {
   })
 
   it('starts every call from an empty database', async () => {
-    await freshApp()
+    // Setup needs a migrated schema, not a full rollback: only the later
+    // freshApp() call is under test. Rolling everything back in setup as
+    // well made this test the slowest in the file, and it timed out under
+    // load, where every SQLite query waits on a shared thread pool (#368,
+    // #367).
+    // latest() does nothing once an earlier test has migrated, and migrates
+    // from scratch when this test runs alone. The guard comes first, as in
+    // freshApp(), so setup never writes to a database on disk.
+    assertInMemory(connection)
+    await connection.migrate.latest()
     await connection('transactions').insert({ description: 'left over' })
     expect(await connection('transactions').count({ n: '*' })).toEqual([
       { n: 1 },
@@ -46,6 +55,40 @@ describe('freshApp', () => {
     expect(await connection('transactions').count({ n: '*' })).toEqual([
       { n: 0 },
     ])
+  })
+
+  it('empties a database whose migrations span two batches, not only the last', async () => {
+    // The row goes in `transactions`, which the first migration creates, so
+    // it sits in batch 1. Rolling back only the last batch would keep it.
+    // Setup stays cheap (#368): latest() migrates from scratch only when this
+    // test runs alone. down({ name }) then rolls back just the last migration,
+    // and up() re-applies it as a batch of its own, so the rest stay in batch 1.
+    // The guard comes first, as in freshApp(), so setup never writes to a
+    // database on disk.
+    assertInMemory(connection)
+    await connection.migrate.latest()
+    const [completed] = await connection.migrate.list()
+    const names = completed.map((m: { name: string }) => m.name).sort()
+    await connection.migrate.down({ name: names[names.length - 1] })
+    await connection.migrate.up()
+    const batches = new Set(
+      (await connection('knex_migrations').select('batch')).map(
+        (row: { batch: number }) => row.batch,
+      ),
+    )
+    expect(batches.size).toBe(2)
+    await connection('transactions').insert({ description: 'left over' })
+    expect(await connection('transactions').count({ n: '*' })).toEqual([
+      { n: 1 },
+    ])
+
+    await freshApp()
+
+    expect(await connection('transactions').count({ n: '*' })).toEqual([
+      { n: 0 },
+    ])
+    const [, pending] = await connection.migrate.list()
+    expect(pending).toHaveLength(0)
   })
 })
 

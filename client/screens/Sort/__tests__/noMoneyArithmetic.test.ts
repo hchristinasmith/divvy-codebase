@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest'
 // copied either: a category change moves budgets spent, so this screen must
 // invalidate the Overview.
 //
-// The Sort screen does no money arithmetic (prd-02 Ruling 16): every total,
+// The Sort screen does no money arithmetic (prd-02 Ruling 17): every total,
 // received amount and latest amount is a route field passed to
 // `formatCents`. Tests are excluded; they build fixtures.
 const ROOT = 'client/screens/Sort'

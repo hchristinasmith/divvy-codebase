@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { formatCents } from '../../../shared/money.ts'
-import type { SubscriptionMerchant } from '../../../shared/contracts.ts'
+import type { IsoDate, SubscriptionMerchant } from '../../../shared/contracts.ts'
 import SideChip from './SideChip.tsx'
 import { formatDay, plural } from './format.ts'
 
@@ -9,9 +9,11 @@ import { formatDay, plural } from './format.ts'
 // often, and its latest charge. The buttons are the card's.
 export default function MerchantRow({
   merchant,
+  today,
   children,
 }: {
   merchant: SubscriptionMerchant
+  today: IsoDate
   children: ReactNode
 }) {
   return (
@@ -25,7 +27,7 @@ export default function MerchantRow({
           <SideChip scope={merchant.scope} />
         </div>
         <span className="text-body-12 text-ink-muted">
-          {`Last charged ${formatDay(merchant.lastChargedOn)} · ${plural(merchant.chargeCount, 'charge')}`}
+          {`Last charged ${formatDay(merchant.lastChargedOn, today)} · ${plural(merchant.chargeCount, 'charge')}`}
         </span>
       </div>
       <div className="flex flex-col items-end">

@@ -9,7 +9,7 @@ import {
   validateApplyRequest,
 } from '../categorise.ts'
 
-// The Sort screen's data module (prd-02 Ruling 16, issue #259), against a
+// The Sort screen's data module (prd-02 Ruling 17, issue #259), against a
 // fresh in-memory database. The route tests cover the Done-when bullets over
 // HTTP; this file covers what the loader reads and what the totals refuse.
 // Every value below is invented, in integer cents.

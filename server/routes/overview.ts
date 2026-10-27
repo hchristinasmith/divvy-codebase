@@ -1,12 +1,12 @@
 import express from 'express'
-import type { Request } from 'express'
 
-import type { Scope } from '../../shared/contracts.ts'
 import {
   OverviewDataError,
   dismissAlert,
   readOverview,
 } from '../db/overview.ts'
+import { errorClass } from '../error-class.ts'
+import { fromThisSite, parseScope } from '../http.ts'
 
 // /api/v1/overview (prd-02, issue #44): the Overview screen's one read and
 // its alert dismissal. Mounted by ./index.ts.
@@ -28,40 +28,10 @@ import {
 // constant messages, which name no id or value; anything else is a generic
 // text. Only the error's class is logged.
 
-/** A plain `all`, `personal` or `strawb`; anything else is refused. */
-function parseScope(raw: unknown): Scope | null {
-  return raw === 'all' || raw === 'personal' || raw === 'strawb' ? raw : null
-}
-
 // `<kind>:<positive row id>:<YYYY-MM-DD>`, as `deriveAlerts` builds them.
 const ALERT_ID =
-  /^(over_budget|bill_due_soon|bill_overdue):[1-9]\d*:\d{4}-\d{2}-\d{2}$/
+  /^(over_budget|bill_due_soon|bill_overdue|bill_too_many_unpaid):[1-9]\d*:\d{4}-\d{2}-\d{2}$/
 const MAX_ALERT_ID_LENGTH = 255
-
-/**
- * A copy of `fromThisSite` in ./sync.ts; change both together.
- * `Sec-Fetch-Site` when the browser sends it; otherwise no `Origin` (curl)
- * passes and an `Origin` must name this host.
- */
-function fromThisSite(req: Request): boolean {
-  const site = req.headers['sec-fetch-site']
-  if (site !== undefined) return site === 'same-origin' || site === 'none'
-  const origin = req.headers.origin
-  if (origin === undefined) return true
-  const host = req.headers.host
-  if (host === undefined) return false
-  try {
-    return new URL(origin).host === host.toLowerCase()
-  } catch {
-    // `Origin: null` (a sandboxed frame, a file: page) and anything else
-    // that is not a URL.
-    return false
-  }
-}
-
-function errorClass(err: unknown): string {
-  return err instanceof Error ? err.constructor.name : typeof err
-}
 
 const router = express.Router()
 

@@ -199,12 +199,14 @@ const ROW_KEYS: Record<keyof SubscriptionRow, true> = {
   chargedAgainOn: true,
   perMonthCents: true,
   perYearCents: true,
+  possiblyStopped: true,
 }
 const TOTAL_KEYS: Record<keyof SubscriptionTotals, true> = {
   perMonthCents: true,
   perYearCents: true,
   countedCount: true,
   uncountedCount: true,
+  possiblyStoppedCount: true,
 }
 const MARK_RESPONSE_KEYS: Record<keyof SubscriptionMarkResponse, true> = {
   scope: true,
@@ -230,6 +232,7 @@ const STREAM_ROW: SubscriptionRow = {
   perMonthCents: 1599,
   // 12 × 1599
   perYearCents: 19188,
+  possiblyStopped: false,
 }
 const HOST_ROW: SubscriptionRow = {
   merchantKey: HOST,
@@ -248,6 +251,7 @@ const HOST_ROW: SubscriptionRow = {
   perMonthCents: 4333,
   // 12 × 4333
   perYearCents: 51996,
+  possiblyStopped: false,
 }
 const CLOUD_QUESTION: SubscriptionMerchant = {
   merchantKey: CLOUD,
@@ -281,6 +285,7 @@ describe('GET: the response is the contract', () => {
         perYearCents: 71184,
         countedCount: 2,
         uncountedCount: 0,
+        possiblyStoppedCount: 0,
       },
     })
   })
@@ -297,6 +302,7 @@ describe('GET: the response is the contract', () => {
       perYearCents: 19188,
       countedCount: 1,
       uncountedCount: 0,
+      possiblyStoppedCount: 0,
     })
   })
 
@@ -312,6 +318,7 @@ describe('GET: the response is the contract', () => {
       perYearCents: 51996,
       countedCount: 1,
       uncountedCount: 0,
+      possiblyStoppedCount: 0,
     })
   })
 
@@ -328,6 +335,7 @@ describe('GET: the response is the contract', () => {
         perYearCents: 0,
         countedCount: 0,
         uncountedCount: 0,
+        possiblyStoppedCount: 0,
       },
     })
   })
@@ -358,6 +366,68 @@ describe('GET: the response is the contract', () => {
       error: 'scope must be all, personal or strawb',
     })
     expect(res.text).not.toContain('business')
+  })
+
+  it('a monthly row last charged more than 60 days before today in NZ is possibly stopped and out of the totals (issue #392)', async () => {
+    // The clock is 23:30 UTC on 27 October: 28 October in NZ. Charges at
+    // noon NZST on 1 June, 1 July and 31 July (gaps 30 and 30); 31 July to
+    // 28 October is 89 days.
+    await insertAll('accounts', [
+      account({
+        id: 1,
+        akahu_id: EVERYDAY,
+        name: 'Sentinel Everyday',
+        scope: 'personal',
+      }),
+    ])
+    await insertAll(
+      'transactions',
+      [
+        '2026-06-01T00:00:00.000Z',
+        '2026-07-01T00:00:00.000Z',
+        '2026-07-31T00:00:00.000Z',
+      ].map((date) =>
+        tx(EVERYDAY, date, -1299, {
+          merchant_id: 'merchant_fixture_paused',
+          merchant_name: 'Example Paused Stream',
+          description: 'EXAMPLE PAUSED STREAM',
+        }),
+      ),
+    )
+
+    const res = await get('personal')
+
+    expect(res.status).toBe(200)
+    expect(res.body.subscriptions).toHaveLength(1)
+    expect(keys(res.body.subscriptions[0])).toEqual(keys(ROW_KEYS))
+    expect(keys(res.body.totals)).toEqual(keys(TOTAL_KEYS))
+    expect(res.body.subscriptions).toStrictEqual([
+      {
+        merchantKey: 'm:merchant_fixture_paused',
+        scope: 'personal',
+        name: 'Example Paused Stream',
+        chargeCount: 3,
+        lastChargedOn: '2026-07-31',
+        amountCents: 1299,
+        cadence: 'monthly',
+        detected: true,
+        marked: false,
+        status: 'active',
+        cancelledOn: null,
+        chargedAgainOn: null,
+        perMonthCents: 1299,
+        // 12 × 1299
+        perYearCents: 15588,
+        possiblyStopped: true,
+      },
+    ])
+    expect(res.body.totals).toStrictEqual({
+      perMonthCents: 0,
+      perYearCents: 0,
+      countedCount: 0,
+      uncountedCount: 0,
+      possiblyStoppedCount: 1,
+    })
   })
 })
 
@@ -677,6 +747,7 @@ describe('round trips', () => {
       perYearCents: 19188,
       countedCount: 1,
       uncountedCount: 1,
+      possiblyStoppedCount: 0,
     })
 
     await mark({ scope: 'personal', merchantKey: CLOUD, answer: null })
@@ -698,6 +769,7 @@ describe('round trips', () => {
       perYearCents: 0,
       countedCount: 0,
       uncountedCount: 0,
+      possiblyStoppedCount: 0,
     })
   })
 
@@ -861,6 +933,67 @@ describe('round trips', () => {
     const res = await cancel({ scope: 'personal', merchantKey: STREAM })
 
     expect(res.body.cancelledOn).toBe('2026-10-28')
+  })
+
+  it('a split merchant whose bare-key part stopped unlisted: No on the bare key hides every part (issue #400)', async () => {
+    await seed()
+    // Example Split App bills two subscriptions (prd-02 Ruling 16): A on
+    // the 5th, January to May, at 1000, and B on the 20th, February to
+    // October, at 2500. A forms first and holds the bare key; B gets
+    // <bare>#2026-02-20:2500. By 20 October A's last charge is months
+    // back and nothing pins it, so it is not listed: no listed row carries
+    // the bare key.
+    const split = (date: string, cents: number) =>
+      tx(EVERYDAY, `${date}T00:00:00.000Z`, -cents, {
+        merchant_id: 'merchant_fixture_split',
+        merchant_name: 'Example Split App',
+        description: 'EXAMPLE SPLIT APP',
+      })
+    await insertAll('transactions', [
+      ...['01', '02', '03', '04', '05'].map((m) => split(`2026-${m}-05`, 1000)),
+      ...['02', '03', '04', '05', '06', '07', '08', '09', '10'].map((m) =>
+        split(`2026-${m}-20`, 2500),
+      ),
+    ])
+    const SPLIT = 'm:merchant_fixture_split'
+    const PART_B = `${SPLIT}#2026-02-20:2500`
+    const splitKeys = (rows: { merchantKey: string }[]) =>
+      rows
+        .map((r) => r.merchantKey)
+        .filter((k) => k === SPLIT || k.startsWith(`${SPLIT}#`))
+
+    let body: SubscriptionsResponse = (await get('personal')).body
+    expect(splitKeys(body.subscriptions)).toStrictEqual([PART_B])
+    expect(splitKeys(body.questions)).toStrictEqual([])
+    expect(splitKeys(body.notSubscriptions)).toStrictEqual([])
+
+    const no = await mark({
+      scope: 'personal',
+      merchantKey: SPLIT,
+      answer: 'not_subscription',
+    })
+    expect(no.status).toBe(200)
+    expect(no.body).toStrictEqual({
+      scope: 'personal',
+      merchantKey: SPLIT,
+      answer: 'not_subscription',
+      cancelledOn: null,
+    })
+
+    body = (await get('personal')).body
+    expect(splitKeys(body.subscriptions)).toStrictEqual([])
+    expect(splitKeys(body.questions)).toStrictEqual([])
+    // Listed once, under the bare key, with every charge of both parts.
+    const listed = body.notSubscriptions.filter((r) =>
+      splitKeys([r]).length > 0,
+    )
+    expect(
+      listed.map((r) => [r.merchantKey, r.chargeCount, r.lastChargedOn]),
+    ).toStrictEqual([[SPLIT, 14, '2026-10-20']])
+    // The other merchants are untouched.
+    expect(body.subscriptions.map((r) => r.merchantKey)).toStrictEqual([
+      STREAM,
+    ])
   })
 })
 

@@ -6,16 +6,15 @@ import {
 } from '../../apis/overview.ts'
 import { invalidateOverview } from '../../apis/queryKeys.ts'
 import { SCOPES } from '../../context/ScopeContext.tsx'
-import type { ActivityRow, Scope } from '../../../shared/contracts.ts'
+import type { ActivityRow, IsoDate, Scope } from '../../../shared/contracts.ts'
+import SegmentedControl from '../../components/Shell/SegmentedControl.tsx'
 import ActivityRowItem from './ActivityRowItem.tsx'
 import {
   CARD,
   CARD_TITLE,
   ERROR,
   MUTED,
-  PILL_TRACK,
   SECONDARY_BUTTON,
-  pill,
 } from './styles.ts'
 
 // Recent activity (docs/design/handoff.md Screen 1 and "Scope toggle"): the
@@ -39,9 +38,11 @@ interface CategoryEdit {
 export default function ActivityCard({
   rows,
   scope,
+  today,
 }: {
   rows: ActivityRow[]
   scope: Scope
+  today: IsoDate
 }) {
   const [filter, setFilter] = useState<Scope>(scope)
   const client = useQueryClient()
@@ -65,19 +66,12 @@ export default function ActivityCard({
         <h2 id="activity-heading" className={`${CARD_TITLE} text-ink`}>
           Recent activity
         </h2>
-        <div role="group" aria-label="Activity filter" className={PILL_TRACK}>
-          {pills.map(({ value, label }) => (
-            <button
-              key={value}
-              type="button"
-              aria-pressed={filter === value}
-              onClick={() => setFilter(value)}
-              className={pill(filter === value)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          label="Activity filter"
+          options={pills}
+          value={filter}
+          onChange={setFilter}
+        />
       </div>
       {categories.isError && (
         <div className="flex flex-wrap items-center gap-3">
@@ -108,6 +102,7 @@ export default function ActivityCard({
                   ? edit.error.message
                   : null
               }
+              today={today}
               onCategory={(category) => edit.mutate({ id: row.id, category })}
             />
           ))}

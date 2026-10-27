@@ -108,7 +108,17 @@ export async function xeroGet(
     redirect: 'error',
   }
   const fetch: XeroFetch = ctx.fetch ?? globalThis.fetch
-  const response = await fetch(url, init)
+  let response: Response
+  try {
+    response = await fetch(url, init)
+  } catch {
+    // undici's own TypeError can quote the Authorization header, so it is
+    // dropped here: no message, no `cause`, nothing carried over.
+    throw new XeroClientError(
+      'request_failed',
+      'Xero request failed before a response arrived',
+    )
+  }
   if (!response.ok) throw errorFor(response)
   const text = await response.text()
   try {

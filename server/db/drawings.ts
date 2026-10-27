@@ -5,8 +5,8 @@ import {
   findDrawingIds,
   type DrawingCandidate,
 } from '../../shared/drawings.ts'
+import { nzCalendarDate } from '../../shared/nz-dates.ts'
 import connection from './connection.ts'
-import { nzCalendarDate } from './overview.ts'
 
 // Drawings on read (prd-02 Ruling 15): which stored transactions are a half
 // of a drawing, and the overlay that shows them as Drawings. The matching
@@ -24,9 +24,15 @@ import { nzCalendarDate } from './overview.ts'
 // row with no date, or a date that is not an instant, cannot be placed in
 // the window and so is never a drawing; nothing else about it changes.
 //
-// overview.ts imports this module and this module imports `nzCalendarDate`
-// from overview.ts. The cycle is safe because neither module calls the
-// other at load time; only function references cross it.
+// `nzCalendarDate` is the shared one; a Date that is not an instant is
+// skipped before it is called, so its RangeError is never reached here.
+//
+// The insights agent imports this module, so it must stay write-free and
+// must not import a module that writes (./overview.ts does).
+// server/agents/__tests__/no-money-writes.test.ts enforces both for
+// server/db modules, following this module's server/db imports
+// transitively. It does not follow an import of a module outside
+// server/db/, so that is held by this comment alone.
 
 type Db = typeof connection
 

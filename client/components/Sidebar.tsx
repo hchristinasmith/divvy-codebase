@@ -4,7 +4,6 @@ import {
   TargetIcon,
   TrophyIcon,
   SettingsIcon,
-  Wand,
   ArrowRightLeft,
   CalendarSearch,
   Menu,
@@ -23,12 +22,6 @@ const menuItems = [
     url: '/transactions',
     icon: ArrowRightLeft,
     description: 'View & Manage Transactions',
-  },
-  {
-    title: 'Wishlist',
-    url: '/wishlist',
-    icon: Wand,
-    description: 'Keep tabs on what you want next',
   },
   {
     title: 'Targets',

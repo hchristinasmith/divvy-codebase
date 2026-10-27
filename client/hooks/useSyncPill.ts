@@ -3,9 +3,9 @@ import { useQuery } from '@tanstack/react-query'
 import { queryKeys } from '../apis/queryKeys.ts'
 
 // The header's sync pill: a status dot and how long ago the banks last
-// synced, from prd-01's `GET /api/v1/sync/status` (#27). Until that route
-// exists, and whenever it fails or returns something unexpected, the pill is
-// neutral ("Not synced yet"): it never shows a time it does not have.
+// synced, from prd-01's `GET /api/v1/sync/status` (#27). Whenever that request
+// fails or returns something unexpected, the pill is neutral ("Not synced
+// yet"): it never shows a time it does not have.
 
 // The part of #27's contract the pill reads. The full body is
 // `{ running, lastRun, lastSuccessAt, nextRunAt }`; lastSuccessAt is an

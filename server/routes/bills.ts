@@ -1,11 +1,10 @@
 import express from 'express'
-import type { Request, Response } from 'express'
+import type { Response } from 'express'
 
 import type {
   BillResponse,
   BillsResponse,
   MarkBillPaidResponse,
-  Scope,
 } from '../../shared/contracts.ts'
 import {
   BillsDataError,
@@ -18,6 +17,8 @@ import {
   validateCreateBill,
   type BillRefusal,
 } from '../db/bills.ts'
+import { errorClass } from '../error-class.ts'
+import { fromThisSite, parseScope, writableId } from '../http.ts'
 
 const router = express.Router()
 
@@ -38,51 +39,6 @@ const router = express.Router()
 // Errors are fixed text and never echo what was sent. A `BillsDataError`
 // carries one of its own constant messages; anything else is a generic
 // text. Only the error's class is logged.
-
-/**
- * A copy of `parseScope` in ./overview.ts and ./subscriptions.ts; change
- * all together.
- * A plain `all`, `personal` or `strawb`; anything else is refused.
- */
-function parseScope(raw: unknown): Scope | null {
-  return raw === 'all' || raw === 'personal' || raw === 'strawb' ? raw : null
-}
-
-/**
- * A copy of `fromThisSite` in ./overview.ts, ./subscriptions.ts and
- * ./sync.ts; change all together. `Sec-Fetch-Site` when the browser sends
- * it; otherwise no `Origin` (curl) passes and an `Origin` must name this
- * host.
- */
-function fromThisSite(req: Request): boolean {
-  const site = req.headers['sec-fetch-site']
-  if (site !== undefined) return site === 'same-origin' || site === 'none'
-  const origin = req.headers.origin
-  if (origin === undefined) return true
-  const host = req.headers.host
-  if (host === undefined) return false
-  try {
-    return new URL(origin).host === host.toLowerCase()
-  } catch {
-    // `Origin: null` (a sandboxed frame, a file: page) and anything else
-    // that is not a URL.
-    return false
-  }
-}
-
-/**
- * A copy of `errorClass` in ./overview.ts, ./accounts.ts, ./subscriptions.ts
- * and ../sync/scheduler.ts; change all together.
- */
-function errorClass(err: unknown): string {
-  return err instanceof Error ? err.constructor.name : typeof err
-}
-
-// Digits only: Number() would also accept '1e3', '0x10' and ' 7'.
-function parseId(raw: string): number | null {
-  const id = Number(raw)
-  return /^[1-9]\d*$/.test(raw) && Number.isSafeInteger(id) ? id : null
-}
 
 const REFUSALS: Record<BillRefusal, { status: number; error: string }> = {
   not_found: { status: 404, error: 'Bill not found' },
@@ -125,23 +81,6 @@ function failed(res: Response, what: string, err: unknown): void {
     error:
       err instanceof BillsDataError ? err.message : 'Internal server error',
   })
-}
-
-/**
- * The checks every write by id starts with: this site, then the id. Answers
- * the id, or null once a refusal has been sent.
- */
-function writableId(req: Request, res: Response): number | null {
-  if (!fromThisSite(req)) {
-    res.status(403).json({ error: 'Forbidden' })
-    return null
-  }
-  const id = parseId(req.params.id)
-  if (id === null) {
-    res.status(400).json({ error: 'id must be a positive integer' })
-    return null
-  }
-  return id
 }
 
 // GET /api/v1/bills?scope=

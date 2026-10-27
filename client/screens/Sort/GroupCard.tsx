@@ -4,7 +4,7 @@ import type { CategoriseGroupResponse } from '../../../shared/contracts.ts'
 import { formatDay } from '../Overview/format.ts'
 import { CARD, EYEBROW, MUTED } from '../Overview/styles.ts'
 
-// One merchant's card (prd-02 Ruling 16): its name, how many uncategorised
+// One merchant's card (prd-02 Ruling 17): its name, how many uncategorised
 // transactions it has, the total spent, what came back when anything did,
 // and the latest date and amount. Every figure is the server's, formatted by
 // `formatCents`. The name is bank text, so it is rendered as text, never as
@@ -13,9 +13,9 @@ import { CARD, EYEBROW, MUTED } from '../Overview/styles.ts'
 function latestLine(group: CategoriseGroupResponse): string {
   const amount = formatCents(group.latestAmountCents)
   if (group.latestDate === null) return `Latest ${amount}`
-  // The year is shown because uncategorised history can span more than one.
-  const year = group.latestDate.slice(0, 4)
-  return `Latest ${formatDay(group.latestDate)} ${year} · ${amount}`
+  // No `today`, so the year is always shown: uncategorised history can span
+  // more than one.
+  return `Latest ${formatDay(group.latestDate, '')} · ${amount}`
 }
 
 export default function GroupCard({

@@ -5,6 +5,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -175,6 +176,25 @@ describe('Dockerfile', () => {
       expect(copy).not.toMatch(/\.env|\.sqlite3/)
     }
   })
+
+  // One base image, named by its index digest in every stage (the Dockerfile's
+  // base-image comment says how to bump it). A FROM that loses its digest
+  // floats with the tag; one that takes another digest builds on another image.
+  it('names node:22-bookworm-slim by one index digest in each of the three stages', () => {
+    const froms = instructions.split('\n').filter((line) => /^FROM\s/.test(line))
+
+    expect(
+      froms.map((line) => line.replace(/@sha256:[0-9a-f]{64}/, '@DIGEST')),
+    ).toEqual([
+      'FROM node:22-bookworm-slim@DIGEST AS tools',
+      'FROM node:22-bookworm-slim@DIGEST AS build',
+      'FROM node:22-bookworm-slim@DIGEST',
+    ])
+    const digests = new Set(
+      froms.map((line) => line.match(/@sha256:([0-9a-f]{64})/)?.[1]),
+    )
+    expect(digests.size).toBe(1)
+  })
 })
 
 describe('scripts/start.sh and docs/deploy.md, as files', () => {
@@ -309,9 +329,18 @@ const SENTINEL = 'not-a-real-secret-sentinel'
 // that. Only the run that expects it never to appear waits briefly.
 const SOCKET_WAIT_SECS = 15
 const NO_SOCKET_WAIT_SECS = 2
-// Above the wait, so a slow socket fails on start.sh's own message, not on
-// spawnSync killing it. A test that runs start.sh twice gets two of these.
-const RUN_TIMEOUT_MS = (SOCKET_WAIT_SECS + 15) * 1000
+// How long spawnSync lets one start.sh run go before it kills it, for every
+// runStart call that expects a status (#374). It is derived from the socket
+// wait, so it stays above it: a slow socket fails on start.sh's own message,
+// not on spawnSync killing it. On 2026-10-26 a boot run hit the old limit,
+// (SOCKET_WAIT_SECS + 15) s, under load and failed as `expected null to be +0`
+// (#369): spawnSync killed start.sh and returned no status. That day, boot
+// runs at load 130-210 took 5.3-13.2 s, but the failing run's length is
+// unknown, so this limit doubles the one it ran past. vitest arms a test's
+// timeout only after a synchronous test returns, so it never ends a
+// spawnSync: this limit is the one that ends a hang. The describe block's
+// timeout is still sized for a test that runs start.sh twice.
+const RUN_TIMEOUT_MS = 2 * (SOCKET_WAIT_SECS + 15) * 1000
 const SERVE_OK = '|-- / proxy http://127.0.0.1:3005\n'
 
 // tailscaled is node so it can hold a real unix socket. It is wrapped in sh
@@ -339,25 +368,47 @@ if (!mode('no-socket') && socket) {
 setTimeout(() => process.exit(0), 30000)
 `
 
-// Each subcommand exits with its own FAKE_*_EXIT (default 0). tailscale is
-// not run under \`env -i\`, so the environment reaches it.
-const FAKE_TAILSCALE = `#!/bin/sh
-echo "tailscale $*" >> "$FAKE_DIR/calls.log"
+// The tailscale and timeout fakes, like the tailscaled wrapper, take their
+// directory from their own path and their failure modes from files in it,
+// never from the environment, so they behave the same whatever environment
+// start.sh hands them. $0 is absolute because start.sh finds them through
+// PATH, whose fakeDir entry is absolute; a relative $0 stops the fake rather
+// than letting it write somewhere else. Every call dumps the environment it
+// was started with to its own call-env.<name>.<pid> file, the call itself on
+// the first line, so the call inside start.sh's $(…) and the ones under
+// timeout can each be inspected. The dump names /usr/bin/env by absolute
+// path, so a fake env in fakeDir cannot change it. The fake timeout execs
+// tailscale, so the two dumps of one bounded call share a pid.
+const FAKE_CALL_PREAMBLE = (name: string): string => `#!/bin/sh
+case "$0" in
+  /*) ;;
+  *) echo "fake ${name}: \\$0 is not an absolute path: $0" >&2; exit 97 ;;
+esac
+dir="\${0%/*}"
+echo "${name} $*" >>"$dir/calls.log"
+{ echo "${name} $*"; /usr/bin/env; } >"$dir/call-env.${name}.$$"
+`
+
+// Each subcommand exits with the code in fakeDir/tailscale.<step>.exit
+// (default 0), written by runStart's tailscaleExit option.
+const FAKE_TAILSCALE = `${FAKE_CALL_PREAMBLE('tailscale')}exit_for() {
+  code=0
+  [ ! -e "$dir/tailscale.$1.exit" ] || read -r code <"$dir/tailscale.$1.exit"
+  exit "$code"
+}
 case " $* " in
-  *" up "*) exit "\${FAKE_UP_EXIT:-0}" ;;
-  *" serve reset "*) exit "\${FAKE_RESET_EXIT:-0}" ;;
-  *" serve --bg "*) exit "\${FAKE_SERVE_EXIT:-0}" ;;
+  *" up "*) exit_for up ;;
+  *" serve reset "*) exit_for reset ;;
+  *" serve --bg "*) exit_for serve ;;
   *" serve status "*)
-    cat "$FAKE_DIR/serve-status"
-    exit "\${FAKE_STATUS_EXIT:-0}" ;;
+    cat "$dir/serve-status"
+    exit_for status ;;
 esac
 exit 0
 `
 
 // macOS has no timeout(1); the container's coreutils does.
-const FAKE_TIMEOUT = `#!/bin/sh
-echo "timeout $*" >> "$FAKE_DIR/calls.log"
-shift
+const FAKE_TIMEOUT = `${FAKE_CALL_PREAMBLE('timeout')}shift
 exec "$@"
 `
 
@@ -495,6 +546,14 @@ interface RunOptions {
   env?: Record<string, string>
   serveStatus?: string
   tailscaled?: 'fail' | 'no-socket'
+  // The exit code of one fake tailscale step (FAKE_TAILSCALE); unset steps
+  // exit 0.
+  tailscaleExit?: Partial<Record<'up' | 'reset' | 'serve' | 'status', number>>
+  // The shell that runs start.sh itself; `sh` (bash on macOS, dash in the
+  // image) unless a test names another.
+  shell?: string
+  // How long spawnSync lets start.sh run before it kills it (#369).
+  timeoutMs?: number
 }
 
 // The environment is built from scratch so nothing from the developer's shell
@@ -504,11 +563,16 @@ function runStart({
   env = {},
   serveStatus,
   tailscaled,
+  tailscaleExit = {},
+  shell = 'sh',
+  timeoutMs = RUN_TIMEOUT_MS,
 }: RunOptions = {}): Run {
   if (serveStatus !== undefined)
     writeFileSync(join(fakeDir, 'serve-status'), serveStatus)
   if (tailscaled !== undefined)
     writeFileSync(join(fakeDir, `tailscaled.${tailscaled}`), '')
+  for (const [step, code] of Object.entries(tailscaleExit))
+    writeFileSync(join(fakeDir, `tailscale.${step}.exit`), `${code}\n`)
   const base: Record<string, string> = {
     PATH: `${fakeDir}:${process.env.PATH ?? '/usr/bin:/bin'}`,
     FAKE_DIR: fakeDir,
@@ -519,11 +583,22 @@ function runStart({
     DATABASE_PATH: join(tmp, 'data', 'divvy.sqlite3'),
   }
   if (authkey !== null) base.TS_AUTHKEY = authkey
-  const result = spawnSync('sh', [startScript], {
+  const started = Date.now()
+  const result = spawnSync(shell, [startScript], {
     env: { ...base, ...env },
     encoding: 'utf8',
-    timeout: RUN_TIMEOUT_MS,
+    timeout: timeoutMs,
   })
+  // No status means a signal ended start.sh, or it never ran. The usual one is
+  // spawnSync's own timeout (SIGTERM, ETIMEDOUT). A Run with a null status
+  // would pass `not.toBe(0)`, so a timed-out refusal would read as a refusal:
+  // throw instead, and say which signal it was (#369).
+  if (result.status === null) {
+    const code = (result.error as NodeJS.ErrnoException | undefined)?.code
+    throw new Error(
+      `start.sh ended on ${result.signal ?? 'no signal'} (${code ?? 'no spawn error'}) after ${Date.now() - started} ms, with no exit status`,
+    )
+  }
   const log = join(fakeDir, 'calls.log')
   return {
     pid: result.pid,
@@ -546,6 +621,18 @@ const dump = (name: string): string => {
   const path = join(fakeDir, `${name}.env`)
   return existsSync(path) ? readFileSync(path, 'utf8') : ''
 }
+// Every dump one of the tailscale or timeout fakes wrote (FAKE_CALL_PREAMBLE):
+// the call, and the environment it was started with.
+const callEnvs = (
+  name: 'tailscale' | 'timeout',
+): { call: string; env: string }[] =>
+  readdirSync(fakeDir)
+    .filter((file) => file.startsWith(`call-env.${name}.`))
+    .map((file) => {
+      const text = readFileSync(join(fakeDir, file), 'utf8')
+      const end = text.indexOf('\n')
+      return { call: text.slice(0, end), env: text.slice(end + 1) }
+    })
 
 describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () => {
   it.each([
@@ -592,6 +679,7 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
     const serving = 'start.sh: serving http://127.0.0.1:3005 on the tailnet as divvy'
     expect(deployMd).toContain(serving)
     expect(lines).toContain(serving)
+    expect(deployMd).toContain('start.sh: WARNING: backups are OFF')
     const warning = lines.findIndex((line) =>
       line.startsWith('start.sh: WARNING: backups are OFF'),
     )
@@ -617,6 +705,11 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
     const run = runStart()
 
     expect(run.status).toBe(0)
+    // The line docs/deploy.md section 6 tells the operator to look for, with
+    // the path the image uses in place of the test's tmp config.
+    const backups = `start.sh: backups ON (litestream, ${config})`
+    expect(run.stderr.split('\n')).toContain(backups)
+    expect(deployMd).toContain('start.sh: backups ON (litestream, /app/litestream.yml)')
     const litestream = run.calls.filter((line) => line.startsWith('litestream'))
     expect(litestream).toHaveLength(1)
     expect(litestream[0]).toMatch(
@@ -704,7 +797,7 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
   it.each<[string, RunOptions, string, string]>([
     [
       'tailscale up fails',
-      { env: { FAKE_UP_EXIT: '1' } },
+      { tailscaleExit: { up: 1 } },
       'serve',
       'tailscale up failed',
     ],
@@ -725,19 +818,19 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
     ],
     [
       'tailscale serve reset fails',
-      { env: { FAKE_RESET_EXIT: '1' } },
+      { tailscaleExit: { reset: 1 } },
       'serve --bg',
       'tailscale serve reset failed',
     ],
     [
       'tailscale serve --bg times out',
-      { env: { FAKE_SERVE_EXIT: '124' } },
+      { tailscaleExit: { serve: 124 } },
       'serve status',
       'tailscale serve failed or timed out',
     ],
     [
       'tailscale serve status fails',
-      { env: { FAKE_STATUS_EXIT: '1' } },
+      { tailscaleExit: { status: 1 } },
       MIGRATE,
       'tailscale serve status failed',
     ],
@@ -809,6 +902,20 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
     expect(ran(run.calls, 'litestream replicate ')).toBe(true)
   })
 
+  // A run killed at its timeout must fail as a kill, not as a refusal: the
+  // refusal tests above assert `not.toBe(0)`, which null passes (#369). The
+  // timeout is short here. The stall is the poll's `sleep 1` with no socket,
+  // so start.sh is still running when the timeout kills it.
+  it('names the signal that ended a run past its timeout, not a null status', () => {
+    expect(() =>
+      runStart({
+        tailscaled: 'no-socket',
+        env: { TS_WAIT_SECS: String(NO_SOCKET_WAIT_SECS) },
+        timeoutMs: 500,
+      }),
+    ).toThrow(/start\.sh ended on SIGTERM \(ETIMEDOUT\) after \d+ ms/)
+  })
+
   // Litestream needs the credential and the replica URL; the app does not,
   // and the credential can delete every backup. Secrets can be set while the
   // image lacks the config, so the backups-OFF branch must drop them too.
@@ -864,6 +971,240 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
     },
   )
 
+  // The test above leans on the fake Litestream to fill the AWS_ key names, so
+  // with backups off nothing sets them. Fly secrets can set any of the scrubbed
+  // names directly, in either branch, so each one is set here by name.
+  it.each([
+    ['under litestream', true],
+    ['backups OFF', false],
+  ])(
+    'keeps every scrubbed name and its value out of npm and the server when each is set directly, %s',
+    (_label, backups) => {
+      // AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are set, so the fake
+      // Litestream does not copy the LITESTREAM_ values over them.
+      const scrubbed = {
+        LITESTREAM_ACCESS_KEY_ID: 'not-a-real-litestream-key-id',
+        LITESTREAM_SECRET_ACCESS_KEY: 'not-a-real-litestream-secret-key',
+        LITESTREAM_REPLICA_URL: 'not-a-real-litestream-replica-url',
+        AWS_ACCESS_KEY_ID: 'not-a-real-aws-key-id',
+        AWS_SECRET_ACCESS_KEY: 'not-a-real-aws-secret-key',
+        AWS_SESSION_TOKEN: 'not-a-real-aws-session-token',
+      }
+      const appSecret = 'not-a-real-secret-sentinel-4'
+      if (backups) writeFileSync(join(tmp, 'litestream.yml'), 'dbs: []\n')
+      const run = runStart({
+        env: { ...scrubbed, AKAHU_USER_TOKEN: appSecret },
+      })
+
+      expect(run.status).toBe(0)
+      for (const name of ['npm', 'node']) {
+        const env = dump(name)
+        expect(env).not.toBe('')
+        const names = env
+          .split('\n')
+          .filter(Boolean)
+          .map((line) => line.slice(0, line.indexOf('=')))
+        for (const [scrubbedName, value] of Object.entries(scrubbed)) {
+          expect(names).not.toContain(scrubbedName)
+          expect(env).not.toContain(value)
+        }
+      }
+      expect(dump('node')).toMatch(
+        new RegExp(`^AKAHU_USER_TOKEN=${appSecret}$`, 'm'),
+      )
+    },
+  )
+
+  // The scrub goes by prefix, not by a list (#291): names nobody listed, set
+  // beside the credential, go too, and so does LITESTREAM_CONFIG, which every
+  // run sets (runStart), so no LITESTREAM_ or AWS_ name is exempt. One value
+  // holds a newline, so its second line starts a line of `env` output.
+  const UNLISTED = {
+    LITESTREAM_ACCESS_KEY_ID: 'not-a-real-litestream-key-id-5',
+    LITESTREAM_SECRET_ACCESS_KEY: 'not-a-real-litestream-secret-key-5',
+    LITESTREAM_FOO: 'not-a-real-litestream-foo',
+    AWS_PROFILE: 'not-a-real-aws-profile',
+    AWS_SECURITY_TOKEN:
+      'not-a-real-aws-security-token\nnot-a-real-aws-security-token-line-2',
+  }
+  const UNLISTED_APP_SECRET = 'not-a-real-secret-sentinel-5'
+
+  function expectNoBackupVariables(run: Run, backups: boolean): void {
+    expect(run.status).toBe(0)
+    if (backups) {
+      // Litestream had them, and copied its key into the AWS_ name, so the
+      // command it starts inherited both sets: the scrub had work to do.
+      const litestreamEnv = dump('litestream')
+      expect(litestreamEnv).toMatch(
+        new RegExp(`^LITESTREAM_FOO=${UNLISTED.LITESTREAM_FOO}$`, 'm'),
+      )
+      expect(litestreamEnv).toMatch(
+        new RegExp(
+          `^AWS_ACCESS_KEY_ID=${UNLISTED.LITESTREAM_ACCESS_KEY_ID}$`,
+          'm',
+        ),
+      )
+    }
+    for (const name of ['npm', 'node']) {
+      const env = dump(name)
+      expect(env).not.toBe('')
+      const names = env
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => line.slice(0, line.indexOf('=')))
+      expect(names.filter((n) => /^(LITESTREAM|AWS)_/.test(n))).toEqual([])
+      for (const value of Object.values(UNLISTED)) {
+        for (const part of value.split('\n')) expect(env).not.toContain(part)
+      }
+    }
+    expect(dump('node')).toMatch(
+      new RegExp(`^AKAHU_USER_TOKEN=${UNLISTED_APP_SECRET}$`, 'm'),
+    )
+  }
+
+  it.each([
+    ['under litestream', true],
+    ['backups OFF', false],
+  ])(
+    'keeps every LITESTREAM_ and AWS_ name, listed or not, and its value out of npm and the server, %s',
+    (_label, backups) => {
+      if (backups) writeFileSync(join(tmp, 'litestream.yml'), 'dbs: []\n')
+      const run = runStart({
+        env: { ...UNLISTED, AKAHU_USER_TOKEN: UNLISTED_APP_SECRET },
+      })
+
+      expectNoBackupVariables(run, backups)
+    },
+  )
+
+  const hasPs =
+    spawnSync('ps', ['-o', 'comm=', '-p', String(process.pid)]).status === 0
+
+  // The image's /bin/sh is dash; this machine's may be bash. start.sh runs
+  // under dash here, and an `sh` in fakeDir puts dash behind the command's own
+  // `sh -c` too. The wrapper records its pid and execs dash, which keeps it,
+  // so npm's parent being one of those pids shows dash ran the scrub. It also
+  // dumps the environment it was started with, which is what that process's
+  // /proc/<pid>/environ shows; the last dump is the sh that runs npm, so the
+  // scrubbed shell must exec a fresh one rather than run npm itself. Skipped
+  // where there is no /bin/dash: the tests above then run under whatever sh
+  // the host has. start.sh's own shell is checked by the tailscale fake, which
+  // start.sh runs directly: it records the command name of its parent (ps),
+  // so a run that left start.sh to the host's sh fails here. (A bare 'sh'
+  // would still be dash: spawnSync finds the wrapper on the run's PATH.)
+  // Skipped too where there is no ps.
+  it.skipIf(!existsSync('/bin/dash') || !hasPs).each([
+    ['under litestream', true],
+    ['backups OFF', false],
+  ])(
+    'scrubs the same way with dash as every shell, %s',
+    (_label, backups) => {
+      writeExecutable(
+        join(fakeDir, 'tailscale'),
+        FAKE_TAILSCALE.replace(
+          '#!/bin/sh\n',
+          '#!/bin/sh\nps -o comm= -p "$PPID" >>"${0%/*}/start-sh.comm"\n',
+        ),
+      )
+      writeExecutable(
+        join(fakeDir, 'sh'),
+        [
+          '#!/bin/dash',
+          `echo "$$" >>"${fakeDir}/dash.pids"`,
+          `/usr/bin/env >"${fakeDir}/sh.env"`,
+          'exec /bin/dash "$@"',
+          '',
+        ].join('\n'),
+      )
+      if (backups) writeFileSync(join(tmp, 'litestream.yml'), 'dbs: []\n')
+      const run = runStart({
+        shell: '/bin/dash',
+        env: { ...UNLISTED, AKAHU_USER_TOKEN: UNLISTED_APP_SECRET },
+      })
+
+      expectNoBackupVariables(run, backups)
+      const dashPids = recorded('dash.pids').split('\n')
+      expect(dashPids).toContain(recorded('npm.ppid'))
+      expect(recorded('node.pid')).toBe(recorded('npm.ppid'))
+      expect(dashPids).toContain(
+        backups ? recorded('litestream.child.pid') : String(run.pid),
+      )
+      // start.sh's own process, and any subshell it forked for a tailscale
+      // call: dash every time (macOS prints the path, Linux the name).
+      const startShells = recorded('start-sh.comm').split('\n')
+      expect(startShells.length).toBeGreaterThan(0)
+      for (const comm of startShells) expect(comm).toMatch(/(^|\/)dash$/)
+      const npmShellEnv = dump('sh')
+      expect(npmShellEnv).toMatch(/^PATH=/m)
+      expect(npmShellEnv).not.toMatch(/^(LITESTREAM|AWS)_/m)
+    },
+  )
+
+  // A fake `env` in fakeDir passes start.sh's own `env -i … tailscaled`
+  // through to the real one, and misbehaves only when called bare, as the
+  // scrub calls it: it fails (on the removal's call, or only on the check's),
+  // prints nothing, or shows a name the scrub's unset cannot remove (as bash
+  // passes on a name that is not an identifier). Each must stop the app
+  // before npm, with the scrub's own ERROR line.
+  const FAKE_ENV = `#!/bin/sh
+if [ "$#" -gt 0 ]; then exec /usr/bin/env "$@"; fi
+case "$FAKE_ENV" in
+  fail) exit 1 ;;
+  fail-check)
+    [ ! -e "$FAKE_DIR/env.called" ] || exit 1
+    : >"$FAKE_DIR/env.called"
+    exec /usr/bin/env ;;
+  empty) exit 0 ;;
+  leftover) /usr/bin/env; echo "AWS_NOT_REMOVABLE=not-a-real-leftover" ;;
+  leftover-first) echo "AWS_NOT_REMOVABLE=not-a-real-leftover"; /usr/bin/env ;;
+esac
+`
+  const failures: [string, string, string][] = [
+    [
+      'env fails',
+      'fail',
+      'env failed, so the LITESTREAM_ and AWS_ variables were not removed',
+    ],
+    [
+      'env fails only for the check',
+      'fail-check',
+      'env failed, so the scrub was not checked',
+    ],
+    ['env prints nothing', 'empty', 'env showed no PATH'],
+    ['a name stays after its unset', 'leftover', 'is still set after the scrub'],
+    [
+      'a name stays on the first line of env',
+      'leftover-first',
+      'is still set after the scrub',
+    ],
+  ]
+  type FailureRow = [string, string, string, string, boolean]
+  it.each(
+    failures.flatMap(([label, mode, reason]): FailureRow[] => [
+      [label, 'under litestream', mode, reason, true],
+      [label, 'backups OFF', mode, reason, false],
+    ]),
+  )(
+    'fails closed when %s in the scrub, %s',
+    (_label, _branch, mode, reason, backups) => {
+      writeExecutable(join(fakeDir, 'env'), FAKE_ENV)
+      if (backups) writeFileSync(join(tmp, 'litestream.yml'), 'dbs: []\n')
+      const run = runStart({ env: { ...UNLISTED, FAKE_ENV: mode } })
+
+      expect(run.status).not.toBe(0)
+      const errors = run.stderr
+        .split('\n')
+        .filter((line) => line.startsWith('start.sh: ERROR: '))
+      expect(errors).toHaveLength(1)
+      expect(errors[0]).toContain(reason)
+      expect(errors[0]).toContain('Refusing to start the app')
+      expect(ran(run.calls, 'tailscaled ')).toBe(true)
+      expect(ran(run.calls, 'litestream replicate ')).toBe(backups)
+      expect(ran(run.calls, 'npm')).toBe(false)
+      expect(ran(run.calls, 'node')).toBe(false)
+    },
+  )
+
   it('never hands the auth key to tailscaled, npm, node or litestream, and never prints it', () => {
     const plain = runStart()
     const npmEnv = dump('npm')
@@ -888,6 +1229,18 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
     }
   })
 
+  // What a process started under start.sh's `env -i PATH="$PATH"` may hold:
+  // PATH from start.sh, what the fake's own sh wrapper sets, and the variable
+  // macOS adds to every process it starts.
+  const ENV_I_ALLOWLIST = [
+    'PATH',
+    'PWD',
+    'OLDPWD',
+    'SHLVL',
+    '_',
+    '__CF_USER_TEXT_ENCODING',
+  ]
+
   it('starts tailscaled with none of the app secrets, while the server still gets them', () => {
     const appSecret = 'not-a-real-secret-sentinel-2'
     const run = runStart({
@@ -901,25 +1254,84 @@ describe('scripts/start.sh, run', { timeout: 2 * RUN_TIMEOUT_MS + 10000 }, () =>
     expect(tailscaledEnv).not.toContain(appSecret)
     expect(tailscaledEnv).not.toContain('AKAHU_USER_TOKEN')
     expect(tailscaledEnv).not.toContain('XERO_CLIENT_SECRET')
-    // An allowlist, so a scrub that drops only the names above still fails:
-    // PATH from start.sh, what the fake's own sh wrapper sets, and the
-    // variable macOS adds to every process it starts.
+    // An allowlist, so a scrub that drops only the names above still fails.
     const names = tailscaledEnv
       .split('\n')
       .filter(Boolean)
       .map((line) => line.slice(0, line.indexOf('=')))
     expect(names).toContain('PATH')
-    for (const name of names) {
-      expect([
-        'PATH',
-        'PWD',
-        'OLDPWD',
-        'SHLVL',
-        '_',
-        '__CF_USER_TEXT_ENCODING',
-      ]).toContain(name)
-    }
+    for (const name of names) expect(ENV_I_ALLOWLIST).toContain(name)
     expect(nodeEnv).toMatch(new RegExp(`^AKAHU_USER_TOKEN=${appSecret}$`, 'm'))
     expect(nodeEnv).toMatch(new RegExp(`^XERO_CLIENT_SECRET=${appSecret}$`, 'm'))
   })
+
+  // The tailscale CLI calls, and the timeout that bounds two of them, start
+  // with PATH alone, as tailscaled does (#319). Every call is listed by
+  // subcommand, so a dump that never happens fails here rather than leaving
+  // nothing to check. One run per shell covers both branches: every tailscale
+  // call comes before start.sh looks for the Litestream config. The image's
+  // sh is dash, so start.sh runs under /bin/dash too where there is one.
+  function expectTailscaleCallsWithoutSecrets(shell: string): void {
+    const secret = 'not-a-real-secret-sentinel-6'
+    const secrets = {
+      AKAHU_USER_TOKEN: secret,
+      XERO_CLIENT_SECRET: secret,
+      LITESTREAM_ACCESS_KEY_ID: secret,
+      LITESTREAM_SECRET_ACCESS_KEY: secret,
+      LITESTREAM_REPLICA_URL: secret,
+    }
+    const run = runStart({ shell, env: secrets })
+    const socket = join(tmp, 's', 'ts.sock')
+    const steps: [string, RegExp][] = [
+      ['up', / up /],
+      ['serve reset', / serve reset$/],
+      ['serve --bg', / serve --bg /],
+      ['serve status', / serve status$/],
+    ]
+    // A call no step matches is kept whole, so it shows in the failure.
+    const step = (call: string): string =>
+      steps.find(([, pattern]) => pattern.test(call))?.[0] ?? call
+    const tailscale = callEnvs('tailscale')
+    const timeout = callEnvs('timeout')
+
+    expect(run.status).toBe(0)
+    expect(tailscale.map(({ call }) => step(call)).sort()).toEqual(
+      ['up', 'serve reset', 'serve --bg', 'serve status'].sort(),
+    )
+    expect(timeout.map(({ call }) => step(call)).sort()).toEqual(
+      ['serve reset', 'serve --bg'].sort(),
+    )
+    for (const { call, env } of [...tailscale, ...timeout]) {
+      const where = `the environment of: ${call.startsWith('timeout ') ? 'timeout ' : ''}${step(call)}`
+      expect(env, where).not.toContain(secret)
+      for (const name of Object.keys(secrets)) {
+        expect(env, where).not.toContain(name)
+      }
+      // An allowlist, so a call that keeps any other name still fails.
+      const names = env
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => line.slice(0, line.indexOf('=')))
+      expect(names, where).toContain('PATH')
+      for (const name of names) expect(ENV_I_ALLOWLIST, where).toContain(name)
+    }
+    // After the environments, so a call that moves env -i inside timeout
+    // fails on timeout's environment, not on its changed argv.
+    for (const { call } of [...tailscale, ...timeout]) {
+      expect(call).toMatch(
+        new RegExp(`^(timeout \\d+ )?tailscale --socket=${socket} `),
+      )
+    }
+  }
+
+  it('starts every tailscale and timeout call with none of the app or backup secrets, under sh', () => {
+    expectTailscaleCallsWithoutSecrets('sh')
+  })
+
+  it.skipIf(!existsSync('/bin/dash'))(
+    'starts every tailscale and timeout call with none of the app or backup secrets, under dash',
+    () => {
+      expectTailscaleCallsWithoutSecrets('/bin/dash')
+    },
+  )
 })

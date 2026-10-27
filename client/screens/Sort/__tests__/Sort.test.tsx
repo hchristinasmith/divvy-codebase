@@ -27,7 +27,7 @@ import {
   type Handlers,
 } from './fixtures.ts'
 
-// The Sort screen (prd-02 Ruling 16, issue 259; Done-when 6). Every
+// The Sort screen (prd-02 Ruling 17, issue 259; Done-when 6). Every
 // request goes through the real client/apis/categorise.ts to a routing fetch
 // stub (./fixtures.ts). The sync pill's fetch never settles. Every value is
 // invented. Each test names the wrong behaviour it fails on.
@@ -103,7 +103,7 @@ describe('the queue', () => {
     expect(within(card()).getByText('5 transactions')).not.toBeNull()
     expect(screen.getByTestId('sort-total').textContent).toBe('$24.50 spent')
     expect(screen.getByTestId('sort-latest').textContent).toBe(
-      'Latest 5 Oct 2026 · -$3.90',
+      'Latest 5 Oct\u00a02026 · -$3.90',
     )
     // No money in, no received line.
     expect(screen.queryByTestId('sort-received')).toBeNull()
@@ -117,7 +117,7 @@ describe('the queue', () => {
       '+$3.00 received',
     )
     expect(screen.getByTestId('sort-latest').textContent).toBe(
-      'Latest 24 Dec 2025 · $3.00',
+      'Latest 24 Dec\u00a02025 · $3.00',
     )
   })
 

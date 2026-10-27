@@ -159,6 +159,50 @@ describe('dismissOverviewAlert', () => {
   })
 })
 
+describe('grabSpendingByCategory', () => {
+  const SPENDING_KEYS = [
+    'scope',
+    'month',
+    'totalCents',
+    'categories',
+    'otherCents',
+    'uncategorisedCents',
+  ]
+
+  it('asks for the scope and the card’s top, and the route answers the contract', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch')
+
+    const body = await api.grabSpendingByCategory('personal')
+
+    const url = new URL(String(spy.mock.calls[0][0]))
+    expect(url.pathname).toBe('/api/v1/spending/categories')
+    expect([...url.searchParams]).toEqual([
+      ['scope', 'personal'],
+      ['top', String(api.SPENDING_CARD_TOP)],
+    ])
+    expect(api.SPENDING_CARD_TOP).toBe(5)
+    expect(Object.keys(body).sort()).toEqual([...SPENDING_KEYS].sort())
+    expect(body.scope).toBe('personal')
+    // An empty database: zeros for whatever this month is. The route test
+    // pins the arithmetic against a fixed clock.
+    expect(body.month).toMatch(/^\d{4}-\d{2}$/)
+    expect([
+      body.totalCents,
+      body.categories,
+      body.otherCents,
+      body.uncategorisedCents,
+    ]).toStrictEqual([0, [], 0, 0])
+  })
+
+  it('is keyed under the overview’s scoped key, so invalidateOverview reaches it', () => {
+    expect(api.spendingByCategoryQuery('strawb').queryKey).toEqual([
+      'overview',
+      'strawb',
+      'spending',
+    ])
+  })
+})
+
 describe('when the server cannot answer', () => {
   it('says the server could not be reached when fetch rejects', async () => {
     vi.stubGlobal(

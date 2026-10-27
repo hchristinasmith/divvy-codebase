@@ -1,6 +1,6 @@
 import express from 'express'
-import type { Request } from 'express'
 
+import { fromThisSite } from '../../http.ts'
 import insights from './insights.ts'
 import proposals from './proposals.ts'
 
@@ -20,28 +20,6 @@ import proposals from './proposals.ts'
 // or HEAD passes the same check as POST /api/v1/sync/run first, here once
 // for every router below, so a write route added later is covered without
 // remembering to.
-
-/**
- * A copy of `fromThisSite` in server/routes/sync.ts and
- * server/routes/overview.ts; change every copy together.
- * `Sec-Fetch-Site` when the browser sends it; otherwise no `Origin` (curl)
- * passes and an `Origin` must name this host.
- */
-function fromThisSite(req: Request): boolean {
-  const site = req.headers['sec-fetch-site']
-  if (site !== undefined) return site === 'same-origin' || site === 'none'
-  const origin = req.headers.origin
-  if (origin === undefined) return true
-  const host = req.headers.host
-  if (host === undefined) return false
-  try {
-    return new URL(origin).host === host.toLowerCase()
-  } catch {
-    // `Origin: null` (a sandboxed frame, a file: page) and anything else
-    // that is not a URL.
-    return false
-  }
-}
 
 const router = express.Router()
 
