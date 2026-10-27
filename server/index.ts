@@ -1,5 +1,6 @@
 import server from './server.ts'
 import { syncScheduler } from './sync/scheduler.ts'
+import { agentScheduler } from './agents/scheduler.ts'
 
 const port = process.env.PORT || 3005
 // Loopback unless HOST says otherwise: tailnet-only with no app auth (D4), so never the LAN by default (#149). Production sets no HOST: `scripts/start.sh` refuses to boot with any value but blank or `127.0.0.1` (#22).
@@ -12,4 +13,6 @@ server.listen(Number(port), host, function () {
   // The one place the scheduler starts (prd-01 Ruling 6, #27): importing
   // server.ts, as the tests do, starts no timer.
   syncScheduler.start()
+  // The agent scheduler starts here too (prd-04, #58), for the same reason.
+  agentScheduler.start()
 })
