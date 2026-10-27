@@ -12,10 +12,7 @@
     "strict": true,
     "allowImportingTsExtensions": true,
     "allowJs": true,
-    "skipLibCheck": true,
-    "paths": {
-      "@/*": ["./src/*"]
-    }
+    "skipLibCheck": true
   },
-  "include": ["client", "server", "shared", "src", "models", "data", "mcp"]
+  "include": ["client", "server", "shared", "models", "data", "mcp"]
 }

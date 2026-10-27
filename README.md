@@ -14,7 +14,7 @@ It is an early prototype. [docs/audit-2026-10-23.md](docs/audit-2026-10-23.md) r
 
 ## Stack
 
-- **Client** (`client/`): React 18, Vite 5, Tailwind CSS 4, react-router 7, TanStack Query 5, and shadcn/Radix primitives in `src/components/ui/`
+- **Client** (`client/`): React 18, Vite 5, Tailwind CSS 4, react-router 7, TanStack Query 5
 - **Server** (`server/`): Express 4 on Node, run with `tsx` in development
 - **Database:** SQLite through Knex 2. Migrations and seeds live in `server/db/`; the knexfile is `server/db/knexfile.js`
 - **Shared types:** `models/`
