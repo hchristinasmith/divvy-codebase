@@ -89,6 +89,8 @@ Items 1, 3, 4 are tests (the code does what is written). Items 2, 5 need a real-
 ## Ruling 1 — Safe-to-spend is computed on the server, by one shared pure function
 `shared/safe-to-spend.ts` takes rows and a scope and returns the signed result and its parts; the overview route calls it and the client displays what it returns. prd-03's `get_safe_to_spend` imports the same function. Why: two implementations of the number is how the advisor and the screen come to disagree. The prototype recomputes in the browser (`Divvy.dc.html:497-499`); the real build does not. Extends to: any new consumer imports it, never re-derives it.
 
+> Note 2026-10-25 (#271): Spending by category follows the same split. `shared/spending.ts` is the one place a month's outflow per category is added up, in integer cents, with the user's category over Akahu's (prd-01 Ruling 4), largest first and uncategorised kept apart. `GET /api/v1/spending/categories` loads rows and calls it, and the Overview's "Spending by category" card displays what it returns, including the top-5 grouping and "Other", with no client sum. Drawings are left out (Ruling 15). Transfers between her own accounts other than drawings are not yet excluded; that rule is open on #52, and one predicate in the shared module, `countsAsSpending`, is where it will go.
+
 ## Ruling 2 — The inputs of the formula are defined, not guessed
 - **liquid**: sum of balances of in-scope accounts whose `account_settings.role` is `current`. Savings and the tax pot are not liquid.
 - **unpaid bills**: in-scope bills due on or before the next payday and not yet paid.
