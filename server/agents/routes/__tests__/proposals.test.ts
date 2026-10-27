@@ -290,6 +290,23 @@ describe('POST /api/v1/agents/proposals/:id/accept', () => {
     )
   })
 
+  it('a rule-origin proposal, named as one, records rule in both columns and one rule correction', async () => {
+    await seedMain()
+    const tx = await seedTransaction('ruled')
+    const id = await seedProposal(proposal(tx, { origin: 'rule' }))
+
+    const res = await accept(id)
+
+    expect(res.status).toBe(200)
+    expect(await transactionRow(tx)).toMatchObject({
+      category: 'Bakeries',
+      category_source: 'rule',
+    })
+    const ours = await connection('category_corrections').where({ transaction_id: tx })
+    expect(ours).toHaveLength(1)
+    expect(ours[0]).toMatchObject({ to_category: 'Bakeries', source: 'rule' })
+  })
+
   it('a second accept is 409 and writes nothing', async () => {
     const { targetProposal } = await seedMain()
     expect((await accept(targetProposal)).status).toBe(200)
