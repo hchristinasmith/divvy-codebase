@@ -92,33 +92,7 @@ describe('existing routes answer as before', () => {
   })
 })
 
-const PLACEHOLDERS = ['habits']
-const EXISTING = ['accounts', 'categories', 'transactions', 'sync', 'xero', 'overview', 'settings', 'subscriptions', 'bills', 'agents', 'goals', 'budgets', 'spending']
-
-describe('placeholder routes', () => {
-  it.each(PLACEHOLDERS)('GET /api/v1/%s answers 501 with a JSON error', async (name) => {
-    const res = await api.get(`/api/v1/${name}`)
-
-    expect(res.status).toBe(501)
-    expect(res.headers['content-type']).toMatch(/^application\/json/)
-    expect(res.body).toStrictEqual({ error: `Not implemented: ${name}` })
-  })
-
-  it.each(PLACEHOLDERS)(
-    '/api/v1/%s answers 501 for any method and sub-path',
-    async (name) => {
-      for (const res of [
-        await api.post(`/api/v1/${name}`).send({}),
-        await api.patch(`/api/v1/${name}/1`).send({}),
-        await api.delete(`/api/v1/${name}/1`),
-        await api.get(`/api/v1/${name}/a/b`),
-      ]) {
-        expect(res.status).toBe(501)
-        expect(res.body).toStrictEqual({ error: `Not implemented: ${name}` })
-      }
-    },
-  )
-})
+const EXISTING = ['accounts', 'categories', 'transactions', 'sync', 'xero', 'overview', 'settings', 'subscriptions', 'bills', 'agents', 'goals', 'budgets', 'spending', 'habits']
 
 // Express 4 internals: a mounted router is a layer named 'router' whose
 // `regexp` matches its mount path. Express 5 renames these; rewrite this
@@ -140,7 +114,7 @@ describe('the mount table', () => {
 
   it('the barrel mounts exactly the existing and placeholder routers', () => {
     const mounted = stackOf(routes)
-    const expected = [...EXISTING, ...PLACEHOLDERS]
+    const expected = [...EXISTING]
 
     // Each expected name is matched by one layer, and every layer by one
     // name, so a mount nobody tests here makes this fail.
