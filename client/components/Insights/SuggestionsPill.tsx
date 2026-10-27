@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { formatCents } from '../../../shared/money.ts'
 import type { ActivityRow } from '../../../shared/contracts.ts'
 // Type only: erased from the client bundle.
-import type { CategoryProposal } from '../../../server/agents/contracts.ts'
+import type { ListedProposal } from '../../../server/agents/contracts.ts'
 import { ERROR, MUTED, SECONDARY_BUTTON } from '../../screens/Overview/styles.ts'
 import {
   usePendingProposals,
@@ -15,13 +15,19 @@ import {
 // pending proposals, and nothing at all otherwise (loading, a failed read,
 // or none pending). Tapping it lists each proposal with Accept and Reject.
 //
-// The proposals route carries a transaction id but no merchant or amount, so
-// both come from the card's own rows when the transaction is among them.
+// The proposals route carries each transaction's description and amount
+// (#439), so the pill reads both from the proposal, never from the card's rows.
 //
 // Every proposal field is rendered as text: the reason and the merchant are
 // outside text, never markup.
 
-export default function SuggestionsPill({ rows }: { rows: ActivityRow[] }) {
+interface SuggestionsPillProps {
+  // Unused: ActivityCard still passes its rows. This prop goes when it stops.
+  rows?: ActivityRow[]
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- ActivityCard still passes rows; the prop goes with it.
+export default function SuggestionsPill(_props: SuggestionsPillProps) {
   const [open, setOpen] = useState(false)
   const proposals = usePendingProposals()
 
@@ -47,11 +53,7 @@ export default function SuggestionsPill({ rows }: { rows: ActivityRow[] }) {
           className="m-0 flex list-none flex-col p-0"
         >
           {items.map((proposal) => (
-            <SuggestionItem
-              key={proposal.id}
-              proposal={proposal}
-              row={rows.find((r) => r.id === String(proposal.transaction_id))}
-            />
+            <SuggestionItem key={proposal.id} proposal={proposal} />
           ))}
         </ul>
       )}
@@ -59,13 +61,7 @@ export default function SuggestionsPill({ rows }: { rows: ActivityRow[] }) {
   )
 }
 
-function SuggestionItem({
-  proposal,
-  row,
-}: {
-  proposal: CategoryProposal
-  row: ActivityRow | undefined
-}) {
+function SuggestionItem({ proposal }: { proposal: ListedProposal }) {
   const decide = useProposalDecision()
   // A second tap can land before the disabled buttons render; this refuses
   // it, so one tap sends one request.
@@ -84,7 +80,7 @@ function SuggestionItem({
     )
   }
 
-  const name = row ? row.description : `Transaction #${proposal.transaction_id}`
+  const name = proposal.description ?? `Transaction #${proposal.transaction_id}`
 
   return (
     <li
@@ -93,9 +89,9 @@ function SuggestionItem({
     >
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <span className="text-body-14 text-ink">{name}</span>
-        {row && (
+        {proposal.amountCents !== null && (
           <span className="font-mono text-body-14 text-ink">
-            {formatCents(row.amountCents)}
+            {formatCents(proposal.amountCents)}
           </span>
         )}
       </div>
