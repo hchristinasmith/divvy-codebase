@@ -50,10 +50,14 @@ export function formatRate(basisPoints: number): string {
 
 /**
  * How full a bar is, as a whole percentage from 0 to 100: `part` of
- * `whole`, rounded and clamped. 0 when `whole` is not positive.
+ * `whole`, floored and clamped. Floored, not rounded, so a bar reads 100
+ * only when the part has reached the whole: 299999 of 300000 is 99, not a
+ * full bar. 0 when `whole` is not positive.
  */
 export function barPercent(part: number, whole: number): number {
   if (whole <= 0) return 0
-  const percent = Math.round((part / whole) * 100)
+  // Multiply before dividing: (part / whole) * 100 can land just under a
+  // whole number (29 / 50 * 100 is 57.99999999999999), and floor would drop it.
+  const percent = Math.floor((part * 100) / whole)
   return Math.min(100, Math.max(0, percent))
 }
