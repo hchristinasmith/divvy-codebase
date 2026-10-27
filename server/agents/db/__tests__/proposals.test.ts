@@ -114,6 +114,27 @@ describe('insertProposal', () => {
     expect(typeof stored[0].confidence).toBe('number')
   })
 
+  it('stores a claude proposal (Ruling 9)', async () => {
+    const txId = await transaction('a')
+    const id = await inserted(proposal(txId, { origin: 'claude' }))
+
+    const stored = await rows()
+    expect(Object.keys(stored[0]).sort()).toEqual([...PROPOSAL_COLUMNS].sort())
+    expect(stored).toStrictEqual([
+      {
+        id,
+        transaction_id: txId,
+        current_category: null,
+        proposed_category: 'Bakeries',
+        confidence: 0.9,
+        reason: 'Moved to Bakeries twice',
+        origin: 'claude',
+        status: 'pending',
+        created_at: AT,
+      },
+    ])
+  })
+
   it.each([['Bakery'], [' Bakeries'], ['bakeries'], ['Bakeries '], [''], [42]])(
     'discards %j, which is not exactly a data/cats.js category (Ruling 6)',
     async (category) => {
@@ -204,8 +225,8 @@ describe('insertProposal', () => {
     ['reason 2,001 U+0001', { reason: '\u0001'.repeat(2_001) }, /^reason must not be blank$/],
     ['reason 42', { reason: 42 as unknown as string }, /^reason must not be blank$/],
     [
-      'origin claude',
-      { origin: 'claude' as unknown as NewProposal['origin'] },
+      'origin haiku',
+      { origin: 'haiku' as unknown as NewProposal['origin'] },
       /^origin is not a known proposal origin$/,
     ],
   ]

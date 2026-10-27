@@ -10,7 +10,6 @@ import { migrateToJustBefore } from '../../../db/__tests__/migrateToJustBefore.t
 import { omit } from '../../../db/__tests__/omit.ts'
 import { sequence } from '../../../db/__tests__/schemaInfo.ts'
 import {
-  PROPOSAL_ORIGINS,
   PROPOSAL_STATUSES,
   type CategoryProposal,
 } from '../../contracts.ts'
@@ -313,7 +312,8 @@ describe('schema (Ruling 2, #31 amended by Ruling 7)', () => {
 
   it('each enum column holds exactly the values the contracts name', async () => {
     expect(await enums('category_proposals')).toStrictEqual({
-      origin: [...PROPOSAL_ORIGINS],
+      // This migration as it was; Ruling 9 widens it in 20261028120000.
+      origin: ['rule'],
       status: [...PROPOSAL_STATUSES],
     })
     expect(await enums('insights')).toStrictEqual({

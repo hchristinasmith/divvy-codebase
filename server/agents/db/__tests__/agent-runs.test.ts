@@ -50,6 +50,10 @@ const RUN_FIELDS: Record<keyof AgentRun, true> = {
   written_count: true,
   sync_run_id: true,
   cursor: true,
+  model: true,
+  input_tokens: true,
+  output_tokens: true,
+  cost_micro_usd: true,
 }
 const RUN_KEYS = Object.keys(RUN_FIELDS).sort()
 
@@ -103,6 +107,10 @@ describe('startRun', () => {
       written_count: 0,
       sync_run_id: null,
       cursor: null,
+      model: null,
+      input_tokens: null,
+      output_tokens: null,
+      cost_micro_usd: null,
     })
     expect(await connection('agent_runs')).toStrictEqual([started])
   })

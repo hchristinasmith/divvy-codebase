@@ -59,6 +59,10 @@ export async function startRun(
     written_count: 0,
     sync_run_id: syncRunId,
     cursor: null,
+    model: null,
+    input_tokens: null,
+    output_tokens: null,
+    cost_micro_usd: null,
   }
   const [stored]: AgentRun[] = await scrubbed(
     'startRun',

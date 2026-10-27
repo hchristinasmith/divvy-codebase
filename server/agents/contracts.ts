@@ -24,7 +24,7 @@ import { isKnownCategory } from '../db/categories.ts'
 
 // ---- category_proposals (Ruling 2, Ruling 7) ----
 
-export const PROPOSAL_ORIGINS = ['rule'] as const
+export const PROPOSAL_ORIGINS = ['rule', 'claude'] as const
 export type ProposalOrigin = (typeof PROPOSAL_ORIGINS)[number]
 
 export const PROPOSAL_STATUSES = ['pending', 'accepted', 'rejected'] as const
@@ -53,7 +53,7 @@ export type AgentKind = (typeof AGENT_KINDS)[number]
 export const AGENT_TRIGGERS = ['sync', 'weekly', 'manual'] as const
 export type AgentTrigger = (typeof AGENT_TRIGGERS)[number]
 
-export const AGENT_RUN_OUTCOMES = ['running', 'success', 'failed'] as const
+export const AGENT_RUN_OUTCOMES = ['running', 'success', 'failed', 'blocked'] as const
 export type AgentRunOutcome = (typeof AGENT_RUN_OUTCOMES)[number]
 
 // A row of `agent_runs`.
@@ -70,6 +70,11 @@ export interface AgentRun {
   // Set exactly when `trigger` is `sync`.
   sync_run_id: number | null
   cursor: string | null
+  // Null on a run with no model call (Ruling 9).
+  model: string | null
+  input_tokens: number | null
+  output_tokens: number | null
+  cost_micro_usd: number | null
 }
 
 // ---- Proposed categories (Ruling 6) ----
