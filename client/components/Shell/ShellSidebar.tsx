@@ -3,8 +3,7 @@ import { sidebarItems } from './nav.ts'
 import { useAlertCount } from '../../hooks/useAlertCount.ts'
 
 // The 224px desktop sidebar (docs/design/handoff.md "Global layout"); gone
-// under 720px, where the tab bar takes over. Named to stay clear of the old
-// components/Sidebar.tsx, which the w5 sweep deletes.
+// under 720px, where the tab bar takes over.
 export default function ShellSidebar() {
   const alertCount = useAlertCount()
   return (

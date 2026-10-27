@@ -149,7 +149,8 @@ not edit.
 
 The effective `category` holds an NZFCC **category name** (the leaf, e.g.
 "Bakeries"), not the personal-finance group name (e.g. "Food"). Read from
-how the code consumes it on 2026-10-25:
+how the code consumes it on 2026-10-25 (the three Dashboard files cited below
+were deleted by #61 on 2026-10-28; the reasoning stands):
 
 - `client/components/Dashboard/SpendingBreakdown.tsx:36-39` groups spending
   by `category.groups.personal_finance.name`, falling back to

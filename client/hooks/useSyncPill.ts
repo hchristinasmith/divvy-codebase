@@ -68,8 +68,6 @@ export function syncPillFor(
   }
 }
 
-// Lives here rather than in client/apis/apiClient.ts because that file was
-// outside this issue's fence; it can move there with the Sync screen (w4).
 async function fetchLastSuccessAt(): Promise<number | null> {
   const res = await fetch(new URL('/api/v1/sync/status', document.baseURI))
   if (!res.ok) return null

@@ -97,9 +97,9 @@ This is the w4 check that the backup holds what the app shows. Do it right after
      pragma integrity_check;"
    ```
 
-   Compare the per-account balances against the Dashboard's account list on production.
+   Compare the per-account balances against the Overview's account cards on production.
 
-3. The Dashboard totals, side by side. Serve a **copy** of the restored file locally (the server opens it read-write and adds `-wal`/`-shm` files), with none of the app's secrets:
+3. The Overview totals, side by side. Serve a **copy** of the restored file locally (the server opens it read-write and adds `-wal`/`-shm` files), with none of the app's secrets:
 
    ```sh
    cp <empty directory>/divvy.sqlite3 <scratch>/compare.sqlite3

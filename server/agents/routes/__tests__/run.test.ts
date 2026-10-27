@@ -134,6 +134,12 @@ async function seedProposable(): Promise<void> {
 
 const post = (body: unknown) => api.post('/api/v1/agents/run').send(body as object)
 
+// Moves every seeded or logged run an hour back, so the next manual POST is
+// outside the minimum gap (#454). A test that makes a second manual POST
+// after a run uses this rather than waiting ten seconds.
+const backdateRuns = () =>
+  connection('agent_runs').update({ started_at: new Date(Date.now() - 3_600_000).toISOString() })
+
 describe('400', () => {
   it.each([
     ['no agent', {}],
@@ -198,6 +204,54 @@ describe('200', () => {
   })
 })
 
+describe('409 minimum gap between manual runs (#454)', () => {
+  const seedRun = (startedAt: string, trigger: 'manual' | 'weekly' = 'manual') =>
+    connection('agent_runs').insert({
+      kind: trigger === 'manual' ? 'category' : 'insights',
+      trigger,
+      started_at: startedAt,
+      finished_at: startedAt,
+      outcome: 'success',
+      considered_count: 0,
+      written_count: 0,
+    })
+
+  it('refuses a manual run started a few seconds ago, and runs nothing', async () => {
+    await seedRun(new Date(Date.now() - 5_000).toISOString())
+
+    const res = await post({ agent: 'insights', scope: 'strawb' })
+
+    expect(res.status).toBe(409)
+    expect(res.body).toStrictEqual({
+      error: 'An agent run was started moments ago; try again shortly',
+      runId: null,
+    })
+    expect((await runRows()).map((r) => r.kind)).toEqual(['category'])
+  })
+
+  it('reads the newest manual run, not the first one logged', async () => {
+    await seedRun(new Date(Date.now() - 3_600_000).toISOString())
+    await seedRun(new Date(Date.now() - 5_000).toISOString())
+
+    expect((await post({ agent: 'insights', scope: 'strawb' })).status).toBe(409)
+  })
+
+  it('a scheduled run moments ago does not hold back a manual one', async () => {
+    await seedRun(new Date(Date.now() - 2_000).toISOString(), 'weekly')
+
+    expect((await post({ agent: 'insights', scope: 'strawb' })).status).toBe(200)
+  })
+
+  it('runs normally when the newest manual run started well over ten seconds ago', async () => {
+    await seedRun(new Date(Date.now() - 60_000).toISOString())
+
+    const res = await post({ agent: 'insights', scope: 'strawb' })
+
+    expect(res.status).toBe(200)
+    expect((await runRows()).map((r) => r.trigger)).toEqual(['manual', 'manual'])
+  })
+})
+
 describe('409', () => {
   it('refuses while a pass is in flight, then the first run answers', async () => {
     let open: () => void = () => {}
@@ -233,6 +287,7 @@ describe('500', () => {
     expect(errors.mock.calls.flat().join(' ')).not.toContain('Sentinel')
 
     // The next run goes ahead.
+    await backdateRuns()
     hooks.failEvidence = false
     expect((await post({ agent: 'category' })).status).toBe(200)
   })
@@ -264,8 +319,23 @@ describe('500', () => {
     expect(errors).toHaveBeenCalledWith('agents: could not run agent', 'FixtureReadError')
     expect(errors.mock.calls.flat().join(' ')).not.toContain('Sentinel')
     // The scheduler's guard is released: the next run goes ahead.
+    await backdateRuns()
     hooks.failFinish = false
     expect((await post({ agent: 'insights', scope: 'personal' })).status).toBe(200)
+  })
+
+  it('a gap check that cannot read agent_runs answers a fixed error and runs nothing (#454)', async () => {
+    await connection.schema.renameTable('agent_runs', 'agent_runs_hidden')
+    try {
+      const res = await post({ agent: 'category' })
+
+      expect(res.status).toBe(500)
+      expect(res.body).toStrictEqual({ error: 'Could not run agent', runId: null })
+      expect(agentScheduler.getState().running).toBe(false)
+    } finally {
+      await connection.schema.renameTable('agent_runs_hidden', 'agent_runs')
+    }
+    expect(await runRows()).toEqual([])
   })
 })
 

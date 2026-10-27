@@ -70,8 +70,8 @@
   --font-sans: 'DM Sans Variable', system-ui, sans-serif;
   --font-mono: 'DM Mono', ui-monospace, monospace;
 
-  /* Type scale, prefixed by role so Tailwind's text-sm/text-base stay as
-     the old pages expect. */
+  /* Type scale, prefixed by role so Tailwind's text-sm/text-base stay
+     unchanged. */
   --text-display-72: 72px;
   --text-display-40: 40px;
   --text-display-36: 36px;

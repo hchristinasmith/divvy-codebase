@@ -15,7 +15,7 @@ Tests sit beside the code in a `__tests__/` folder, named after the file they co
 | Code | Test |
 |---|---|
 | `server/routes/categories.ts` | `server/routes/__tests__/categories.test.ts` |
-| `client/components/Dashboard/ActualVTarget.tsx` | `client/components/Dashboard/__tests__/ActualVTarget.test.tsx` |
+| `client/components/Shell/ShellSidebar.tsx` | `client/components/Shell/__tests__/ShellSidebar.test.tsx` |
 | `shared/<module>.ts` | `shared/__tests__/<module>.test.ts` |
 
 `vitest.config.ts` only collects `*.test.ts(x)` files inside `__tests__/` folders under `client/`, `server/`, `shared/`, `models/` and `mcp/`. A test anywhere else does not run.

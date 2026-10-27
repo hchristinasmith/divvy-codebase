@@ -3,8 +3,8 @@ import ScreenHeader from '../../components/Shell/ScreenHeader.tsx'
 import { habitsQuery } from '../../apis/habits.ts'
 import { useScope } from '../../context/ScopeContext.tsx'
 import type { HabitsResponse } from '../../../shared/contracts.ts'
+import PatternInsights from '../../components/Insights/PatternInsights.tsx'
 import { CARD, ERROR, MUTED, SECONDARY_BUTTON } from '../Overview/styles.ts'
-import PatternsCard from './PatternsCard.tsx'
 import RunwayCard from './RunwayCard.tsx'
 import StreaksCard from './StreaksCard.tsx'
 import TruthReportCard from './TruthReportCard.tsx'
@@ -14,8 +14,9 @@ import { BOTTOM_GRID, SECTION, SIDE_COLUMN, TOP_GRID } from './styles.ts'
 // The Habits screen (prd-02, issue 57; docs/design/handoff.md Screen 5):
 // runway, the streaks the data supports and the Worth it? list from one
 // read (server/routes/habits.ts), the verdict pills that write to it, the
-// Patterns card as an empty state for prd-04 to fill, and the Weekly truth
-// report pointing to Claude desktop. This screen does no arithmetic.
+// Patterns card holding prd-04's insights (PatternInsights, #63), and the
+// Weekly truth report pointing to Claude desktop. This screen does no
+// arithmetic.
 //
 // The prototype's projected-date card is not here: the route has no such
 // field, as its formula is an open question in prd-02, so it is hidden
@@ -82,7 +83,7 @@ function HabitsBody({ data }: { data: HabitsResponse }) {
       <div className={BOTTOM_GRID}>
         <WorthItCard rows={data.verdicts} />
         <div className={SIDE_COLUMN}>
-          <PatternsCard />
+          <PatternInsights />
           <TruthReportCard />
         </div>
       </div>

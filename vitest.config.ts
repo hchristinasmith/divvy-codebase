@@ -17,8 +17,8 @@ process.env.TZ = 'UTC'
 // pick the `:memory:` SQLite config; `server/test-utils/app.ts` refuses to
 // run if it did not.
 //
-// The Vite config is merged in so client tests resolve the same `@/` alias
-// and plugins as the app build.
+// The Vite config is merged in so client tests resolve the same plugins as
+// the app build.
 export default mergeConfig(
   viteConfig,
   defineConfig({
