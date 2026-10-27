@@ -600,7 +600,58 @@ describe('no Xero (Done-when 3, prd-02 Ruling 4)', () => {
     expect(text).not.toMatch(/xero/i)
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Sync')
     expect(text).toContain('Banks')
-    expect(text).toContain('Auto-sync every 15 min. Banks via read-only Open Banking.')
+    expect(text).toContain('Banks via read-only Open Banking.')
+  })
+})
+
+describe('the footer schedule line (#326)', () => {
+  it('counts down to the next run, rounded up to whole minutes', async () => {
+    useClock()
+    setup({
+      status: json(
+        statusBody({
+          lastSuccessAt: minutesBefore(START, 4),
+          // 6.5 minutes ahead: fails if the count rounds down to 6.
+          nextRunAt: new Date(START + 390_000).toISOString(),
+        }),
+      ),
+      accounts: json(ACCOUNTS_BODY),
+    })
+    await findRows()
+    expect(main().textContent).toContain(
+      'Next sync in 7 min. Banks via read-only Open Banking.',
+    )
+  })
+
+  it('says the run is due now once its time has passed', async () => {
+    useClock()
+    setup({
+      status: json(
+        statusBody({
+          lastSuccessAt: minutesBefore(START, 4),
+          nextRunAt: new Date(START - 1000).toISOString(),
+        }),
+      ),
+      accounts: json(ACCOUNTS_BODY),
+    })
+    await findRows()
+    expect(main().textContent).toContain(
+      'Next sync due now. Banks via read-only Open Banking.',
+    )
+  })
+
+  it('says nothing about a schedule while the scheduler is stopped', async () => {
+    setup({
+      status: json(statusBody({ lastSuccessAt: minutesBefore(Date.now(), 4) })),
+      accounts: json(ACCOUNTS_BODY),
+    })
+    await findRows()
+    const text = main().textContent ?? ''
+    // Fails if the fixed "every 15 min" claim, or any countdown, comes back
+    // while nothing is scheduled.
+    expect(text).not.toContain('Auto-sync')
+    expect(text).not.toContain('Next sync')
+    expect(text).toContain('Banks via read-only Open Banking.')
   })
 })
 

@@ -53,7 +53,7 @@ afterAll(async () => {
   delete (globalThis as { document?: unknown }).document
 })
 
-const STATUS_KEYS = ['running', 'lastRun', 'lastSuccessAt']
+const STATUS_KEYS = ['running', 'lastRun', 'lastSuccessAt', 'nextRunAt']
 // No `error`: the run's machine code is dropped before the screen sees it.
 const RUN_KEYS = ['startedAt', 'finishedAt', 'outcome']
 
@@ -82,7 +82,12 @@ describe('syncStatusQuery against the real app', () => {
     // Fails if a key the screen reads stops being produced, or the run's
     // machine error starts being kept.
     expect(Object.keys(status).sort()).toEqual([...STATUS_KEYS].sort())
-    expect(status).toEqual({ running: false, lastRun: null, lastSuccessAt: null })
+    expect(status).toEqual({
+      running: false,
+      lastRun: null,
+      lastSuccessAt: null,
+      nextRunAt: null,
+    })
     // The pill's entry is written too, as "no believable success".
     expect(qc.getQueryData(queryKeys.syncStatus.all)).toBeNull()
   })
@@ -135,6 +140,23 @@ describe('syncStatusQuery against the real app', () => {
   })
 })
 
+describe('syncStatusQuery and the next scheduled run', () => {
+  it('keeps a nextRunAt the server sent', async () => {
+    const NEXT = '2026-10-26T09:15:00.000Z'
+    stubFetch(
+      reply(
+        200,
+        `{"running":false,"lastRun":null,"lastSuccessAt":null,"nextRunAt":"${NEXT}"}`,
+      ),
+    )
+    const status = await client().fetchQuery(api.syncStatusQuery())
+
+    // Fails if the screen stops reading the schedule the footer counts down.
+    expect(Object.keys(status).sort()).toEqual([...STATUS_KEYS].sort())
+    expect(status.nextRunAt).toBe(NEXT)
+  })
+})
+
 describe('syncStatusQuery refusals', () => {
   it('rejects a 200 HTML page with a fixed message that does not quote it', async () => {
     stubFetch(reply(200, '<html>SENTINEL</html>'))
@@ -150,6 +172,10 @@ describe('syncStatusQuery refusals', () => {
     ['an empty object', '{}'],
     ['running that is not a boolean', '{"running":"no","lastRun":null,"lastSuccessAt":null}'],
     ['a lastSuccessAt that is not a time', '{"running":false,"lastRun":null,"lastSuccessAt":"yesterday"}'],
+    [
+      'a nextRunAt that is not a time',
+      '{"running":false,"lastRun":null,"lastSuccessAt":null,"nextRunAt":"later"}',
+    ],
     [
       'an unknown outcome',
       '{"running":false,"lastSuccessAt":null,"lastRun":{"startedAt":"2026-10-25T00:00:00.000Z","finishedAt":null,"outcome":"abandoned"}}',

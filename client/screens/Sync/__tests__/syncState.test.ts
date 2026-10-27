@@ -16,7 +16,13 @@ const ago = (ms: number) => new Date(NOW - ms).toISOString()
 const MIN = 60_000
 
 function status(overrides: Partial<SyncScreenStatus> = {}): SyncScreenStatus {
-  return { running: false, lastRun: null, lastSuccessAt: null, ...overrides }
+  return {
+    running: false,
+    lastRun: null,
+    lastSuccessAt: null,
+    nextRunAt: null,
+    ...overrides,
+  }
 }
 
 const ROW_KEYS = ['kind', 'tone', 'lead', 'time']

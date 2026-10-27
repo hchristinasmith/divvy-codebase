@@ -9,7 +9,8 @@ import type { SyncRunStatus, SyncStatus } from '../../server/routes/sync.ts'
 // (`GET /api/v1/accounts`), and "Sync now" (`POST /api/v1/sync/run`).
 //
 // What the screen keeps is narrowed here, at the edge. From the status: the
-// running flag, the last run's times and outcome, and the last success. The
+// running flag, the last run's times and outcome, the last success, and the
+// next scheduled run (null while the scheduler is stopped). The
 // run's `error` is a machine code ("akahu_unauthorized (HTTP 401)") and is
 // dropped, so the screen cannot show it. From each account: its name and its
 // connection's name. Ids, account numbers, balances and logos are dropped
@@ -61,6 +62,7 @@ export interface SyncScreenStatus {
   running: SyncStatus['running']
   lastRun: SyncScreenRun | null
   lastSuccessAt: SyncStatus['lastSuccessAt']
+  nextRunAt: SyncStatus['nextRunAt']
 }
 
 const UNEXPECTED_STATUS = 'Unexpected sync status'
@@ -98,11 +100,20 @@ function parseRun(value: unknown): SyncScreenRun | null {
 // screen shows its error state and never a guessed "Not synced yet".
 function parseStatusBody(body: unknown): SyncScreenStatus {
   if (!isRecord(body)) throw new Error(UNEXPECTED_STATUS)
-  const { running, lastRun, lastSuccessAt } = body
-  if (typeof running !== 'boolean' || !isTimestampOrNull(lastSuccessAt)) {
+  const { running, lastRun, lastSuccessAt, nextRunAt } = body
+  if (
+    typeof running !== 'boolean' ||
+    !isTimestampOrNull(lastSuccessAt) ||
+    !isTimestampOrNull(nextRunAt)
+  ) {
     throw new Error(UNEXPECTED_STATUS)
   }
-  return { running, lastRun: parseRun(lastRun), lastSuccessAt }
+  return {
+    running,
+    lastRun: parseRun(lastRun),
+    lastSuccessAt,
+    nextRunAt,
+  }
 }
 
 // The screen's own entry, under the sync-status prefix. The header's pill
