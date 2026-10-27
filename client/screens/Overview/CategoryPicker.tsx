@@ -1,11 +1,9 @@
 import type { CategoryGroup } from '../../../models/categories.ts'
 import { SELECT } from './styles.ts'
 
-// The inline category picker on an activity row. Written here rather than
-// reusing client/components/Transactions/CategoryDropDown.tsx, which the w5
-// sweep deletes. A native select, so it works with a keyboard and a screen
-// reader as it is. It only offers the names GET /api/v1/categories lists,
-// which are the names the update route accepts.
+// The inline category picker on an activity row. A native select, so it works
+// with a keyboard and a screen reader as it is. It only offers the names GET
+// /api/v1/categories lists, which are the names the update route accepts.
 //
 // It never shows a category the row does not have: with none it shows
 // "Uncategorised"; with one that is not in the list it shows that name as

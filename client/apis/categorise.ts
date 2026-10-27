@@ -53,9 +53,9 @@ export function applyGroup(body: ApplyGroupBody): Promise<ApplyCategoryResponse>
 
 /**
  * Everything a category change can move: the Overview (budgets spent and
- * activity read the effective category), the budgets list, both transaction
- * lists (`['transactions']` in client/components/Dashboard, `['txns']` in
- * client/components/Transactions), and the groups in every scope.
+ * activity read the effective category), the budgets list, and the groups in
+ * every scope. It also invalidates `['transactions']` and `['txns']`, which
+ * were the deleted pages' lists; nothing reads them now.
  */
 export async function invalidateAfterApply(client: QueryClient): Promise<void> {
   await Promise.all([
