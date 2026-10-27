@@ -264,6 +264,11 @@ describe('what is not faked', () => {
 
     expect(document.body.textContent).not.toMatch(/freedom/i)
     expect(screen.queryByRole('region', { name: /freedom/i })).toBeNull()
+    // Exactly these cards, so a projected-date card under another name
+    // fails too.
+    expect(
+      screen.getAllByRole('region').map((r) => r.getAttribute('aria-label')),
+    ).toEqual(['Runway', 'Streaks', 'Worth it?', 'Patterns', 'Weekly truth report'])
   })
 
   it('the Patterns card is an empty state saying insights arrive later', async () => {
