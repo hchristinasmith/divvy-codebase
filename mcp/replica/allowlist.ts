@@ -80,6 +80,7 @@ export const ALLOWLIST: Readonly<Record<string, AllowedTable>> = {
       'date',
       'description',
       'amount_cents',
+      'balance_cents', // get_habits: streaks (#466)
       'merchant_name',
       'category',
       'category_source',

@@ -51,6 +51,7 @@ const EXPECTED_REPLICA: Record<string, string[]> = {
     'date',
     'description',
     'amount_cents',
+    'balance_cents',
     'merchant_name',
     'category',
     'category_source',
