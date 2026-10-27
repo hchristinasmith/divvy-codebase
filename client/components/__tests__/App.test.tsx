@@ -59,7 +59,9 @@ describe('App no longer routes the old pages', () => {
     '/challenges',
   ])('%s renders no page', (path) => {
     renderAt(path)
-    expect(screen.getByRole('main').textContent).toBe('')
+    // Markup, not text: the old Dashboard's loading state was a text-less
+    // skeleton, so an empty textContent would pass with the page still routed.
+    expect(screen.getByRole('main').innerHTML).toBe('')
   })
 })
 
