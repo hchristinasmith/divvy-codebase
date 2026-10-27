@@ -738,6 +738,29 @@ describe('GET /api/v1/transactions?scope=&month=&category=', () => {
     }
   })
 
+  it('leaves out a $500 move between her own personal accounts, and keeps an ordinary outflow in the same category (#431)', async () => {
+    const SAVER = 'acc_431_rapid_save'
+    await seed()
+    await insertAll('accounts', [
+      { id: 4311, akahu_id: SAVER, source: 'akahu', scope: 'personal', name: 'Rapid Save Invented', created_at: STAMP, updated_at: STAMP },
+    ])
+    await insertAll('transactions', [
+      tx(EVERYDAY, '2026-10-10T00:00:00.000Z', -50000, { category: GROCER }),
+      tx(SAVER, '2026-10-11T00:00:00.000Z', 50000),
+    ])
+
+    const listed = await list({ scope: 'personal', month: '2026-10', category: GROCER })
+    expect(amounts(listed)).toEqual([-1205, -2310, -999])
+
+    const aggregate = await api
+      .get('/api/v1/spending/categories')
+      .query({ scope: 'personal', month: '2026-10' })
+    const line = (aggregate.body.categories as { category: string; spentCents: number }[]).find(
+      (l) => l.category === GROCER,
+    )
+    expect(line?.spentCents).toBe(4514)
+  })
+
   it('leaves the answer without the filters exactly as before: every Akahu row, money in included', async () => {
     await seed()
 

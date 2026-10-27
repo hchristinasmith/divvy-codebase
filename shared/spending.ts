@@ -6,10 +6,19 @@
 // sum. Nothing else re-derives a category total.
 //
 // - A row counts when it is in the view's scope (`all` is both), its NZ
-//   date falls in the month, it is money out, and `countsAsSpending` says
-//   so. Pending and settled rows count alike. Money in (income, a refund)
-//   is not spending and never offsets it, as for a budget's spent
-//   (`budgetSpentCents`, ./safe-to-spend.ts).
+//   date falls in the month, it is money out, `countsAsSpending` says
+//   so, and it is not a leg of an own-account transfer. Pending and settled
+//   rows count alike. Money in (income, a refund) is not spending and never
+//   offsets it, as for a budget's spent (`budgetSpentCents`,
+//   ./safe-to-spend.ts).
+// - Own-account transfers are ruled (Baseline decision 0a37d21b, pair match,
+//   #431): the pairing is `findOwnTransfers` in ./habits.ts, reused, not a
+//   second matcher. It runs inside `spendingByCategory`, not in
+//   `countsAsSpending`, because a pair needs both legs and that function
+//   sees one row. Like `transferLegsInView` in ./habits.ts it pairs only
+//   among the view's own in-scope, non-drawing rows, dated within
+//   TRANSFER_WINDOW_DAYS of the month either side, so a leg dated the day
+//   before the month still finds its partner.
 // - The category is the effective one the caller hands in: the user's over
 //   Akahu's (prd-01 Ruling 4), with drawings already laid over
 //   (./drawings.ts). A row with none is uncategorised, kept apart from every
@@ -29,9 +38,16 @@ import type {
   Scope,
   SpendingByCategoryResponse,
   SpendingCategoryLine,
+  TransactionStatus,
 } from './contracts.ts'
 import { isDrawingCategory } from './drawings.ts'
+import {
+  TRANSFER_WINDOW_DAYS,
+  findOwnTransfers,
+  type HabitTransaction,
+} from './habits.ts'
 import { sumCents } from './money.ts'
+import { daysBetween, daysInMonth } from './safe-to-spend.ts'
 import { isIsoDate } from './subscriptions.ts'
 
 /** The most lines `top` may ask for. */
@@ -39,12 +55,18 @@ export const SPENDING_TOP_MAX = 50
 
 /** One row as the aggregate sees it. */
 export interface SpendingTransaction {
+  /** `transactions.id` as decimal text: digits, no leading zero, unique. */
+  id: string
+  /** The account the row is on; two legs of a transfer differ here. */
+  accountId: string
   /** The account's scope. */
   scope: RowScope
   /** The NZ calendar date, `YYYY-MM-DD`. */
   date: IsoDate
   /** Signed: negative is money out. */
   amountCents: Cents
+  /** Settled or pending. */
+  status: TransactionStatus
   /** The effective category, drawings already laid over; null when none. */
   category: string | null
 }
@@ -66,19 +88,35 @@ export function isYearMonth(value: unknown): value is string {
 }
 
 /**
- * Whether an outflow is spending (prd-02 Ruling 15): a row whose effective
- * category is Drawings, Hannah paying herself, is not.
+ * Whether a row is spending on its own (prd-02 Ruling 15): a row whose
+ * effective category is Drawings, Hannah paying herself, is not.
  *
- * Transfers between her own accounts other than drawings have no rule yet:
- * it is open on #52 (Baseline decision 0a37d21b). When it is ruled, the
- * rule goes here and nowhere else, which is why this takes the whole row.
- * Whether the row is money out is the aggregate's check, not this one's.
+ * Own-account transfers are not decided here, because a transfer is a pair
+ * of rows and this takes one. `spendingByCategory` pairs them with
+ * `findOwnTransfers` (shared/habits.ts; Baseline decision 0a37d21b, pair
+ * match, #431) before it asks this about each remaining row. Whether the
+ * row is money out is the aggregate's check, not this one's.
  */
 export function countsAsSpending(tx: SpendingTransaction): boolean {
   return !isDrawingCategory(tx.category)
 }
 
+const ROW_ID = /^[1-9]\d*$/
+
 function validate(tx: SpendingTransaction, index: number): void {
+  if (typeof tx.id !== 'string' || !ROW_ID.test(tx.id)) {
+    throw new RangeError(
+      `id of transaction ${index} must be a positive integer as text, got "${String(tx.id)}"`,
+    )
+  }
+  if (typeof tx.accountId !== 'string') {
+    throw new TypeError(`accountId of transaction ${index} must be text`)
+  }
+  if (tx.status !== 'settled' && tx.status !== 'pending') {
+    throw new RangeError(
+      `status of transaction ${index} must be settled or pending, got "${String(tx.status)}"`,
+    )
+  }
   if (!Number.isSafeInteger(tx.amountCents)) {
     throw new TypeError(
       `amountCents of transaction ${index} must be an integer number of cents, got ${tx.amountCents}`,
@@ -112,6 +150,46 @@ function compareCodePoints(a: string, b: string): number {
 }
 
 /**
+ * The ids of the view's rows that are legs of an own-account transfer, from
+ * `findOwnTransfers`. Only the view's in-scope rows that `countsAsSpending`
+ * keeps are paired, dated within TRANSFER_WINDOW_DAYS of the month either
+ * side, as `transferLegsInView` does in ./habits.ts: a Personal → Strawb
+ * payment is left out of All and is spend in Personal. Drawings go first,
+ * so a drawing half cannot take another row's partner.
+ *
+ * Exported so the transaction list (#433) leaves out the same legs as the
+ * aggregate. Callers pass rows that already satisfy `SpendingTransaction`;
+ * `findOwnTransfers` checks the paired subset's ids and amounts.
+ */
+export function transferLegIdsInView(
+  transactions: readonly SpendingTransaction[],
+  scope: Scope,
+  month: string,
+): Set<string> {
+  const first = `${month}-01`
+  const year = Number(month.slice(0, 4))
+  const monthIndex = Number(month.slice(5, 7))
+  const last = `${month}-${String(daysInMonth(year, monthIndex)).padStart(2, '0')}`
+  const legs: HabitTransaction[] = []
+  for (const tx of transactions) {
+    if (scope !== 'all' && tx.scope !== scope) continue
+    if (daysBetween(tx.date, first) > TRANSFER_WINDOW_DAYS) continue
+    if (daysBetween(last, tx.date) > TRANSFER_WINDOW_DAYS) continue
+    if (!countsAsSpending(tx)) continue
+    legs.push({
+      id: tx.id,
+      accountId: tx.accountId,
+      date: tx.date,
+      amountCents: tx.amountCents,
+      status: tx.status,
+      balanceCents: null,
+      category: tx.category,
+    })
+  }
+  return new Set(findOwnTransfers(legs).keys())
+}
+
+/**
  * The month's spending in the view's scope, per category, with the total.
  * See the header for each rule. A bad scope, month, `top` or row is a
  * RangeError or a TypeError.
@@ -136,8 +214,16 @@ export function spendingByCategory(
       `top must be a whole number from 1 to ${SPENDING_TOP_MAX}, got ${top}`,
     )
   }
-  input.transactions.forEach(validate)
+  const seenIds = new Set<string>()
+  input.transactions.forEach((tx, index) => {
+    validate(tx, index)
+    if (seenIds.has(tx.id)) {
+      throw new RangeError(`id of transaction ${index} appears twice`)
+    }
+    seenIds.add(tx.id)
+  })
 
+  const transferLegIds = transferLegIdsInView(input.transactions, scope, month)
   const outflows: Cents[] = []
   const uncategorised: Cents[] = []
   const byCategory = new Map<string, Cents[]>()
@@ -146,6 +232,7 @@ export function spendingByCategory(
     if (tx.date.slice(0, 7) !== month) continue
     if (tx.amountCents >= 0) continue
     if (!countsAsSpending(tx)) continue
+    if (transferLegIds.has(tx.id)) continue
     const spent = -tx.amountCents
     outflows.push(spent)
     if (tx.category === null) {

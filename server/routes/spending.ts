@@ -1,8 +1,8 @@
 import express from 'express'
 import type { Response } from 'express'
 
-import type { Scope } from '../../shared/contracts.ts'
 import { SPENDING_TOP_MAX, isYearMonth } from '../../shared/spending.ts'
+import { parseScope } from '../http.ts'
 import { SpendingDataError, readSpendingByCategory } from '../db/spending.ts'
 
 // /api/v1/spending (#271): spending by category, for the Overview's
@@ -26,11 +26,6 @@ import { SpendingDataError, readSpendingByCategory } from '../db/spending.ts'
 // Errors are fixed text. A `SpendingDataError` carries one of its own
 // constant messages, which name no value; anything else is a generic text.
 // Only the error's class is logged.
-
-/** A copy of `parseScope` in ./overview.ts. A plain scope; anything else is refused. */
-function parseScope(raw: unknown): Scope | null {
-  return raw === 'all' || raw === 'personal' || raw === 'strawb' ? raw : null
-}
 
 function errorClass(err: unknown): string {
   return err instanceof Error ? err.constructor.name : typeof err

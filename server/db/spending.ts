@@ -3,9 +3,11 @@ import type {
   RowScope,
   Scope,
   SpendingByCategoryResponse,
+  TransactionStatus,
 } from '../../shared/contracts.ts'
 import type { CategorySource } from '../../models/transactions.ts'
 import { effectiveCategory } from '../../shared/drawings.ts'
+import { TRANSFER_WINDOW_DAYS } from '../../shared/habits.ts'
 import {
   isYearMonth,
   spendingByCategory,
@@ -25,20 +27,28 @@ import { listAccounts } from './synced.ts'
 // shared/spending.ts, whose result it returns unchanged. Nothing here is
 // read by safe-to-spend.
 //
-// Rows read: Akahu outflows, settled and pending, on stored Akahu accounts
-// of both scopes, each taking its account's scope; the shared module applies
-// the scope asked for. A Xero row is never read (prd-05 is M4), and a
-// transaction whose account is not stored is not read.
+// Rows read: settled and pending rows of both signs, on stored Akahu
+// accounts of both scopes, each taking its account's scope; the shared
+// module applies the scope asked for. Money in is read because a transfer's
+// inflow leg is what pairs its outflow leg (#431); money in is never
+// spending. A Xero row is never read (prd-05 is M4), and a transaction whose
+// account is not stored is not read.
 //
 // Categories are effective ones (prd-02 Ruling 15): a half of a drawing
 // that Hannah has not categorised by hand shows Drawings here, and the
 // shared module's `countsAsSpending` leaves it out. Nothing is dropped
 // here, so that rule lives in one place.
 //
+// Own-account transfers (Baseline decision 0a37d21b, pair match, #431) are
+// left out by the shared module, which pairs the legs with
+// `findOwnTransfers` from shared/habits.ts. Nothing here pairs anything.
+//
 // The month is an NZ calendar month. Stored dates are UTC instants and NZ
 // is ahead of UTC, so a row in the month is never dated before the day
 // before its first day in UTC, nor on or after the first of the next month;
-// rows in that range are read and the NZ date of each decides. A row with
+// rows in that range are read and the NZ date of each decides. The range
+// is widened by TRANSFER_WINDOW_DAYS either side, because a transfer leg
+// dated just outside the month pairs with one inside it. A row with
 // no date, or one in range with no amount, is read too, so it is refused
 // rather than silently left out.
 //
@@ -78,6 +88,7 @@ interface SpendingQueryRow {
   account_id: string
   date: string | null
   amount_cents: number | null
+  status: TransactionStatus
   category: string | null
   category_source: CategorySource
 }
@@ -125,21 +136,29 @@ function utcDay(at: Date): IsoDate {
 }
 
 /**
- * The stored-date range that holds every instant in the NZ month: from the
- * day before its first day, to before the first day of the next month. The
- * month is a checked `YYYY-MM` from 1000-01, so `Date.UTC`'s reading of the
- * years 0 to 99 never applies. There is no upper bound after 9999-12, which
- * text comparison could not express.
+ * The stored-date range that holds every instant whose NZ date is in the
+ * month, widened by TRANSFER_WINDOW_DAYS either side so a transfer leg just
+ * outside the month is read for its partner. NZ is ahead of UTC, so a
+ * stored date is at most its NZ date and at least a day before it: the range
+ * starts a day before the earliest NZ date read and stops before the first
+ * UTC date that can fall after the latest. The month is a checked `YYYY-MM`
+ * from 1000-01, so `Date.UTC`'s reading of the years 0 to 99 never applies.
+ * There is no upper bound after 9999-12, which text comparison could not
+ * express.
  */
 function storedRange(month: string): { from: IsoDate; before: IsoDate | null } {
   const year = Number(month.slice(0, 4))
   const index = Number(month.slice(5, 7)) - 1
   return {
-    from: utcDay(new Date(Date.UTC(year, index, 0))),
+    from: utcDay(
+      new Date(Date.UTC(year, index, 1 - TRANSFER_WINDOW_DAYS - 1)),
+    ),
     before:
       year === 9999 && index === 11
         ? null
-        : utcDay(new Date(Date.UTC(year, index + 1, 1))),
+        : utcDay(
+            new Date(Date.UTC(year, index + 1, 1 + TRANSFER_WINDOW_DAYS)),
+          ),
   }
 }
 
@@ -168,13 +187,11 @@ export async function readSpendingByCategory(
       'account_id',
       'date',
       'amount_cents',
+      'status',
       'category',
       'category_source',
     )
     .where({ source: 'akahu' })
-    .where((q) =>
-      q.where('amount_cents', '<', 0).orWhereNull('amount_cents'),
-    )
     .whereIn('account_id', [...accountScopes.keys()])
     .where((q) =>
       q
@@ -192,9 +209,12 @@ export async function readSpendingByCategory(
     if (scope === undefined || row.amount_cents === null)
       throw new SpendingDataError('a transaction is incomplete')
     return {
+      id: String(row.id),
+      accountId: row.account_id,
       scope,
       date: nzDate(row.date),
       amountCents: row.amount_cents,
+      status: row.status,
       category: effectiveCategory(
         { category: row.category, categorySource: row.category_source },
         drawingIds.has(row.id),

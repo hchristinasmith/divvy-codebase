@@ -47,6 +47,7 @@ afterAll(async () => {
 
 const EVERYDAY = 'acc_sentinel_everyday'
 const TRADING = 'acc_sentinel_trading'
+const RAPID = 'acc_sentinel_rapid'
 
 function tx(
   accountId: string,
@@ -126,6 +127,48 @@ describe('readSpendingByCategory', () => {
     expect(r.categories).toStrictEqual([
       { category: 'Software Invented', spentCents: 25000 },
     ])
+  })
+
+  it('reads inflow legs dated two NZ days either side of the month, so both moves are left out', async () => {
+    await seed([])
+    await connection('accounts').insert({
+      id: 3,
+      akahu_id: RAPID,
+      scope: 'personal',
+      source: 'akahu',
+      name: 'Invented account',
+      created_at: STAMP,
+      updated_at: STAMP,
+    })
+    // The out leg is on 1 October; the in leg, two NZ days earlier, is on
+    // 29 September NZDT, stored as 28 September UTC: the first UTC date the
+    // widened read reaches. The second out leg is on 31 October; its in
+    // leg, two NZ days later, is on 2 November, stored as 2 November UTC:
+    // the last UTC date it reaches.
+    await connection('transactions').insert([
+      tx(EVERYDAY, '2026-10-01T00:00:00.000Z', -50000, {
+        category: 'Transfers Invented',
+      }),
+      tx(RAPID, '2026-09-28T12:00:00.000Z', 50000),
+      tx(EVERYDAY, '2026-10-31T00:00:00.000Z', -30000, {
+        category: 'Transfers Invented',
+      }),
+      tx(RAPID, '2026-11-02T00:00:00.000Z', 30000),
+      tx(EVERYDAY, '2026-10-05T00:00:00.000Z', -1200, {
+        category: 'Groceries Invented',
+      }),
+    ])
+
+    const r = await readSpendingByCategory({ scope: 'all' }, NOW, connection)
+
+    expect(r).toStrictEqual({
+      scope: 'all',
+      month: '2026-10',
+      totalCents: 1200,
+      categories: [{ category: 'Groceries Invented', spentCents: 1200 }],
+      otherCents: 0,
+      uncategorisedCents: 0,
+    })
   })
 
   it('passes month and top through', async () => {
