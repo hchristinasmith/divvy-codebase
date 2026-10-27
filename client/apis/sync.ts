@@ -9,7 +9,8 @@ import type { SyncRunStatus, SyncStatus } from '../../server/routes/sync.ts'
 // (`GET /api/v1/accounts`), and "Sync now" (`POST /api/v1/sync/run`).
 //
 // What the screen keeps is narrowed here, at the edge. From the status: the
-// running flag, the last run's times and outcome, and the last success. The
+// running flag, the last run's times and outcome, the last success, and the
+// next scheduled run (null while the scheduler is stopped). The
 // run's `error` is a machine code ("akahu_unauthorized (HTTP 401)") and is
 // dropped, so the screen cannot show it. From each account: its name and its
 // connection's name. Ids, account numbers, balances and logos are dropped
@@ -21,10 +22,9 @@ const UNREADABLE = 'The server sent a reply Divvy could not read'
 
 // A copy of `call` in ./overview.ts and ./subscriptions.ts (the same
 // messages as `send` in ./settings.ts): the server's text when it sent one,
-// its status when it did not, or that it could not be reached. Unlike those
-// copies, a 200 that is not JSON (a proxy's HTML page) rejects with a fixed
-// message, so the parser's SyntaxError, which quotes the body, never
-// reaches the screen.
+// its status when it did not, or that it could not be reached. A 200 that
+// is not JSON (a proxy's HTML page) rejects with a fixed message, so the
+// parser's SyntaxError, which quotes the body, never reaches the screen.
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response
   try {
@@ -62,6 +62,7 @@ export interface SyncScreenStatus {
   running: SyncStatus['running']
   lastRun: SyncScreenRun | null
   lastSuccessAt: SyncStatus['lastSuccessAt']
+  nextRunAt: SyncStatus['nextRunAt']
 }
 
 const UNEXPECTED_STATUS = 'Unexpected sync status'
@@ -99,11 +100,20 @@ function parseRun(value: unknown): SyncScreenRun | null {
 // screen shows its error state and never a guessed "Not synced yet".
 function parseStatusBody(body: unknown): SyncScreenStatus {
   if (!isRecord(body)) throw new Error(UNEXPECTED_STATUS)
-  const { running, lastRun, lastSuccessAt } = body
-  if (typeof running !== 'boolean' || !isTimestampOrNull(lastSuccessAt)) {
+  const { running, lastRun, lastSuccessAt, nextRunAt } = body
+  if (
+    typeof running !== 'boolean' ||
+    !isTimestampOrNull(lastSuccessAt) ||
+    !isTimestampOrNull(nextRunAt)
+  ) {
     throw new Error(UNEXPECTED_STATUS)
   }
-  return { running, lastRun: parseRun(lastRun), lastSuccessAt }
+  return {
+    running,
+    lastRun: parseRun(lastRun),
+    lastSuccessAt,
+    nextRunAt,
+  }
 }
 
 // The screen's own entry, under the sync-status prefix. The header's pill

@@ -22,9 +22,13 @@ import type {
 
 const rootURL = new URL('/api/v1', document.baseURI)
 
+const UNREADABLE = 'The server sent a reply Divvy could not read'
+
 // A copy of `call` in ./overview.ts (itself the same messages as `send` in
 // ./settings.ts): the server's text when it sent one, its status when it did
-// not, or that it could not be reached.
+// not, or that it could not be reached. A 200 that is not JSON (a proxy's
+// HTML page) rejects with a fixed message, so the parser's SyntaxError, which
+// quotes the body, never reaches the screen.
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response
   try {
@@ -42,7 +46,11 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
     if (typeof message === 'string') throw new Error(message)
     throw new Error(`Server error (${response.status})`)
   }
-  return (await response.json()) as T
+  try {
+    return (await response.json()) as T
+  } catch {
+    throw new Error(UNREADABLE)
+  }
 }
 
 function send<T>(method: 'PUT' | 'POST', path: string, body: object): Promise<T> {

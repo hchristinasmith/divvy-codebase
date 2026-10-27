@@ -256,3 +256,23 @@ describe('the subscriptions query', () => {
     client.clear()
   })
 })
+
+describe('a 200 that is not JSON', () => {
+  it('rejects with the fixed message, never the body', async () => {
+    // A proxy's page answered in place of the API: the parser's SyntaxError
+    // would quote it, so the message must be the fixed one.
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
+      Promise.resolve(new Response('<html>proxy</html>', { status: 200 })),
+    )
+
+    const error = await api.grabSubscriptions('personal').then(
+      () => null,
+      (e: unknown) => e,
+    )
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toBe(
+      'The server sent a reply Divvy could not read',
+    )
+    expect((error as Error).message).not.toContain('<html>')
+  })
+})

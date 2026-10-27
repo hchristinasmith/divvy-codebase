@@ -39,7 +39,11 @@ export default function SourcesCard({
           ))
         )}
       </ul>
-      <SyncFooter running={status.running} />
+      <SyncFooter
+        running={status.running}
+        nextRunAt={status.nextRunAt}
+        now={now}
+      />
     </div>
   )
 }
