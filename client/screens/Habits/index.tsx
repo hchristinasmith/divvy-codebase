@@ -2,8 +2,8 @@ import { useQuery } from '@tanstack/react-query'
 import ScreenHeader from '../../components/Shell/ScreenHeader.tsx'
 import { habitsQuery } from '../../apis/habits.ts'
 import { useScope } from '../../context/ScopeContext.tsx'
+import type { HabitsResponse } from '../../../shared/contracts.ts'
 import PatternInsights from '../../components/Insights/PatternInsights.tsx'
-import type { HabitsResponse, Scope } from '../../../shared/contracts.ts'
 import { CARD, ERROR, MUTED, SECONDARY_BUTTON } from '../Overview/styles.ts'
 import RunwayCard from './RunwayCard.tsx'
 import StreaksCard from './StreaksCard.tsx'
@@ -66,14 +66,14 @@ export default function Habits() {
             </div>
           )}
           {/* Keyed by scope, so a switch drops a failed write's message. */}
-          <HabitsBody key={scope} scope={scope} data={habits.data} />
+          <HabitsBody key={scope} data={habits.data} />
         </>
       )}
     </>
   )
 }
 
-function HabitsBody({ scope, data }: { scope: Scope; data: HabitsResponse }) {
+function HabitsBody({ data }: { data: HabitsResponse }) {
   return (
     <div className={SECTION}>
       <div className={TOP_GRID}>
@@ -83,7 +83,7 @@ function HabitsBody({ scope, data }: { scope: Scope; data: HabitsResponse }) {
       <div className={BOTTOM_GRID}>
         <WorthItCard rows={data.verdicts} />
         <div className={SIDE_COLUMN}>
-          <PatternInsights scope={scope} />
+          <PatternInsights />
           <TruthReportCard />
         </div>
       </div>

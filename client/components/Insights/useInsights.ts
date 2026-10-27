@@ -1,43 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Insight } from '../../../models/insights.ts'
 import type { Scope } from '../../../shared/contracts.ts'
+import { call } from '../../apis/http.ts'
 
 // The insights inbox as the Habits screen's Patterns card reads it (prd-04
 // Ruling 2, Ruling 3; #63): the insights not yet dismissed, and the dismiss
 // route from #51. Dismissing only sets `dismissed_at`.
 //
-// Fetch lives in this file rather than client/apis/, which is not this
-// issue's to edit. `call` copies the one in ./useProposals.ts: a refused
-// request rejects with the server's own `{ error }` text, its status when it
-// sent none, or that it could not be reached.
-//
-// The key lives here for the same reason, keyed by scope so a switch never
-// shows another scope's insights; move it to client/apis/queryKeys.ts when a
-// second screen reads insights.
+// Requests go through client/apis/http.ts. The key lives here, not in
+// client/apis/queryKeys.ts, which is not this issue's to edit; it is keyed
+// by scope so a switch never shows another scope's insights. Move it there
+// when a second screen reads insights.
 const INSIGHTS_KEY = ['insights'] as const
 const insightsKey = (scope: Scope) => [...INSIGHTS_KEY, scope] as const
-
-const rootURL = new URL('/api/v1', document.baseURI)
-
-async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  let response: Response
-  try {
-    response = await fetch(`${rootURL}${path}`, init)
-  } catch {
-    throw new Error('The server could not be reached')
-  }
-  if (!response.ok) {
-    let message: unknown
-    try {
-      message = ((await response.json()) as { error?: unknown }).error
-    } catch {
-      message = undefined
-    }
-    if (typeof message === 'string') throw new Error(message)
-    throw new Error(`Server error (${response.status})`)
-  }
-  return (await response.json()) as T
-}
 
 /** GET /api/v1/agents/insights, which never includes a dismissed insight. */
 interface ListInsightsResponse {

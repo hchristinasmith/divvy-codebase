@@ -1,11 +1,11 @@
 import { useRef, type ReactNode } from 'react'
-import type { Scope } from '../../../shared/contracts.ts'
+import { useScope } from '../../context/ScopeContext.tsx'
 import PatternsCard from '../../screens/Habits/PatternsCard.tsx'
 import { ERROR } from '../../screens/Overview/styles.ts'
 import InsightCard from './InsightCard.tsx'
 import { useDismissInsight, useInsights } from './useInsights.ts'
 
-// The Habits screen's Patterns card filled with the scope's insights
+// The Habits screen's Patterns card filled with the toggle's scope's insights
 // (prd-04 Ruling 2, Ruling 3; #63). Every insight is drawn by InsightCard
 // and nothing else here shows its title, body or chart, so InsightCard's
 // guarantees for hostile text and specs hold.
@@ -16,7 +16,8 @@ import { useDismissInsight, useInsights } from './useInsights.ts'
 // reads as it did before #63 until there is something to show. A failed
 // read is said in the card; a failed dismiss is said above the list and the
 // insight stays.
-export default function PatternInsights({ scope }: { scope: Scope }) {
+export default function PatternInsights() {
+  const { scope } = useScope()
   const insights = useInsights(scope)
   const dismiss = useDismissInsight()
   // One dismiss at a time, so a double tap sends one request. A ref, not

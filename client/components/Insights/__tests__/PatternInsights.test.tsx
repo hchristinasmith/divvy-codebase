@@ -11,10 +11,7 @@ import {
   type Aggregates,
   type LedgerRow,
 } from '../../../../server/agents/insights/queries.ts'
-import {
-  topMerchantsChart,
-  topMerchantsMarkdown,
-} from '../../../../server/agents/insights/prompt.ts'
+import { buildDrafts } from '../../../../server/agents/insights/prompt.ts'
 import PatternInsights from '../PatternInsights.tsx'
 
 // queries.ts opens the server's knex connection at import; its pure folds
@@ -149,7 +146,7 @@ describe('two seeded insights render both titles and bodies and one chart', () =
       insight(1, { chart_spec_json: JSON.stringify(CHART) }),
       insight(2),
     ])
-    renderWithProviders(<PatternInsights scope="personal" />)
+    renderWithProviders(<PatternInsights />, { initialScope: 'personal' })
 
     expect(await screen.findByText('Invented pattern 1')).not.toBeNull()
     expect(cardIds()).toEqual(['1', '2'])
@@ -212,14 +209,19 @@ describe('the chart drawn from known rows equals a hand query over the same rows
       unusual: [],
       monthly: [],
     }
+    // The draft the agent itself builds for the week (buildDrafts, as
+    // agent.ts stores it), so the chart is the one that insight carries.
+    const draft = buildDrafts(a, 'personal').find((d) => d.kind === 'pattern')
+    if (!draft) throw new Error('no top-merchants draft')
+    expect(draft.title).toBe(`Top merchants and unusual spends, ${WEEK}`)
     installFetch([
       insight(5, {
-        title: `Top merchants and unusual spends, ${WEEK}`,
-        body_md: topMerchantsMarkdown(a),
-        chart_spec_json: JSON.stringify(topMerchantsChart(a)),
+        title: draft.title,
+        body_md: draft.body_md,
+        chart_spec_json: JSON.stringify(draft.chart_spec),
       }),
     ])
-    renderWithProviders(<PatternInsights scope="personal" />)
+    renderWithProviders(<PatternInsights />, { initialScope: 'personal' })
     await screen.findByText(`Top merchants and unusual spends, ${WEEK}`)
 
     const hand = handQuery(ROWS)
@@ -240,7 +242,7 @@ describe('the chart drawn from known rows equals a hand query over the same rows
 describe('dismiss calls the route once and removes the insight; a failure says so and keeps it', () => {
   it('removes the card after one POST to its dismiss route', async () => {
     const fx = installFetch([insight(1), insight(2)])
-    renderWithProviders(<PatternInsights scope="personal" />)
+    renderWithProviders(<PatternInsights />, { initialScope: 'personal' })
     await screen.findByText('Invented pattern 2')
 
     fireEvent.click(within(card(2)).getByRole('button', { name: 'Dismiss' }))
@@ -256,7 +258,7 @@ describe('dismiss calls the route once and removes the insight; a failure says s
 
   it('the last dismissed insight leaves the card to its empty state', async () => {
     installFetch([insight(3)])
-    renderWithProviders(<PatternInsights scope="personal" />)
+    renderWithProviders(<PatternInsights />, { initialScope: 'personal' })
     await screen.findByText('Invented pattern 3')
 
     fireEvent.click(within(card(3)).getByRole('button', { name: 'Dismiss' }))
@@ -270,7 +272,7 @@ describe('dismiss calls the route once and removes the insight; a failure says s
       status: 409,
       body: { error: 'Insight already dismissed' },
     }))
-    renderWithProviders(<PatternInsights scope="personal" />)
+    renderWithProviders(<PatternInsights />, { initialScope: 'personal' })
     await screen.findByText('Invented pattern 2')
 
     fireEvent.click(within(card(2)).getByRole('button', { name: 'Dismiss' }))
@@ -285,7 +287,7 @@ describe('dismiss calls the route once and removes the insight; a failure says s
     installFetch([insight(1)], () => {
       throw new TypeError('Failed to fetch')
     })
-    renderWithProviders(<PatternInsights scope="personal" />)
+    renderWithProviders(<PatternInsights />, { initialScope: 'personal' })
     await screen.findByText('Invented pattern 1')
 
     fireEvent.click(within(card(1)).getByRole('button', { name: 'Dismiss' }))
@@ -343,7 +345,7 @@ describe('a hostile insight from the API renders inert, through InsightCard', ()
         }),
       }),
     ])
-    const { container } = renderWithProviders(<PatternInsights scope="personal" />)
+    const { container } = renderWithProviders(<PatternInsights />, { initialScope: 'personal' })
     await waitFor(() => expect(cardIds()).toEqual(['9']))
 
     expect(liveContent(container)).toEqual([])
