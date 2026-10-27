@@ -28,6 +28,17 @@
 // Calls are one at a time: the brakes are checked against the tokens of the
 // calls that have returned.
 //
+// The budget is best effort, not a hard cap:
+// - the check is made before a call, so the call that crosses the budget
+//   still goes out and can overshoot it by up to its `max_tokens` plus its
+//   input;
+// - a run's tokens reach `agent_runs` only at `finish`, so another run in
+//   flight at the same time does not see them, and a process that dies
+//   before `finish` loses them from the day's total. Writing usage per call
+//   needs server/agents/db/agent-runs.ts, another lane's fence;
+// - a reply whose usage cannot be read stops the run, because that call was
+//   billed and its tokens can never be counted.
+//
 // Logs and thrown errors carry fixed text, a reason, an error's class and an
 // HTTP status. Never the key, a prompt, a response or an error's message,
 // which for an API error can repeat request headers.
@@ -76,12 +87,20 @@ export interface ModelRunDeps {
   db?: typeof connection
 }
 
-// The SDK is given the key explicitly; left to itself it would read the
-// environment.
+// The Anthropic API's own host. Pinned so ANTHROPIC_BASE_URL in the
+// environment cannot send the key elsewhere.
+const API_HOST = 'https://api.anthropic.com'
+
+// The SDK is given the key, the host and its log level explicitly; left to
+// itself it would read each from the environment. With the key passed, it
+// resolves no credentials profile, so a profile's base URL never applies.
+// ANTHROPIC_CUSTOM_HEADERS is still honoured: it can add headers, or replace
+// the key header, on a request that still goes only to API_HOST. Logging is
+// off so ANTHROPIC_LOG cannot print a prompt or a response.
 function sdkTransport(apiKey: string): Transport {
   let sdk: Anthropic | undefined
   return (params) => {
-    sdk ??= new Anthropic({ apiKey })
+    sdk ??= new Anthropic({ apiKey, baseURL: API_HOST, logLevel: 'off' })
     return sdk.messages.create(params)
   }
 }
@@ -108,6 +127,8 @@ export async function startModelRun(start: StartRun, deps: ModelRunDeps = {}): P
   let cost = 0
   let blocked: BlockReason | null = null
   let finished = false
+  // Set when a sent call's usage could not be read; every later call throws.
+  let stopped = false
   let transport = deps.transport
 
   const block = (reason: BlockReason): CompleteResult => {
@@ -121,6 +142,7 @@ export async function startModelRun(start: StartRun, deps: ModelRunDeps = {}): P
 
     async complete(params) {
       if (finished) throw new Error('model run already finished')
+      if (stopped) throw new Error('model run stopped: an earlier reply’s usage was unreadable')
       // A blocked run already logged its model on the call that blocked.
       if (blocked !== null) return block(blocked)
       const config = loadLlmConfig(deps.env)
@@ -149,11 +171,22 @@ export async function startModelRun(start: StartRun, deps: ModelRunDeps = {}): P
         console.error('agents: model call failed', errorClass(err))
         throw sanitized(err)
       }
-      const usage = {
-        inputTokens: message.usage.input_tokens,
-        outputTokens: message.usage.output_tokens,
+      // A sent call whose usage cannot be read was still billed, and its
+      // tokens can never reach the budget, so the run stops here.
+      let usage: { inputTokens: number; outputTokens: number }
+      let callCost: number
+      try {
+        usage = {
+          inputTokens: message.usage.input_tokens,
+          outputTokens: message.usage.output_tokens,
+        }
+        callCost = costMicroUsd(usage, price)
+      } catch {
+        stopped = true
+        console.error('agents: model call failed, unreadable usage')
+        throw new Error('model call failed: the reply’s usage is unreadable')
       }
-      cost += costMicroUsd(usage, price)
+      cost += callCost
       inputTokens += usage.inputTokens
       outputTokens += usage.outputTokens
       return { status: 'ok', message }

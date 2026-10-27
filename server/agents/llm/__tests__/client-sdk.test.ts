@@ -6,7 +6,8 @@ import { startModelRun } from '../client.ts'
 import { params, reply } from './fakes.ts'
 
 // The default transport (#429): the SDK is built only when a call is sent,
-// once per run, with the key from config passed explicitly. The SDK is
+// once per run, with the key from config, the API host and the log level
+// passed explicitly. The SDK is
 // replaced here, so nothing reaches the network; every value is invented.
 
 const sdk = vi.hoisted(() => ({
@@ -46,12 +47,12 @@ afterAll(async () => {
 const KEY = 'sk-ant-test-0f3c9e1a-invented'
 const START = { kind: 'category', trigger: 'manual' } as const
 
-it('builds the SDK on the first sent call, once, with only the key', async () => {
+it('builds the SDK on the first sent call, once, with the key, host and log level pinned', async () => {
   const run = await startModelRun(START, { env: { ANTHROPIC_API_KEY: KEY }, db: connection })
   expect(sdk.options).toHaveLength(0)
   await run.complete(params)
   await run.complete(params)
-  expect(sdk.options).toEqual([{ apiKey: KEY }])
+  expect(sdk.options).toEqual([{ apiKey: KEY, baseURL: 'https://api.anthropic.com', logLevel: 'off' }])
   expect(sdk.bodies).toHaveLength(2)
   await run.finish({ outcome: 'success', consideredCount: 1, writtenCount: 0 })
 })

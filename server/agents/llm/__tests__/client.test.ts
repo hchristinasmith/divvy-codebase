@@ -286,6 +286,29 @@ describe('usage on agent_runs', () => {
     })
   })
 
+  it('stops a run whose reply has unreadable usage, so unlogged spend cannot repeat', async () => {
+    quiet()
+    let sent = 0
+    const run = await startModelRun(
+      START,
+      deps({
+        transport: async (body) => {
+          sent += 1
+          const message = await recording([[10, 1]]).transport(body)
+          return { ...message, usage: { ...message.usage, input_tokens: Number.NaN } }
+        },
+        env: env(),
+      }),
+    )
+    await expect(run.complete(params)).rejects.toThrow(
+      'model call failed: the reply’s usage is unreadable',
+    )
+    await expect(run.complete(params)).rejects.toThrow('model run stopped')
+    expect(sent).toBe(1)
+    await run.finish({ ...done, outcome: 'failed' })
+    expect((await row(run.id)).outcome).toBe('failed')
+  })
+
   it('refuses without a key before any call, and logs the attempt', async () => {
     quiet()
     const wire = untouchable()

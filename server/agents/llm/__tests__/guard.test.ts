@@ -94,6 +94,22 @@ describe('tokensSpentToday', () => {
     expect(await tokensSpentToday(NOW, connection)).toBe(10)
   })
 
+  it('keeps a 25-hour Auckland day whole (daylight saving ends 5 April 2026)', async () => {
+    await priorRun('2026-04-04T11:00:00.000Z', 1, 0) // 5 April 00:00 NZDT
+    await priorRun('2026-04-04T10:59:59.999Z', 100, 0) // 4 April 23:59 NZDT
+    await priorRun('2026-04-05T11:59:59.999Z', 10, 0) // 5 April 23:59 NZST
+    expect(await tokensSpentToday(new Date('2026-04-05T11:59:59.999Z'), connection)).toBe(11)
+    expect(await tokensSpentToday(new Date('2026-04-05T12:00:00.000Z'), connection)).toBe(0)
+  })
+
+  it('keeps a 23-hour Auckland day whole (daylight saving starts 27 September 2026)', async () => {
+    await priorRun('2026-09-26T12:00:00.000Z', 1, 0) // 27 September 00:00 NZST
+    await priorRun('2026-09-26T11:59:59.999Z', 100, 0) // 26 September 23:59 NZST
+    await priorRun('2026-09-27T10:59:59.999Z', 10, 0) // 27 September 23:59 NZDT
+    expect(await tokensSpentToday(new Date('2026-09-27T10:59:59.999Z'), connection)).toBe(11)
+    expect(await tokensSpentToday(new Date('2026-09-27T11:00:00.000Z'), connection)).toBe(0)
+  })
+
   it('ignores runs with no usage and runs still going', async () => {
     await connection('agent_runs').insert({
       kind: 'category',
