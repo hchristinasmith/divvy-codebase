@@ -8,6 +8,7 @@ import {
 } from '../../../models/insights.ts'
 import { dismissInsight, getInsight, listInsights } from '../db/insights.ts'
 import { errorClass } from '../../error-class.ts'
+import { parseId } from '../../http.ts'
 
 // /api/v1/agents/insights (prd-04 Rulings 2, 3 and 8, #51), mounted by
 // ./index.ts, which also refuses a cross-site POST before it reaches here.
@@ -27,15 +28,6 @@ interface ListInsightsResponse {
 
 interface DismissInsightResponse {
   insight: Insight
-}
-
-/**
- * A plain positive integer id, or null. Digits only, as PATCH
- * /api/v1/transactions/:id: Number() would also accept '1e3', '0x10' and ' 7'.
- */
-function parseId(raw: string): number | null {
-  const id = Number(raw)
-  return /^[1-9]\d*$/.test(raw) && Number.isSafeInteger(id) ? id : null
 }
 
 /** `all` (or absent) is no filter; one scope; anything else, or repeated, null. */

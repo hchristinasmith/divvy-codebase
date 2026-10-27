@@ -14,6 +14,7 @@ import {
 } from '../../db/transactions.ts'
 import type { TransactionRow } from '../../../models/transactions.ts'
 import { errorClass } from '../../error-class.ts'
+import { parseId } from '../../http.ts'
 
 // /api/v1/agents/proposals (prd-04 Rulings 2 and 7, #51), mounted by
 // ./index.ts, which also refuses a cross-site POST before it reaches here.
@@ -61,15 +62,6 @@ interface AcceptProposalResponse {
 
 interface RejectProposalResponse {
   proposal: CategoryProposal
-}
-
-/**
- * A plain positive integer id, or null. Digits only, as PATCH
- * /api/v1/transactions/:id: Number() would also accept '1e3', '0x10' and ' 7'.
- */
-function parseId(raw: string): number | null {
-  const id = Number(raw)
-  return /^[1-9]\d*$/.test(raw) && Number.isSafeInteger(id) ? id : null
 }
 
 /** One known status; absent is `pending`; anything else, or repeated, null. */
