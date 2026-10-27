@@ -8,6 +8,7 @@ import { invalidateOverview } from '../../apis/queryKeys.ts'
 import { SCOPES } from '../../context/ScopeContext.tsx'
 import type { ActivityRow, IsoDate, Scope } from '../../../shared/contracts.ts'
 import SegmentedControl from '../../components/Shell/SegmentedControl.tsx'
+import SuggestionsPill from '../../components/Insights/SuggestionsPill.tsx'
 import ActivityRowItem from './ActivityRowItem.tsx'
 import {
   CARD,
@@ -73,6 +74,7 @@ export default function ActivityCard({
           onChange={setFilter}
         />
       </div>
+      <SuggestionsPill rows={rows} />
       {categories.isError && (
         <div className="flex flex-wrap items-center gap-3">
           <p role="alert" className={ERROR}>
