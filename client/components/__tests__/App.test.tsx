@@ -9,23 +9,7 @@ import {
   overviewByScope,
 } from '../../screens/Overview/__tests__/fixtures.ts'
 
-// The old pages stay routed until the prd-02 w5 sweep (prd-02 Ruling 8).
-// Each is replaced by a marker so this test checks routing, not page content.
-vi.mock('../Dashboard/Dashboard.tsx', () => ({
-  default: () => <p data-testid="page">Dashboard page</p>,
-}))
-vi.mock('../Transactions/TransactionsPage.tsx', () => ({
-  default: () => <p data-testid="page">Transactions page</p>,
-}))
-vi.mock('../Targets/targets.tsx', () => ({
-  default: () => <p data-testid="page">Targets page</p>,
-}))
-vi.mock('../ManageSubscriptions/Subscriptions.tsx', () => ({
-  default: () => <p data-testid="page">Subscriptions page</p>,
-}))
-vi.mock('../Challenges/ChallengesDashboard.tsx', () => ({
-  default: () => <p data-testid="page">Challenges page</p>,
-}))
+// Settings is replaced by a marker so this test checks routing, not page content.
 vi.mock('../Settings.tsx', () => ({
   default: () => <p data-testid="page">Settings page</p>,
 }))
@@ -55,20 +39,27 @@ function renderAt(path: string) {
   )
 }
 
-describe('App routes the old pages', () => {
-  it.each([
-    ['/dashboard', 'Dashboard page'],
-    ['/transactions', 'Transactions page'],
-    ['/targets', 'Targets page'],
-    ['/manage-subscriptions', 'Subscriptions page'],
-    ['/challenges', 'Challenges page'],
-    ['/settings', 'Settings page'],
-  ])('%s renders %s inside the shell', (path, text) => {
-    renderAt(path)
+describe('App routes Settings', () => {
+  it('/settings renders Settings inside the shell', () => {
+    renderAt('/settings')
     const page = screen.getByTestId('page')
-    expect(page.textContent).toBe(text)
+    expect(page.textContent).toBe('Settings page')
     expect(screen.getByRole('main').contains(page)).toBe(true)
     expect(screen.getByRole('navigation', { name: 'Primary' })).not.toBeNull()
+  })
+})
+
+// prd-02 Ruling 8: the w5 sweep deleted the old pages and their routes.
+describe('App no longer routes the old pages', () => {
+  it.each([
+    '/dashboard',
+    '/transactions',
+    '/targets',
+    '/manage-subscriptions',
+    '/challenges',
+  ])('%s renders no page', (path) => {
+    renderAt(path)
+    expect(screen.getByRole('main').textContent).toBe('')
   })
 })
 
