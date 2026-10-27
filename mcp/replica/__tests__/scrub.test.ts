@@ -10,6 +10,9 @@
 //     an allowlist edit;
 //   - the replica's tables or columns differ from the list written out here,
 //     which is the list the PR states for review.
+//   - (#132) formatted_account, authorisation_id, credentials_id,
+//     connection_id or error_message appears in the replica, as a column
+//     name or as a value.
 //
 // The live fixture is the real migrations run against a scratch file, by
 // path (mcp/ never imports server/, Ruling 6), then filled with sentinels.
@@ -425,4 +428,37 @@ describe('Xero tables (prd-05)', () => {
     const replicaTables = [...(await columnsOf(replicaPath)).keys()]
     expect(replicaTables.filter((name) => name.startsWith('xero_'))).toEqual([])
   })
+})
+
+// #132 (prd-03 Ruling 2, Done when 3): the bank-link ids and the sync error
+// text #19 added, named one by one. Each must be absent from the replica both
+// as a column name, in any table, and as a value, in any cell.
+describe('#132: bank-link ids, the full account number and sync error text never reach the replica', () => {
+  const NEVER = [
+    { column: 'formatted_account', value: FULL_ACCOUNT_NUMBER },
+    { column: 'authorisation_id', value: SENTINELS.authorisationId },
+    { column: 'credentials_id', value: SENTINELS.credentialsId },
+    { column: 'connection_id', value: SENTINELS.accountConnectionId },
+    { column: 'error_message', value: SENTINELS.syncError },
+  ]
+
+  it('the live fixture has each column, holding its value', async () => {
+    const liveColumns = await columnsOf(livePath)
+    const live = await readAll(livePath)
+    for (const { column, value } of NEVER) {
+      const tables = [...liveColumns].filter(([, columns]) => columns.includes(column)).map(([table]) => table)
+      expect(tables, column).not.toEqual([])
+      expect(cellsContaining(live, value), column).not.toEqual([])
+    }
+  })
+
+  for (const { column, value } of NEVER) {
+    it(`${column}: no replica table has the column, and no cell holds its value`, async () => {
+      await refresh()
+      const columns = await columnsOf(replicaPath)
+      const withColumn = [...columns].filter(([, names]) => names.includes(column)).map(([table]) => table)
+      expect(withColumn).toEqual([])
+      expect(cellsContaining(await readAll(replicaPath), value)).toEqual([])
+    })
+  }
 })
