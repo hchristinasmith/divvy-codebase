@@ -1,6 +1,7 @@
 import { queryOptions } from '@tanstack/react-query'
 import type { QueryClient } from '@tanstack/react-query'
 import { invalidateOverview, queryKeys } from './queryKeys.ts'
+import { call, request } from './http.ts'
 import type {
   BudgetResponse,
   BudgetsResponse,
@@ -17,37 +18,6 @@ import type {
 // Every write moves the remaining budget the Overview subtracts from
 // safe-to-spend, so the screen refetches the budgets and the overview after
 // each one (`invalidateBudgets`; prd-02 Done-when 3).
-
-const rootURL = new URL('/api/v1', document.baseURI)
-
-// A copy of `request` and `call` in ./bills.ts (themselves the messages of
-// `call` in ./overview.ts and `send` in ./settings.ts). DELETE answers 204
-// with no body, so `removeBudget` needs the checked response without
-// `.json()`.
-async function request(path: string, init?: RequestInit): Promise<Response> {
-  let response: Response
-  try {
-    response = await fetch(`${rootURL}${path}`, init)
-  } catch {
-    throw new Error('The server could not be reached')
-  }
-  if (!response.ok) {
-    let message: unknown
-    try {
-      message = ((await response.json()) as { error?: unknown }).error
-    } catch {
-      message = undefined
-    }
-    if (typeof message === 'string') throw new Error(message)
-    throw new Error(`Server error (${response.status})`)
-  }
-  return response
-}
-
-async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await request(path, init)
-  return (await response.json()) as T
-}
 
 function send<T>(method: 'POST' | 'PATCH', path: string, body: object): Promise<T> {
   return call(path, {

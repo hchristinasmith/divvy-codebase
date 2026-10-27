@@ -1,6 +1,7 @@
 import { queryOptions } from '@tanstack/react-query'
 import type { QueryClient } from '@tanstack/react-query'
 import { queryKeys } from './queryKeys.ts'
+import { call } from './http.ts'
 import type {
   AddGoalContributionRequest,
   AddGoalContributionResponse,
@@ -18,32 +19,6 @@ import type {
 // transfer (prd-02 Ruling 5): it never changes safe-to-spend, so nothing in
 // this module touches the Overview's query. Editing and deleting a goal are
 // routes the screen does not offer yet, so they are not here.
-
-const rootURL = new URL('/api/v1', document.baseURI)
-
-// A copy of `call` in ./subscriptions.ts (itself a copy of `call` in
-// ./overview.ts, the same messages as `send` in ./settings.ts): the server's
-// text when it sent one, its status when it did not, or that it could not be
-// reached.
-async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  let response: Response
-  try {
-    response = await fetch(`${rootURL}${path}`, init)
-  } catch {
-    throw new Error('The server could not be reached')
-  }
-  if (!response.ok) {
-    let message: unknown
-    try {
-      message = ((await response.json()) as { error?: unknown }).error
-    } catch {
-      message = undefined
-    }
-    if (typeof message === 'string') throw new Error(message)
-    throw new Error(`Server error (${response.status})`)
-  }
-  return (await response.json()) as T
-}
 
 // A copy of `send` in ./subscriptions.ts, POST only.
 function send<T>(path: string, body: object): Promise<T> {

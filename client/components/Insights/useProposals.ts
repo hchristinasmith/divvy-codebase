@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { invalidateOverview, queryKeys } from '../../apis/queryKeys.ts'
+import { call } from '../../apis/http.ts'
 // Type only: erased from the client bundle.
 import type { CategoryProposal } from '../../../server/agents/contracts.ts'
 
@@ -7,36 +8,13 @@ import type { CategoryProposal } from '../../../server/agents/contracts.ts'
 // (prd-04 Ruling 2, #62): the pending proposals, and the accept and reject
 // routes from #51. Only the user's tap here changes a category.
 //
-// Fetch lives in this file rather than client/apis/, which is not this
-// issue's to edit. `call` copies the one in client/apis/overview.ts: a
-// refused request rejects with the server's own `{ error }` text, its status
-// when it sent none, or that it could not be reached.
+// Fetch goes through `call` in client/apis/http.ts, as every API module's
+// does: a refused request rejects with the server's own `{ error }` text, its
+// status when it sent none, or that it could not be reached.
 //
-// The key lives here for the same reason; move it to client/apis/queryKeys.ts
-// when a second screen reads proposals.
+// The key lives here because client/apis/queryKeys.ts is not this issue's to
+// edit; move it there when a second screen reads proposals.
 const PENDING_PROPOSALS_KEY = ['proposals', 'pending'] as const
-
-const rootURL = new URL('/api/v1', document.baseURI)
-
-async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  let response: Response
-  try {
-    response = await fetch(`${rootURL}${path}`, init)
-  } catch {
-    throw new Error('The server could not be reached')
-  }
-  if (!response.ok) {
-    let message: unknown
-    try {
-      message = ((await response.json()) as { error?: unknown }).error
-    } catch {
-      message = undefined
-    }
-    if (typeof message === 'string') throw new Error(message)
-    throw new Error(`Server error (${response.status})`)
-  }
-  return (await response.json()) as T
-}
 
 /** GET /api/v1/agents/proposals, whose status defaults to pending. */
 interface ListProposalsResponse {

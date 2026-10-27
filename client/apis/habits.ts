@@ -1,6 +1,7 @@
 import { queryOptions } from '@tanstack/react-query'
 import type { QueryClient } from '@tanstack/react-query'
 import { queryKeys } from './queryKeys.ts'
+import { call } from './http.ts'
 import type {
   HabitsResponse,
   Scope,
@@ -17,32 +18,6 @@ import type {
 //
 // A verdict is a tag, not money: it never moves safe-to-spend, so nothing in
 // this module touches the Overview's query.
-
-const rootURL = new URL('/api/v1', document.baseURI)
-
-// A copy of `call` in ./goals.ts (itself a copy of `call` in
-// ./subscriptions.ts and ./overview.ts, the same messages as `send` in
-// ./settings.ts): the server's text when it sent one, its status when it did
-// not, or that it could not be reached.
-async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  let response: Response
-  try {
-    response = await fetch(`${rootURL}${path}`, init)
-  } catch {
-    throw new Error('The server could not be reached')
-  }
-  if (!response.ok) {
-    let message: unknown
-    try {
-      message = ((await response.json()) as { error?: unknown }).error
-    } catch {
-      message = undefined
-    }
-    if (typeof message === 'string') throw new Error(message)
-    throw new Error(`Server error (${response.status})`)
-  }
-  return (await response.json()) as T
-}
 
 export function grabHabits(scope: Scope): Promise<HabitsResponse> {
   return call(`/habits?scope=${encodeURIComponent(scope)}`)

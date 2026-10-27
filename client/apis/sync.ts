@@ -1,6 +1,7 @@
 import { queryOptions } from '@tanstack/react-query'
 import { queryKeys } from './queryKeys.ts'
 import { parseSyncStatus } from '../hooks/useSyncPill.ts'
+import { call } from './http.ts'
 // Type only: erased from the client bundle.
 import type { SyncRunStatus, SyncStatus } from '../../server/routes/sync.ts'
 
@@ -17,37 +18,6 @@ import type { SyncRunStatus, SyncStatus } from '../../server/routes/sync.ts'
 // for the same reason.
 
 const rootURL = new URL('/api/v1', document.baseURI)
-
-const UNREADABLE = 'The server sent a reply Divvy could not read'
-
-// A copy of `call` in ./overview.ts and ./subscriptions.ts (the same
-// messages as `send` in ./settings.ts): the server's text when it sent one,
-// its status when it did not, or that it could not be reached. A 200 that
-// is not JSON (a proxy's HTML page) rejects with a fixed message, so the
-// parser's SyntaxError, which quotes the body, never reaches the screen.
-async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  let response: Response
-  try {
-    response = await fetch(`${rootURL}${path}`, init)
-  } catch {
-    throw new Error('The server could not be reached')
-  }
-  if (!response.ok) {
-    let message: unknown
-    try {
-      message = ((await response.json()) as { error?: unknown }).error
-    } catch {
-      message = undefined
-    }
-    if (typeof message === 'string') throw new Error(message)
-    throw new Error(`Server error (${response.status})`)
-  }
-  try {
-    return (await response.json()) as T
-  } catch {
-    throw new Error(UNREADABLE)
-  }
-}
 
 // ---------------------------------------------------------------- status
 

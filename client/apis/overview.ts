@@ -1,5 +1,6 @@
 import { queryOptions } from '@tanstack/react-query'
 import { queryKeys } from './queryKeys.ts'
+import { call } from './http.ts'
 import type {
   DismissAlertResponse,
   OverviewResponse,
@@ -26,39 +27,6 @@ import type {
 // Built on `fetch` rather than superagent: every test that renders the
 // shell already stubs `fetch` for the sync pill, and the sidebar badge now
 // fires the overview read too, so those tests need nothing new.
-
-const rootURL = new URL('/api/v1', document.baseURI)
-
-const UNREADABLE = 'The server sent a reply Divvy could not read'
-
-// The same messages as `send` in ./settings.ts: the server's text when
-// it sent one, its status when it did not, or that it could not be reached.
-// Unlike `send`, a 200 that is not JSON (a proxy's HTML page) rejects with a
-// fixed message, so the parser's SyntaxError, which quotes the body, never
-// reaches the screen.
-async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  let response: Response
-  try {
-    response = await fetch(`${rootURL}${path}`, init)
-  } catch {
-    throw new Error('The server could not be reached')
-  }
-  if (!response.ok) {
-    let message: unknown
-    try {
-      message = ((await response.json()) as { error?: unknown }).error
-    } catch {
-      message = undefined
-    }
-    if (typeof message === 'string') throw new Error(message)
-    throw new Error(`Server error (${response.status})`)
-  }
-  try {
-    return (await response.json()) as T
-  } catch {
-    throw new Error(UNREADABLE)
-  }
-}
 
 export function grabOverview(scope: Scope): Promise<OverviewResponse> {
   return call(`/overview?scope=${encodeURIComponent(scope)}`)
