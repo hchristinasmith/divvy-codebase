@@ -92,7 +92,7 @@ describe('existing routes answer as before', () => {
   })
 })
 
-const EXISTING = ['accounts', 'categories', 'transactions', 'sync', 'xero', 'overview', 'settings', 'subscriptions', 'bills', 'agents', 'goals', 'budgets', 'spending', 'habits']
+const EXISTING = ['accounts', 'categories', 'transactions', 'sync', 'xero', 'overview', 'settings', 'subscriptions', 'bills', 'agents', 'goals', 'budgets', 'spending', 'habits', 'categorise']
 
 // Express 4 internals: a mounted router is a layer named 'router' whose
 // `regexp` matches its mount path. Express 5 renames these; rewrite this

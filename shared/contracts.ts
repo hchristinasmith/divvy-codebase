@@ -695,3 +695,37 @@ export interface SpendingByCategoryResponse {
    */
   uncategorisedCents: Cents
 }
+
+// ---------------------------------------------------------------------------
+// Categorise
+// ---------------------------------------------------------------------------
+
+/**
+ * One merchant's uncategorised settled transactions on the Sort screen
+ * (prd-02 Ruling 17). A merchant is its key (`m:<Akahu merchant id>`, else
+ * `d:<normalised description>`), across every account in the view's scope.
+ */
+export interface CategoriseGroupResponse {
+  merchantKey: string
+  /** The latest row's merchant name, else its description. */
+  name: string
+  count: number
+  /** Money out, as a positive amount. Money in never offsets it. */
+  totalCents: Cents
+  /** Money in, as a positive amount; 0 when there is none. */
+  receivedCents: Cents
+  /** Null when the latest row's date is not an instant. */
+  latestDate: IsoDate | null
+  /** The latest row's amount, signed: money out is negative. */
+  latestAmountCents: Cents
+}
+
+/** GET /api/v1/categorise/groups?scope= — largest total first. */
+export interface CategoriseGroupsResponse {
+  groups: CategoriseGroupResponse[]
+}
+
+/** POST /api/v1/categorise/groups/apply — how many rows it categorised. */
+export interface ApplyCategoryResponse {
+  changed: number
+}

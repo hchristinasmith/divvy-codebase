@@ -3,6 +3,7 @@ import express from 'express'
 import accounts from './accounts.ts'
 import bills from './bills.ts'
 import budgets from './budgets.ts'
+import categorise from './categorise.ts'
 import categories from './categories.ts'
 import goals from './goals.ts'
 import habits from './habits.ts'
@@ -37,6 +38,7 @@ router.use('/goals', goals)
 router.use('/habits', habits)
 router.use('/subscriptions', subscriptions)
 router.use('/spending', spending)
+router.use('/categorise', categorise)
 router.use('/agents', agents)
 
 export default router
