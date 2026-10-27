@@ -1,8 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router'
 import App from '../App.tsx'
+import { screens } from '../../screens/routes.tsx'
+import {
+  installFetch,
+  overviewByScope,
+} from '../../screens/Overview/__tests__/fixtures.ts'
 
 // The old pages stay routed until the prd-02 w5 sweep (prd-02 Ruling 8).
 // Each is replaced by a marker so this test checks routing, not page content.
@@ -97,5 +102,38 @@ describe('App routes the handoff screens', () => {
     expect(
       screen.queryByRole('button', { name: 'Toggle Dark Mode' }),
     ).toBeNull()
+  })
+})
+
+// The Spending screen (issue 272) is routed in App.tsx, not in the route
+// table, so it has no sidebar or tab bar entry; the handoff shows none.
+describe('App routes the Spending screen', () => {
+  it('/spending renders the Spending screen inside the shell', () => {
+    renderAt('/spending')
+    const headings = screen.getAllByRole('heading', { level: 1 })
+    expect(headings.map((h) => h.textContent)).toEqual(['Spending'])
+    expect(screen.getByRole('main').contains(headings[0])).toBe(true)
+  })
+
+  it('adds no sidebar or tab bar entry', () => {
+    renderAt('/spending')
+    for (const name of ['Primary', 'Tab bar']) {
+      const nav = screen.getByRole('navigation', { name })
+      expect(within(nav).getAllByRole('link').length, name).toBeGreaterThan(0)
+      expect(within(nav).queryByText(/spending/i), name).toBeNull()
+      expect(nav.querySelector('a[href="/spending"]'), name).toBeNull()
+    }
+    expect(screens.map((s) => s.path)).not.toContain('/spending')
+  })
+
+  it("the Overview's spending card links to it", async () => {
+    installFetch({ overview: overviewByScope() })
+    renderAt('/')
+    const card = await screen.findByTestId('spending-card')
+
+    fireEvent.click(within(card).getByRole('link', { name: 'Spending by category' }))
+
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Spending')
+    expect(screen.queryByTestId('spending-card')).toBeNull()
   })
 })

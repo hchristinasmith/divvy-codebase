@@ -13,8 +13,8 @@ import connection from './connection.ts'
 // itself is shared/drawings.ts; this module only loads its candidates and
 // writes nothing, ever. Every read path that shows a category or counts
 // spending calls `loadDrawingIds` once and lays the result over its rows:
-// the overview (safe-to-spend, budgets, activity), subscriptions, and the
-// two transaction lists.
+// the overview (safe-to-spend, budgets, activity), spending by category,
+// subscriptions, and every transaction list (account, search, Spending screen).
 //
 // Candidates are all-time, not a window, so neither the safe-to-spend
 // window's edge nor a list's limit can hide a partner: every Akahu row on a

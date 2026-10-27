@@ -228,6 +228,8 @@ export interface Handlers {
   categories?: Handler
   patch?: Handler
   spending?: Handler
+  /** GET /transactions, which the Spending screen (issue 272) reads. */
+  transactions?: Handler
 }
 
 export interface FetchCall {
@@ -272,6 +274,9 @@ export function installFetch(initial: Handlers = {}) {
     }
     if (call.method === 'GET' && path === '/api/v1/spending/categories') {
       return handlers.spending
+    }
+    if (call.method === 'GET' && path === '/api/v1/transactions') {
+      return handlers.transactions
     }
     return undefined
   }
