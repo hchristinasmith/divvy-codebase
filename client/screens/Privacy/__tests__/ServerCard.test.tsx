@@ -21,7 +21,7 @@ const LAST = '2026-10-25T02:41:00.000Z'
 const NEXT = '2026-10-25T02:56:00.000Z'
 
 // Intl puts a narrow no-break space before "am"/"pm"; compare with every
-// space flattened, as the Dashboard's LastSynced test does.
+// space flattened.
 const flat = (text: string | null | undefined) =>
   (text ?? '').replace(/\s/g, ' ')
 

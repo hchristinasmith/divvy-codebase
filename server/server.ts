@@ -25,8 +25,8 @@ server.use('/api', (req, res) => {
   res.status(404).json({ error: 'Not found' })
 })
 
-// Single-page-app fallback (#92). The client owns its routes (/targets,
-// /settings, ...), so a GET for a page that is not a static file gets
+// Single-page-app fallback (#92). The client owns its routes (/settings,
+// /sync, ...), so a GET for a page that is not a static file gets
 // index.html and react-router takes it from there; without this a refresh on
 // any route but / is a 404 in production. Requests that do not accept HTML
 // fall through to Express's 404. Without a client build (dev, tests) there is

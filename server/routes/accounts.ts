@@ -10,14 +10,14 @@ import { applyDrawings, loadDrawingIds } from '../db/drawings.ts'
 import { listAccounts, listTransactions } from '../db/synced.ts'
 import { errorClass } from '../error-class.ts'
 
-// /api/v1/accounts (prd-01, issue #32): the Dashboard's accounts and
-// transactions, read from what sync stored. These replace the live Akahu
-// proxy (prd-01 Ruling 7, Done-when 8): no request to this router reaches
-// Akahu or reads a credential.
+// /api/v1/accounts (prd-01, issue #32): the accounts and transactions, read
+// from what sync stored. These replace the live Akahu proxy (prd-01 Ruling 7,
+// Done-when 8): no request to this router reaches Akahu or reads a
+// credential.
 //
-// The responses keep Akahu's envelope, `{ success: true, items }`, so the
-// Dashboard reads them unchanged. Money is integer cents in the database and
-// becomes dollars only here, at the envelope edge (prd-01 Ruling 3), through
+// The responses keep Akahu's envelope, `{ success: true, items }`, and its
+// item shape. Money is integer cents in the database and becomes dollars
+// only here, at the envelope edge (prd-01 Ruling 3), through
 // `centsToDollars`, the single conversion point. It parses the number from
 // the whole dollars and the two-digit remainder, so the stored value is only
 // ever handled as an integer; for a safe integer this gives the same double
@@ -25,9 +25,9 @@ import { errorClass } from '../error-class.ts'
 // never sent as 0 or null.
 //
 // The category is the effective one with its source (Ruling 4), shaped like
-// Akahu's category object because the Dashboard reads
-// `category.groups.personal_finance.name`. The group is looked up from the
-// category's name in data/cats.js, never from Akahu's stored group
+// Akahu's category object, so `category.groups.personal_finance.name` reads
+// as it does from Akahu. The group is looked up from the category's name in
+// data/cats.js, never from Akahu's stored group
 // (docs/akahu-pending-semantics.md §4). A half of a drawing shows Drawings,
 // set by `rule`, unless Hannah categorised it by hand (prd-02 Ruling 15);
 // Drawings is not in data/cats.js, so it is sent with no groups.

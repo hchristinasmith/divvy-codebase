@@ -55,9 +55,10 @@ function toRole(value: string): AccountRole | null {
   return ACCOUNT_ROLES.find((role) => role === value) ?? null
 }
 
-// After a save, refetch what the Overview, Transactions and account lists
-// show. The last two keys are the legacy Dashboard's
-// (client/components/Dashboard/Dashboard.tsx); queryKeys has no entry for them.
+// After a save, refetch the Overview and every read under the settings
+// prefix: this screen's lists and the bill form's account picker. The last
+// two keys belonged to the pages #61 deleted, and nothing reads them now;
+// queryKeys has no entry for them.
 function refreshAfterSave(client: QueryClient): Promise<unknown> {
   return Promise.all([
     client.invalidateQueries({ queryKey: queryKeys.settings.all }),

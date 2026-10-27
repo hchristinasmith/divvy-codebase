@@ -6,10 +6,9 @@ import {
 import connection from './connection.ts'
 
 // Reads of the accounts and transactions sync mirrored from Akahu (prd-01,
-// issue #32), for the Dashboard's DB-backed routes in
-// `server/routes/accounts.ts`. Rows come back exactly as stored: money is
-// integer cents, and turning it into dollars is the route's job, at the
-// envelope edge (prd-01 Ruling 3).
+// issue #32), for the DB-backed routes in `server/routes/accounts.ts`. Rows
+// come back exactly as stored: money is integer cents, and turning it into
+// dollars is the route's job, at the envelope edge (prd-01 Ruling 3).
 //
 // Only `source = 'akahu'` rows: the routes answer in Akahu's envelope, and a
 // Xero row (Ruling 9) has no place in it.

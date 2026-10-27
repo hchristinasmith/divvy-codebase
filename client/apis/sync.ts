@@ -151,7 +151,7 @@ function parseAccounts(body: unknown): SyncAccount[] {
   return body.items.map(parseAccount)
 }
 
-// Its own key, not the legacy Dashboard's `['accounts']`, which caches the
+// Its own key, not `['accounts']`, which the deleted pages cached as the
 // whole envelope. Under the sync-status prefix, so the invalidation after
 // "Sync now" re-reads the accounts too.
 export const syncAccountsQuery = queryOptions({
