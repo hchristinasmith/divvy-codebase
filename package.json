@@ -70,10 +70,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
-    "@radix-ui/react-avatar": "^1.1.10",
-    "@radix-ui/react-slot": "^1.2.3",
     "@tailwindcss/vite": "^4.1.8",
-    "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dotenv": "^16.5.0",
     "express": "^4.17.2",
@@ -81,7 +78,6 @@
     "lucide-react": "^0.511.0",
     "sqlite3": "^5.1.6",
     "superagent": "^10.2.1",
-    "tailwind-merge": "^3.3.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
