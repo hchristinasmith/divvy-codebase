@@ -72,6 +72,12 @@ describe('nextOneLabel', () => {
       '$1,200.00 · 1 Nov',
     )
   })
+
+  it('shows no year, even for a bill due in another year', () => {
+    expect(nextOneLabel(bill({ amountCents: 120000, dueDate: '2027-01-05' }))).toBe(
+      '$1,200.00 · 5 Jan',
+    )
+  })
 })
 
 describe('rowTone', () => {

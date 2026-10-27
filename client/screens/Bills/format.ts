@@ -41,7 +41,8 @@ export function metaLine(bill: BillResponse): string {
 
 /** "2026-11-28" → day "28", month "Nov" for the date tile. */
 export function dateTileParts(iso: string): { day: string; month: string } {
-  const label = formatDay(iso)
+  // The bill's own date as `today`, so the label never carries a year.
+  const label = formatDay(iso, iso)
   const [day, month] = label.split(' ')
   if (label === iso || month === undefined) return { day: iso, month: '' }
   return { day, month }
@@ -50,7 +51,7 @@ export function dateTileParts(iso: string): { day: string; month: string } {
 /** The "Next one" tile: "$1,200.00 · 1 Nov", or "None". */
 export function nextOneLabel(bill: BillResponse | null): string {
   if (bill === null) return 'None'
-  return `${formatCents(bill.amountCents)} · ${formatDay(bill.dueDate)}`
+  return `${formatCents(bill.amountCents)} · ${formatDay(bill.dueDate, bill.dueDate)}`
 }
 
 export type RowTone = 'next' | 'later' | 'paid'
