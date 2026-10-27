@@ -6,6 +6,7 @@ import { LINK } from './styles.ts'
 // sidebar lists them all.
 const LINKS = [
   { to: '/bills', label: 'Bills' },
+  { to: '/sort', label: 'Sort' },
   { to: '/subscriptions', label: 'Subscriptions' },
   { to: '/sync', label: 'Sync' },
   { to: '/privacy', label: 'Privacy' },

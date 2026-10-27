@@ -31,7 +31,8 @@ export const sidebarItems: readonly NavEntry[] = [
 ]
 
 // Phone tab bar: only the screens that declare a tab, in tab order. Bills,
-// Sync and Privacy have none until #33 decides how a phone reaches them.
+// Subscriptions, Sort, Sync and Privacy have none; the phone reaches them
+// through the Overview's More links (prd-02 Ruling 14).
 export const tabItems: readonly NavEntry[] = screens
   .flatMap((s) => (s.tab ? [{ ...s, tab: s.tab }] : []))
   .sort((a, b) => a.tab.order - b.tab.order)
