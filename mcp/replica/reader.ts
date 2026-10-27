@@ -53,11 +53,20 @@ export class ReplicaRowLimitExceeded extends Error {
 // `pragma\w*` covers the table-valued `pragma_*` functions too.
 const REFUSED_WORDS = /\b(insert|update|delete|pragma\w*|attach|detach|create|drop|alter|vacuum|reindex|analyze|load_extension)\b|\breplace\s+into\b/i
 
-/** The statement with comments removed and every quoted string or identifier emptied. */
+/**
+ * The statement with comments removed and every string literal emptied. A
+ * quoted identifier keeps its text, unquoted, so the word check still sees
+ * it: SQLite resolves `"pragma_database_list"` or `` `pragma_table_info` ``
+ * to the same table-valued function as the bare name. A name that merely
+ * contains a refused word as a whole word is refused too; that is the safe
+ * direction.
+ */
 function withoutLiterals(sql: string): string {
-  return sql.replace(/'(?:[^']|'')*'|"(?:[^"]|"")*"|`(?:[^`]|``)*`|\[[^\]]*\]|--[^\n]*|\/\*[\s\S]*?(?:\*\/|$)/g, (match) =>
-    match.startsWith('--') || match.startsWith('/*') ? ' ' : `${match[0]}${match[0]}`,
-  )
+  return sql.replace(/'(?:[^']|'')*'|"(?:[^"]|"")*"|`(?:[^`]|``)*`|\[[^\]]*\]|--[^\n]*|\/\*[\s\S]*?(?:\*\/|$)/g, (match) => {
+    if (match.startsWith('--') || match.startsWith('/*')) return ' '
+    if (match.startsWith("'")) return "''"
+    return ` ${match.slice(1, -1)} `
+  })
 }
 
 /** Throws `ReplicaQueryRefused` unless `sql` is a single SELECT or WITH … SELECT. */

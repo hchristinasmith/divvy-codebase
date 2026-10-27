@@ -112,6 +112,11 @@ describe('only a single SELECT gets through', () => {
     staticSql`WITH x AS (SELECT 1) REPLACE INTO t VALUES (9, 'x', 'y')`,
     staticSql`PRAGMA table_info(t)`,
     staticSql`SELECT * FROM pragma_table_info('t')`,
+    // A quoted name is the same function to SQLite; the check must see through the quotes.
+    staticSql`SELECT * FROM "pragma_table_info"('t')`,
+    staticSql`SELECT * FROM \`pragma_database_list\``,
+    staticSql`SELECT * FROM [PRAGMA_TABLE_LIST]`,
+    staticSql`SELECT "load_extension"('x')`,
     staticSql`ATTACH DATABASE ':memory:' AS x`,
     staticSql`SELECT 1; ATTACH DATABASE ':memory:' AS x`,
     staticSql`DETACH DATABASE main`,

@@ -10,6 +10,15 @@
 // allowlist no longer matches) removes its scratch files and leaves the
 // previous replica as it was.
 //
+// The scratch copy is unscrubbed, so it is made owner-only (0600) as soon as
+// the backup finishes and switched out of WAL (a live file under Litestream is
+// in WAL mode, and the backup copies that header), so reading it leaves no
+// `-wal` or `-shm` beside the live file. A refresh process killed mid-run
+// (SIGKILL, OOM) cannot clean up, so each refresh first sweeps scratch and
+// temporary files left by a process that is no longer running, or by this
+// one outside a refresh in flight. The replica is renamed into place as 0640:
+// readable by its group (the MCP user's, set by the start script), not by all.
+//
 // Watch mode refreshes every `intervalMs` (five minutes) and, between those,
 // polls the live database every `pollMs` for a newer finished `sync_runs` row,
 // refreshing as soon as one appears. That is how "shortly after each sync" is
@@ -20,12 +29,12 @@
 // Runs as the web app's OS user, never inside the MCP process: the MCP entry
 // does not import this module (`__tests__/refresh.test.ts` pins that).
 
-import { rm, rename } from 'node:fs/promises'
+import { chmod, readdir, rm, rename } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import sqlite3 from 'sqlite3'
 import { systemClock } from '../contracts.ts'
 import type { Clock } from '../contracts.ts'
-import { all, buildReplica, close, openDatabase } from './scrub.ts'
+import { all, buildReplica, close, openDatabase, run } from './scrub.ts'
 import type { BuiltReplicaMeta } from './scrub.ts'
 
 /** Five minutes between refreshes (Ruling 2). */
@@ -58,6 +67,11 @@ interface BackupSource {
   backup(filename: string, callback: (error: Error | null) => void): SqliteBackup
 }
 
+/** The unscrubbed scratch copy: owner only. */
+export const COPY_MODE = 0o600
+/** The replica: the web app's user writes it, the MCP user's group reads it. */
+export const REPLICA_MODE = 0o640
+
 /** Copies the whole live database into `copyPath` with the backup API. */
 async function backupLive(livePath: string, copyPath: string): Promise<void> {
   const live = await openDatabase(livePath, sqlite3.OPEN_READONLY)
@@ -84,11 +98,68 @@ async function backupLive(livePath: string, copyPath: string): Promise<void> {
   }
 }
 
+/** Makes the copy owner-only and leaves it in rollback-journal mode, with no `-wal` or `-shm`. */
+async function sealCopy(copyPath: string): Promise<void> {
+  await chmod(copyPath, COPY_MODE)
+  const copy = await openDatabase(copyPath, sqlite3.OPEN_READWRITE)
+  try {
+    await run(copy, 'PRAGMA journal_mode = DELETE')
+  } finally {
+    await close(copy)
+  }
+}
+
 let sequence = 0
+/** Scratch and temporary paths of the refreshes this process has in flight. */
+const refreshesInFlight = new Set<string>()
+
+const SIDE_FILES = ['-journal', '-wal', '-shm'] as const
 
 async function removeFile(path: string): Promise<void> {
   await rm(path, { force: true })
-  await rm(`${path}-journal`, { force: true })
+  for (const suffix of SIDE_FILES) await rm(`${path}${suffix}`, { force: true })
+}
+
+const COPY_PREFIX = '.divvy-replica-copy-'
+const TAG = '(\\d+)-\\d+-\\d+'
+const SIDE = '(?:-journal|-wal|-shm)?'
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function processIsRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
+/**
+ * Removes files in `dir` matching `pattern` (whose first group is the pid
+ * that wrote them) unless a running process, or a refresh in flight here,
+ * owns them. Both patterns start with a dot and end in a refresh tag, so the
+ * live database, the replica and their side files can never match.
+ * Best-effort: litter is never a reason to skip a refresh.
+ */
+async function sweep(dir: string, pattern: RegExp): Promise<void> {
+  let names: string[]
+  try {
+    names = await readdir(dir)
+  } catch {
+    return
+  }
+  for (const name of names) {
+    const match = pattern.exec(name)
+    if (!match) continue
+    const path = join(dir, name)
+    const pid = Number(match[1])
+    const owned = pid === process.pid ? refreshesInFlight.has(path.replace(/-(?:journal|wal|shm)$/, '')) : processIsRunning(pid)
+    if (owned) continue
+    await rm(path, { force: true }).catch(() => undefined)
+  }
 }
 
 /** Builds a fresh replica and renames it over `replicaPath`. Rejects, leaving the old one, on any failure. */
@@ -96,21 +167,31 @@ export async function refreshReplica(options: RefreshOptions): Promise<BuiltRepl
   const clock = options.clock ?? systemClock
   sequence += 1
   const tag = `${process.pid}-${Date.now()}-${sequence}`
-  const copyPath = join(options.workDir ?? dirname(options.livePath), `.divvy-replica-copy-${tag}.sqlite3`)
-  const tmpPath = join(dirname(options.replicaPath), `.${basename(options.replicaPath)}.${tag}.tmp`)
+  const workDir = options.workDir ?? dirname(options.livePath)
+  const replicaDir = dirname(options.replicaPath)
+  const copyPath = join(workDir, `${COPY_PREFIX}${tag}.sqlite3`)
+  const tmpPath = join(replicaDir, `.${basename(options.replicaPath)}.${tag}.tmp`)
+  await sweep(workDir, new RegExp(`^${escapeRegExp(COPY_PREFIX)}${TAG}\\.sqlite3${SIDE}$`))
+  await sweep(replicaDir, new RegExp(`^\\.${escapeRegExp(basename(options.replicaPath))}\\.${TAG}\\.tmp${SIDE}$`))
+  refreshesInFlight.add(copyPath)
+  refreshesInFlight.add(tmpPath)
   let renamed = false
   try {
     // The copy holds the live state as of the moment the backup starts; the
     // replica claims no fresher data than that.
     const dataAsOf = clock.now().toISOString()
     await backupLive(options.livePath, copyPath)
+    await sealCopy(copyPath)
     const meta = await buildReplica({ sourcePath: copyPath, targetPath: tmpPath, dataAsOf, clock })
+    await chmod(tmpPath, REPLICA_MODE)
     await rename(tmpPath, options.replicaPath)
     renamed = true
     return meta
   } finally {
     await removeFile(copyPath)
     if (!renamed) await removeFile(tmpPath)
+    refreshesInFlight.delete(copyPath)
+    refreshesInFlight.delete(tmpPath)
   }
 }
 

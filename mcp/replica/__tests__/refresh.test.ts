@@ -16,7 +16,7 @@
 
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -100,6 +100,51 @@ describe('one refresh', () => {
     await refreshReplica({ livePath, replicaPath })
     expect(readdirSync(dir).sort()).toEqual(['live.sqlite3', 'replica'])
     expect(readdirSync(dirname(replicaPath))).toEqual(['divvy-ro.sqlite3'])
+  })
+
+  it('leaves no copy, -wal or -shm beside a live file in WAL mode, as Litestream runs it', async () => {
+    const writer = await openDatabase(livePath, sqlite3.OPEN_READWRITE)
+    try {
+      await run(writer, 'PRAGMA journal_mode = WAL')
+      await run(writer, 'PRAGMA wal_autocheckpoint = 0')
+      await run(writer, "UPDATE transactions SET description = 'from the wal'")
+      await refreshReplica({ livePath, replicaPath })
+      expect(readdirSync(dir).filter((name) => name.startsWith('.divvy-replica-copy-'))).toEqual([])
+      expect(readdirSync(dirname(replicaPath))).toEqual(['divvy-ro.sqlite3'])
+      const rows = await (await openReplica({ path: replicaPath })).select({ sql: staticSql`SELECT description FROM transactions`, maxRows: 1 })
+      expect(rows).toEqual([{ description: 'from the wal' }])
+    } finally {
+      await close(writer)
+    }
+  })
+
+  it('renames the replica into place readable by owner and group only (0640)', async () => {
+    await refreshReplica({ livePath, replicaPath })
+    expect(statSync(replicaPath).mode & 0o777).toBe(0o640)
+  })
+
+  it('sweeps scratch and temporary files a dead refresh left, and nothing else', async () => {
+    const dead = 2_000_000_000
+    expect(() => process.kill(dead, 0)).toThrow()
+    const replicaDir = dirname(replicaPath)
+    const stale = [
+      join(dir, `.divvy-replica-copy-${dead}-1-1.sqlite3`),
+      join(dir, `.divvy-replica-copy-${dead}-1-1.sqlite3-wal`),
+      join(dir, `.divvy-replica-copy-${process.pid}-1-99.sqlite3-shm`),
+      join(replicaDir, `.divvy-ro.sqlite3.${dead}-1-1.tmp`),
+      join(replicaDir, `.divvy-ro.sqlite3.${dead}-1-1.tmp-journal`),
+    ]
+    const kept = [
+      join(dir, 'divvy.sqlite3'),
+      join(dir, 'divvy.sqlite3-wal'),
+      join(dir, 'divvy.sqlite3-shm'),
+      join(dir, '.divvy-replica-copy-notes'),
+      join(replicaDir, 'divvy-ro.sqlite3.bak'),
+    ]
+    for (const file of [...stale, ...kept]) writeFileSync(file, 'x')
+    await refreshReplica({ livePath, replicaPath })
+    expect(stale.filter((file) => existsSync(file))).toEqual([])
+    expect(kept.filter((file) => !existsSync(file))).toEqual([])
   })
 
   it('writes the unscrubbed copy to workDir when given, and removes it', async () => {
