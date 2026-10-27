@@ -103,8 +103,8 @@ describe('parseProposedCategory accepts only the data/cats.js taxonomy', () => {
 describe('row and config types', () => {
   it('pins the status and origin lists', () => {
     expect([...PROPOSAL_STATUSES]).toEqual(['pending', 'accepted', 'rejected'])
-    // Ruling 7: origin `claude` returns only by a further amendment.
-    expect([...PROPOSAL_ORIGINS]).toEqual(['rule'])
+    // Ruling 9: the category agent's model fallback proposes with origin `claude`.
+    expect([...PROPOSAL_ORIGINS]).toEqual(['rule', 'claude'])
   })
 
   it('types a proposal and a config', () => {
