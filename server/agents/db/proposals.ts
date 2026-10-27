@@ -1,5 +1,7 @@
-// The category agent's inbox (prd-04 Rulings 2, 6 and 7; #31): writes and
-// reads `category_proposals`, and no other table.
+// The category agent's inbox (prd-04 Rulings 2, 6, 7 and 9; #31, #428):
+// writes and reads `category_proposals`, and no other table. A proposal's
+// origin is `rule` (learned from corrections, Ruling 7) or `claude` (the
+// model fallback for rows no rule covers, Ruling 9).
 //
 // A proposal is inserted once per (transaction, proposed category) and never
 // replaced or deleted here. A `rejected` row is what stops the pair being

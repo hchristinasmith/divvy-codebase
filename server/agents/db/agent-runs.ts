@@ -1,9 +1,15 @@
-// The agents' run log (prd-04 Rulings 2, 5 and 7; #31): writes and reads
-// `agent_runs`, and no other table.
+// The agents' run log (prd-04 Rulings 2, 5, 7 and 9; #31, #428): writes and
+// reads `agent_runs`, and no other table.
 //
-// A run log only (Ruling 7, no model calls): which agent ran, why, when, how
-// it ended and how many rows it considered and wrote. A failed run's reason
-// goes to the server log; there is no column for it.
+// Which agent ran, why, when, how it ended and how many rows it considered
+// and wrote. A failed run's reason goes to the server log; there is no column
+// for it. Under Ruling 9 a category run that called the model also carries
+// its usage (model, input and output tokens, cost in millionths of a US
+// dollar), given to `finishRun`; a run with no model call keeps every usage
+// column null. `blocked` is a run the kill switch or the daily token budget
+// stopped; it carries the usage of any calls made before the stop. Only
+// `success` counts as processed below, so a sync run whose run was blocked
+// is picked up again.
 //
 // Ruling 5's polling stands on `sync_run_id` and `cursor`. A run triggered
 // by a sync names that `sync_runs` row, and `processedSyncRunIds` is the set
@@ -28,6 +34,7 @@ import type {
 } from '../contracts.ts'
 import connection from '../../db/connection.ts'
 import { scrubbed } from './scrubbed.ts'
+import { notBlank } from './text-checks.ts'
 
 export interface StartRun {
   kind: AgentKind
@@ -59,6 +66,10 @@ export async function startRun(
     written_count: 0,
     sync_run_id: syncRunId,
     cursor: null,
+    model: null,
+    input_tokens: null,
+    output_tokens: null,
+    cost_micro_usd: null,
   }
   const [stored]: AgentRun[] = await scrubbed(
     'startRun',
@@ -73,6 +84,14 @@ export interface FinishRun {
   writtenCount: number
   // Left as it was when absent.
   cursor?: string | null
+  // The model call's usage (Ruling 9). Absent leaves the usage columns null.
+  // `costMicroUsd` is millionths of a US dollar; not Divvy money.
+  usage?: {
+    model: string
+    inputTokens: number
+    outputTokens: number
+    costMicroUsd: number
+  }
 }
 
 function count(value: unknown, field: string): number {
@@ -93,8 +112,12 @@ export async function finishRun(
   now: Date = new Date(),
   db = connection,
 ): Promise<boolean> {
-  if (finish.outcome !== 'success' && finish.outcome !== 'failed') {
-    throw new Error('outcome must be success or failed')
+  if (
+    finish.outcome !== 'success' &&
+    finish.outcome !== 'failed' &&
+    finish.outcome !== 'blocked'
+  ) {
+    throw new Error('outcome must be success, failed or blocked')
   }
   const changes: Partial<AgentRun> = {
     outcome: finish.outcome,
@@ -103,6 +126,14 @@ export async function finishRun(
     written_count: count(finish.writtenCount, 'writtenCount'),
   }
   if (finish.cursor !== undefined) changes.cursor = finish.cursor
+  if (finish.usage !== undefined) {
+    const { usage } = finish
+    notBlank(usage.model, 'usage.model')
+    changes.model = usage.model
+    changes.input_tokens = count(usage.inputTokens, 'usage.inputTokens')
+    changes.output_tokens = count(usage.outputTokens, 'usage.outputTokens')
+    changes.cost_micro_usd = count(usage.costMicroUsd, 'usage.costMicroUsd')
+  }
   const updated = await scrubbed(
     'finishRun',
     db('agent_runs')

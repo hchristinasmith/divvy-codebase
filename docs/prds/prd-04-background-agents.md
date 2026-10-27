@@ -83,6 +83,12 @@ Items 1–6 and 8 are tests (the code does what is written). **Two criteria that
 - Cost: void; $0 by construction.
 - Quality: stands at 8 of 10. Rules propose less, so the review runs once 10 real proposals exist.
 
+*Dated notes, 2026-10-28 (Ruling 9):*
+- 3: back for the category agent. A rejection still suppresses its pair for good, and is passed back as an example in the model's prompt.
+- 4: back for the category agent. Its model request carries only Ruling 4's fields. Insights stay void under Ruling 7.
+- 6: back for the category agent. The kill switch stops every model call, and a run stops at the daily token budget. Insights stay void under Ruling 7.
+- Cost: back for the category agent, measured from `agent_runs` usage. Insights stay $0 under Ruling 7.
+
 ## Rulings
 
 ## Ruling 1 — Agents run on the server and call the Claude API; they never touch the MCP
@@ -118,6 +124,14 @@ Extends to: origin `claude` and any model call come back only by a further amend
 
 Ruling 3 stands. Merchant names and descriptions still flow into chart labels and body text, so the spec is validated on write and on render, and the markdown renders without HTML.
 
+## Ruling 9 — The category agent falls back to Haiku; insights stay deterministic (operator amendment, 2026-10-28; amends Ruling 7)
+
+Hannah has Claude API credits and ruled that the category agent may use them. Rules from Ruling 7 run first. Rows that no rule covers go to `claude-haiku-5-5` in batches, through one client with a kill switch, a daily token budget and per-call usage logging (Rulings 1 and 4 apply again to this path). Proposals from the model carry origin `claude`. The insights agent stays on Ruling 7: no model.
+
+Why: rules alone leave every merchant Hannah has never corrected without a proposal, and that is most of them. Haiku is the cheap model, and the brakes keep spending small.
+
+Extends to: insights or in-app chat calling a model need a further amendment.
+
 ## Sequencing
 
 Waves are **layers**: issues in a wave are fenced apart and built in parallel; one PR per wave.
@@ -126,6 +140,7 @@ Waves are **layers**: issues in a wave are fenced apart and built in parallel; o
 - Create an Anthropic API key with a monthly spend limit set in the console, and add it as a Fly secret.
 - Confirm the two model ids (`claude-haiku-5-5`, `claude-sonnet-5-5`) are available to your key.
 - Pick the 10 real transactions' worth of review time for the quality check.
+- API key with a monthly spend limit: #427
 
 **Wave 1 — the keystone (contracts, additive):**
 - `prd04 w1: proposals, insights and the agent usage log exist as tables` — migrations, schema-reviewed; creates `server/agents/db/**`.

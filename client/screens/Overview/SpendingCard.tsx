@@ -6,8 +6,8 @@ import type {
   Scope,
   SpendingByCategoryResponse,
 } from '../../../shared/contracts.ts'
+import { SpendingBar, SpendingSwatch, linesOf } from './SpendingBar.tsx'
 import {
-  BAR_TRACK,
   CARD,
   CARD_TITLE,
   ERROR,
@@ -29,62 +29,14 @@ import {
 // this too. A scope switch shows the loading line until that scope's
 // figures arrive, never the previous scope's.
 //
+// The bar and its colours are ./SpendingBar.tsx, shared with the Spending
+// screen.
+//
 // The whole card links to the Spending screen (issue 272): the heading's link is
 // stretched over it, and the card shows the focus outline while that link
 // has focus (not while Try again does).
 
 const SPENDING_PATH = '/spending'
-
-// By rank, then the tail. Theme colours only, and none of ok, warn or
-// danger: a category is not good or bad. Uncategorised is ink, the one
-// near-neutral dark in the theme, so it reads apart from every pink rank,
-// from Other's mauve, and from the canvas track behind the bar.
-const RANK_COLOURS = [
-  'bg-deep',
-  'bg-pink',
-  'bg-rose',
-  'bg-blush-hover',
-  'bg-ink-faint',
-]
-const OTHER_COLOUR = 'bg-ink-muted'
-const UNCATEGORISED_COLOUR = 'bg-ink'
-
-interface Line {
-  key: string
-  kind: 'category' | 'other' | 'uncategorised'
-  label: string
-  cents: number
-  colour: string
-}
-
-function linesOf(data: SpendingByCategoryResponse): Line[] {
-  const lines: Line[] = data.categories.map((line, rank) => ({
-    key: `category:${line.category}`,
-    kind: 'category',
-    label: line.category,
-    cents: line.spentCents,
-    colour: RANK_COLOURS[rank % RANK_COLOURS.length],
-  }))
-  if (data.otherCents > 0) {
-    lines.push({
-      key: 'other',
-      kind: 'other',
-      label: 'Other',
-      cents: data.otherCents,
-      colour: OTHER_COLOUR,
-    })
-  }
-  if (data.uncategorisedCents > 0) {
-    lines.push({
-      key: 'uncategorised',
-      kind: 'uncategorised',
-      label: 'Uncategorised',
-      cents: data.uncategorisedCents,
-      colour: UNCATEGORISED_COLOUR,
-    })
-  }
-  return lines
-}
 
 export default function SpendingCard({ scope }: { scope: Scope }) {
   const spending = useQuery(spendingByCategoryQuery(scope))
@@ -145,23 +97,7 @@ function SpendingBody({ data }: { data: SpendingByCategoryResponse }) {
           {formatCents(data.totalCents)}
         </span>
       </div>
-      {/* Each segment's width is its line's share of the bar: `flexGrow`
-          takes the cents as they are. That is presentation, not money
-          arithmetic; the list below carries the figures. */}
-      <div
-        aria-hidden="true"
-        data-testid="spending-bar"
-        className={`${BAR_TRACK} flex gap-1 bg-canvas`}
-      >
-        {lines.map((line) => (
-          <span
-            key={line.key}
-            data-spending-segment={line.kind}
-            className={`min-w-0 basis-0 ${line.colour}`}
-            style={{ flexGrow: line.cents }}
-          />
-        ))}
-      </div>
+      <SpendingBar lines={lines} />
       <ul
         aria-label="Top spending categories"
         className="m-0 flex list-none flex-col gap-2 p-0"
@@ -172,10 +108,7 @@ function SpendingBody({ data }: { data: SpendingByCategoryResponse }) {
             data-spending-line={line.kind}
             className="flex items-center gap-2.5"
           >
-            <span
-              aria-hidden="true"
-              className={`size-2.5 shrink-0 rounded-pill ${line.colour}`}
-            />
+            <SpendingSwatch line={line} />
             <span className="min-w-0 flex-1 truncate text-body-14 text-ink">
               {line.label}
             </span>

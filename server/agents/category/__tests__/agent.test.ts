@@ -116,6 +116,10 @@ const RUN_KEYS = [
   'sync_run_id',
   'trigger',
   'written_count',
+  'model',
+  'input_tokens',
+  'output_tokens',
+  'cost_micro_usd',
 ]
 const RESULT_KEYS = ['considered', 'cursor', 'outcome', 'runId', 'skipped', 'written']
 
