@@ -377,6 +377,43 @@ describe('a category’s transactions', () => {
     expect(fx.callsTo('GET', TRANSACTIONS)).toHaveLength(1)
   })
 
+  it('stays closed on going back to the month it was opened in', async () => {
+    setup()
+    await total()
+    fireEvent.click(categoryButton('Groceries Invented'))
+    await screen.findByRole('list', { name: 'Groceries Invented transactions' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Previous month' }))
+    await total()
+    fireEvent.click(screen.getByRole('button', { name: 'Next month' }))
+    await total()
+
+    expect(screen.getByTestId('spending-month').textContent).toBe('October 2026')
+    expect(categoryButton('Groceries Invented').getAttribute('aria-expanded')).toBe(
+      'false',
+    )
+  })
+
+  it('never shows one month’s list under another while it loads', async () => {
+    const { fx } = setup()
+    await total()
+    fireEvent.click(categoryButton('Groceries Invented'))
+    await screen.findByRole('list', { name: 'Groceries Invented transactions' })
+    fireEvent.click(categoryButton('Groceries Invented'))
+
+    // No reply: September's list never arrives.
+    fx.handlers.transactions = () => undefined
+    fireEvent.click(screen.getByRole('button', { name: 'Previous month' }))
+    await waitFor(() => expect(lastParams(fx, SPENDING)).toContainEqual(['month', '2026-09']))
+    await total()
+    fireEvent.click(categoryButton('Groceries Invented'))
+
+    expect(screen.getByText('Loading transactions…')).not.toBeNull()
+    expect(
+      screen.queryByRole('list', { name: 'Groceries Invented transactions' }),
+    ).toBeNull()
+  })
+
   it('closes the list when the scope changes', async () => {
     const { fx } = setup()
     await total()

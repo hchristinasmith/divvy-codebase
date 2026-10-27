@@ -64,6 +64,9 @@ export default function Spending() {
     open !== null && open.scope === scope && open.month === month
       ? open.category
       : null
+  // Forgotten on a switch, so going back to that month or scope does not
+  // reopen it.
+  if (open !== null && openCategory === null) setOpen(null)
 
   function toggle(category: string) {
     setOpen(
