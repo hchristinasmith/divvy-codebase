@@ -66,6 +66,14 @@ async function syncRun(startedAt: string = AT): Promise<number> {
   return id
 }
 
+const usage = (fields: Partial<NonNullable<FinishRun['usage']>> = {}): NonNullable<FinishRun['usage']> => ({
+  model: 'claude-haiku-5-5',
+  inputTokens: 1200,
+  outputTokens: 80,
+  costMicroUsd: 1600,
+  ...fields,
+})
+
 const done = (fields: Partial<FinishRun> = {}): FinishRun => ({
   outcome: 'success',
   consideredCount: 12,
@@ -200,6 +208,36 @@ describe('finishRun', () => {
     })
   })
 
+  it('records a blocked run with its usage (Ruling 9)', async () => {
+    const run = await startRun({ kind: 'category', trigger: 'manual' }, NOW)
+
+    expect(
+      await finishRun(run.id, done({ outcome: 'blocked', writtenCount: 0, usage: usage() }), LATER),
+    ).toBe(true)
+
+    const [stored]: AgentRun[] = await connection('agent_runs')
+    expect(Object.keys(stored).sort()).toEqual(RUN_KEYS)
+    expect(stored).toStrictEqual({
+      ...run,
+      finished_at: LATER.toISOString(),
+      outcome: 'blocked',
+      considered_count: 12,
+      written_count: 0,
+      model: 'claude-haiku-5-5',
+      input_tokens: 1200,
+      output_tokens: 80,
+      cost_micro_usd: 1600,
+    })
+  })
+
+  it('leaves every usage column null on a run finished without usage', async () => {
+    const run = await startRun({ kind: 'category', trigger: 'manual' }, NOW)
+    await finishRun(run.id, done(), LATER)
+    expect(
+      await connection('agent_runs').first('model', 'input_tokens', 'output_tokens', 'cost_micro_usd'),
+    ).toStrictEqual({ model: null, input_tokens: null, output_tokens: null, cost_micro_usd: null })
+  })
+
   it('clears the cursor when given null', async () => {
     const run = await startRun({ kind: 'category', trigger: 'manual' }, NOW)
     await connection('agent_runs').where({ id: run.id }).update({ cursor: 'txn:7' })
@@ -208,11 +246,16 @@ describe('finishRun', () => {
   })
 
   const BAD: [name: string, fields: Partial<FinishRun>, message: RegExp][] = [
-    ['outcome running', { outcome: 'running' as unknown as FinishRun['outcome'] }, /^outcome must be success or failed$/],
+    ['outcome running', { outcome: 'running' as unknown as FinishRun['outcome'] }, /^outcome must be success, failed or blocked$/],
     ['consideredCount -1', { consideredCount: -1 }, /^consideredCount must be a non-negative integer$/],
     ['consideredCount 1.5', { consideredCount: 1.5 }, /^consideredCount must be a non-negative integer$/],
     ['writtenCount NaN', { writtenCount: NaN }, /^writtenCount must be a non-negative integer$/],
     ['writtenCount "2"', { writtenCount: '2' as unknown as number }, /^writtenCount must be a non-negative integer$/],
+    ['usage.inputTokens -1', { usage: usage({ inputTokens: -1 }) }, /^usage\.inputTokens must be a non-negative integer$/],
+    ['usage.outputTokens 2.5', { usage: usage({ outputTokens: 2.5 }) }, /^usage\.outputTokens must be a non-negative integer$/],
+    ['usage.costMicroUsd -3', { usage: usage({ costMicroUsd: -3 }) }, /^usage\.costMicroUsd must be a non-negative integer$/],
+    ['usage.costMicroUsd 0.5', { usage: usage({ costMicroUsd: 0.5 }) }, /^usage\.costMicroUsd must be a non-negative integer$/],
+    ['usage.model blank', { usage: usage({ model: '  ' }) }, /^usage\.model must not be blank$/],
   ]
 
   it.each(BAD)('throws on %s and leaves the run running', async (_, fields, message) => {
@@ -247,10 +290,12 @@ describe('processedSyncRunIds (Ruling 5)', () => {
     const second = await syncRun(LATER.toISOString())
     const third = await syncRun(LATEST.toISOString())
 
-    // Running, failed, another kind, and a run with no sync run: none count.
+    // Running, failed, blocked, another kind, and a run with no sync run: none count.
     await startRun({ kind: 'category', trigger: 'sync', syncRunId: third }, NOW)
     const failed = await startRun({ kind: 'category', trigger: 'sync', syncRunId: second }, NOW)
     await finishRun(failed.id, done({ outcome: 'failed' }), LATER)
+    const blocked = await startRun({ kind: 'category', trigger: 'sync', syncRunId: second }, NOW)
+    await finishRun(blocked.id, done({ outcome: 'blocked' }), LATER)
     const other = await startRun({ kind: 'insights', trigger: 'sync', syncRunId: third }, NOW)
     await finishRun(other.id, done(), LATER)
     const manual = await startRun({ kind: 'category', trigger: 'manual' }, NOW)

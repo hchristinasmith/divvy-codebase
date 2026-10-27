@@ -1,20 +1,25 @@
-// The background agents' contract (prd-04 Ruling 2, Ruling 6, Ruling 7).
-// Every later prd-04 issue builds against this file. The inbox columns
-// below change only by amending prd-04.
+// The background agents' contract (prd-04 Ruling 2, Ruling 6, Ruling 7,
+// Ruling 9). Every later prd-04 issue builds against this file. The inbox
+// columns below change only by amending prd-04.
 //
-// Ruling 7: neither agent calls a model. The category agent proposes only
-// from rules learned from `category_corrections`; the insights agent is
-// fixed queries and a template (its row and chart spec are
-// models/insights.ts). Origin `claude`, a model's view of a transaction and
-// a token-usage log come back only by a further amendment, and nothing is
-// built for them until then.
+// Ruling 9 amends Ruling 7 for the category agent only. Rules learned from
+// `category_corrections` run first (origin `rule`); rows that no rule covers
+// go to the model in batches, and what it proposes carries origin `claude`.
+// Every model call goes through one client with a kill switch and a daily
+// token budget, and a run that called the model logs its model, tokens and
+// cost on its `agent_runs` row. A run the kill switch or the budget stopped
+// ends `blocked`, and still logs the usage of any calls it made first.
+//
+// The insights agent stays on Ruling 7: no model. It is fixed queries and a
+// template (its row and chart spec are models/insights.ts), and its runs
+// carry no usage.
 //
 // The category agent writes only this inbox (Ruling 2):
 //
 //   category_proposals  id, transaction_id, current_category,
 //                       proposed_category, confidence, reason,
-//                       origin (rule), status (pending | accepted | rejected),
-//                       created_at
+//                       origin (rule | claude),
+//                       status (pending | accepted | rejected), created_at
 //
 // A proposal names a category from data/cats.js exactly, or is discarded
 // (Ruling 6).
@@ -22,7 +27,7 @@
 import type { IsoTimestamp } from '../../models/sync.ts'
 import { isKnownCategory } from '../db/categories.ts'
 
-// ---- category_proposals (Ruling 2, Ruling 7) ----
+// ---- category_proposals (Ruling 2, Ruling 7, Ruling 9) ----
 
 export const PROPOSAL_ORIGINS = ['rule', 'claude'] as const
 export type ProposalOrigin = (typeof PROPOSAL_ORIGINS)[number]
@@ -45,7 +50,7 @@ export interface CategoryProposal {
   created_at: IsoTimestamp
 }
 
-// ---- agent_runs (prd-04 Rulings 2, 5 and 7; #31) ----
+// ---- agent_runs (prd-04 Rulings 2, 5, 7 and 9; #31, #428) ----
 
 export const AGENT_KINDS = ['category', 'insights'] as const
 export type AgentKind = (typeof AGENT_KINDS)[number]
@@ -87,7 +92,7 @@ export function parseProposedCategory(value: unknown): string | null {
   return typeof value === 'string' && isKnownCategory(value) ? value : null
 }
 
-// ---- Configuration (Ruling 7) ----
+// ---- Configuration (Ruling 7, Ruling 9) ----
 
 // Resolved values only; reading them from the environment belongs to the
 // agent runner.
@@ -98,4 +103,12 @@ export interface AgentConfig {
   ruleThreshold: number
   // False stops both agents.
   enabled: boolean
+  // Read by the category agent's model path only (Ruling 9). Optional so a
+  // rules-only config still type-checks; their defaults belong to the runner.
+  // Tokens the model path may spend in a day, input and output together.
+  dailyTokenBudget?: number
+  // The model id the category agent calls.
+  categoryModel?: string
+  // True stops every model call; the rules still run.
+  killSwitch?: boolean
 }
