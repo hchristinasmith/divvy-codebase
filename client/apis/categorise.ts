@@ -1,6 +1,7 @@
 import { queryOptions } from '@tanstack/react-query'
 import type { QueryClient } from '@tanstack/react-query'
 import { invalidateOverview, queryKeys } from './queryKeys.ts'
+import { call } from './http.ts'
 import type {
   ApplyCategoryResponse,
   CategoriseGroupsResponse,
@@ -12,33 +13,6 @@ import type {
 // request rejects with an Error whose message is the server's own
 // `{ error }` text, so the screen can show it as it is. Every figure is the
 // server's; nothing here does money arithmetic.
-
-const rootURL = new URL('/api/v1', document.baseURI)
-
-// A copy of `call` in ./goals.ts, ./overview.ts and ./subscriptions.ts
-// (itself the same messages as `send` in ./settings.ts); ./sync.ts has one
-// more that also refuses a 200 that is not JSON. Change all together (#249
-// tracks lifting it): the server's text when it sent one, its status when
-// it did not, or that it could not be reached.
-async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  let response: Response
-  try {
-    response = await fetch(`${rootURL}${path}`, init)
-  } catch {
-    throw new Error('The server could not be reached')
-  }
-  if (!response.ok) {
-    let message: unknown
-    try {
-      message = ((await response.json()) as { error?: unknown }).error
-    } catch {
-      message = undefined
-    }
-    if (typeof message === 'string') throw new Error(message)
-    throw new Error(`Server error (${response.status})`)
-  }
-  return (await response.json()) as T
-}
 
 /**
  * POST /api/v1/categorise/groups/apply's body, in its wire names. The
