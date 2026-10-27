@@ -72,7 +72,7 @@ describe('App routes the old pages', () => {
   })
 })
 
-describe('App routes the handoff screens', () => {
+describe('App routes the shell screens', () => {
   it('/ is the Overview now, not the old Dashboard', () => {
     renderAt('/')
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(

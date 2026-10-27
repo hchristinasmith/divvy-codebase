@@ -21,11 +21,18 @@ import {
 
 const MONTH = '2026-10'
 
+// Every row gets its own id, and by default one account, so no two default
+// rows can pair as a transfer.
+let nextId = 0
 function tx(fields: Partial<SpendingTransaction> = {}): SpendingTransaction {
+  nextId += 1
   return {
+    id: String(nextId),
+    accountId: 'acc_everyday_invented',
     scope: 'personal',
     date: '2026-10-14',
     amountCents: -1000,
+    status: 'settled',
     category: 'Groceries Invented',
     ...fields,
   }
@@ -155,6 +162,90 @@ describe('spendingByCategory', () => {
 
     expect(r.categories.map((l) => l.category)).toEqual(['Groceries Invented'])
     expect(r.totalCents).toBe(1200)
+  })
+
+  it('leaves out a $500 move between her own accounts, not the payment beside it', () => {
+    const r = run([
+      // Spending to Rapid Save, both personal, a day apart.
+      tx({
+        accountId: 'acc_spending_invented',
+        date: '2026-10-12',
+        amountCents: -50000,
+        category: 'Transfers Invented',
+      }),
+      tx({
+        accountId: 'acc_rapid_invented',
+        date: '2026-10-13',
+        amountCents: 50000,
+      }),
+      // A payment out that matches no money in.
+      tx({ accountId: 'acc_spending_invented', amountCents: -1200 }),
+    ])
+
+    // Only the 1200: the 50000 out and the 50000 in are both left out.
+    expect(r.totalCents).toBe(1200)
+    expect(r.categories).toStrictEqual([
+      { category: 'Groceries Invented', spentCents: 1200 },
+    ])
+  })
+
+  it('leaves out a move whose legs straddle the month end', () => {
+    const r = run([
+      // Out on the last day of October, in on the first of November.
+      tx({
+        accountId: 'acc_spending_invented',
+        date: '2026-10-31',
+        amountCents: -50000,
+        category: 'Transfers Invented',
+      }),
+      tx({
+        accountId: 'acc_rapid_invented',
+        date: '2026-11-01',
+        amountCents: 50000,
+      }),
+    ])
+
+    expect(r.totalCents).toBe(0)
+    expect(r.categories).toStrictEqual([])
+  })
+
+  it('leaves a Personal → Strawb payment out of All, and counts it in Personal', () => {
+    const rows = [
+      tx({
+        accountId: 'acc_spending_invented',
+        date: '2026-10-12',
+        amountCents: -50000,
+      }),
+      tx({
+        accountId: 'acc_trading_invented',
+        scope: 'strawb',
+        date: '2026-10-13',
+        amountCents: 50000,
+      }),
+    ]
+
+    // All holds both legs, so they pair: 0. Personal holds only the out
+    // leg, which has no partner there: 50000 of spending.
+    expect(run(rows, { scope: 'all' }).totalCents).toBe(0)
+    expect(run(rows, { scope: 'personal' }).totalCents).toBe(50000)
+  })
+
+  it('pairs only rows within two days of the month, so an older row cannot take a leg’s partner', () => {
+    const r = run([
+      // Each early row is listed first, so it has the lower id and would
+      // win the tie on a two-day gap if it were paired at all.
+      // 28 Sep is three days before the month; its partner would be 30 Sep.
+      tx({ accountId: 'acc_c_invented', date: '2026-09-28', amountCents: -50000 }),
+      tx({ accountId: 'acc_b_invented', date: '2026-09-30', amountCents: 50000 }),
+      tx({ accountId: 'acc_a_invented', date: '2026-10-02', amountCents: -50000 }),
+      // 3 Nov is three days after the month; its partner would be 1 Nov.
+      tx({ accountId: 'acc_c_invented', date: '2026-11-03', amountCents: -30000 }),
+      tx({ accountId: 'acc_b_invented', date: '2026-11-01', amountCents: 30000 }),
+      tx({ accountId: 'acc_a_invented', date: '2026-10-30', amountCents: -30000 }),
+    ])
+
+    // 2 Oct pairs with 30 Sep and 30 Oct with 1 Nov; nothing is left: 0.
+    expect(r.totalCents).toBe(0)
   })
 
   it('ignores money in, which never offsets an outflow', () => {

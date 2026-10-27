@@ -924,7 +924,7 @@ describe('loading, empty and error states', () => {
 })
 
 describe('the More row on the phone (Ruling 14)', () => {
-  it('links Bills, Subscriptions, Sync and Privacy, hidden at desktop width', async () => {
+  it('links Bills, Sort, Subscriptions, Sync and Privacy, hidden at desktop width', async () => {
     setup('all')
     await hero()
     const more = screen.getByRole('navigation', { name: 'More' })
@@ -936,6 +936,7 @@ describe('the More row on the phone (Ruling 14)', () => {
         .map((a) => [a.textContent, a.getAttribute('href')]),
     ).toEqual([
       ['Bills', '/bills'],
+      ['Sort', '/sort'],
       ['Subscriptions', '/subscriptions'],
       ['Sync', '/sync'],
       ['Privacy', '/privacy'],

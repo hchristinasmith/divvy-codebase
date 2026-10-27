@@ -9,7 +9,11 @@ import type {
   TransactionStatus,
 } from '../../models/sync.ts'
 import type { RowScope, Scope } from '../../shared/contracts.ts'
-import { countsAsSpending } from '../../shared/spending.ts'
+import {
+  countsAsSpending,
+  transferLegIdsInView,
+  type SpendingTransaction,
+} from '../../shared/spending.ts'
 import { nzCalendarDate } from '../../shared/nz-dates.ts'
 import connection from './connection.ts'
 import { applyDrawings, loadDrawingIds } from './drawings.ts'
@@ -59,7 +63,11 @@ export interface SpendingTransactionsQuery {
  * outflows, settled and pending, on stored Akahu accounts in the scope
  * (`all` is both); whose NZ calendar date falls in the month; whose
  * effective category, drawings laid over (prd-02 Ruling 15), is the one
- * asked; and that `countsAsSpending` keeps. Newest first (`date`
+ * asked; that `countsAsSpending` keeps; and that is not a leg of an
+ * own-account transfer. Own-account transfers are left out with the same
+ * rule as the aggregate (#431): both legs of a pair, found by
+ * `transferLegIdsInView` over every in-scope row, money in included, so the
+ * legs are the ones the category's bar does not count. Newest first (`date`
  * descending, then `id` descending). Reads only.
  *
  * The aggregate refuses a row with no date or no amount; this list cannot
@@ -77,33 +85,57 @@ export async function listSpendingTransactions(
   }
   if (accountScopes.size === 0) return []
 
+  // Both signs: a transfer's inflow leg is what pairs its outflow leg.
   const rows: TransactionRow[] = await db('transactions')
     .select([...TRANSACTION_ROW_COLUMNS])
     .where({ source: 'akahu' })
-    .where('amount_cents', '<', 0)
     .whereIn('account_id', [...accountScopes.keys()])
     .orderBy([
       { column: 'date', order: 'desc' },
       { column: 'id', order: 'desc' },
     ])
 
-  return applyDrawings(rows, await loadDrawingIds(db)).filter((row) => {
+  const placed: { row: TransactionRow; tx: SpendingTransaction }[] = []
+  for (const row of applyDrawings(rows, await loadDrawingIds(db))) {
     const scope =
       row.account_id === null ? undefined : accountScopes.get(row.account_id)
-    if (scope === undefined || row.date === null || row.amount_cents === null)
-      return false
+    if (
+      scope === undefined ||
+      row.account_id === null ||
+      row.date === null ||
+      row.amount_cents === null
+    )
+      continue
     const at = new Date(row.date)
-    if (Number.isNaN(at.getTime())) return false
-    const date = nzCalendarDate(at)
-    if (date.slice(0, 7) !== query.month) return false
-    if (row.category !== query.category) return false
-    return countsAsSpending({
-      scope,
-      date,
-      amountCents: row.amount_cents,
-      category: row.category,
+    if (Number.isNaN(at.getTime())) continue
+    placed.push({
+      row,
+      tx: {
+        id: String(row.id),
+        accountId: row.account_id,
+        scope,
+        date: nzCalendarDate(at),
+        amountCents: row.amount_cents,
+        status: row.status,
+        category: row.category,
+      },
     })
-  })
+  }
+
+  const transferLegIds = transferLegIdsInView(
+    placed.map((p) => p.tx),
+    query.scope,
+    query.month,
+  )
+  return placed
+    .filter(({ row, tx }) => {
+      if (tx.amountCents >= 0) return false
+      if (tx.date.slice(0, 7) !== query.month) return false
+      if (row.category !== query.category) return false
+      if (!countsAsSpending(tx)) return false
+      return !transferLegIds.has(tx.id)
+    })
+    .map(({ row }) => row)
 }
 
 /**
