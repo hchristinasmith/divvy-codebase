@@ -1,14 +1,14 @@
 import express from 'express'
 
 import type { Account } from '../../models/sync.ts'
-import type { CategorySource } from '../../models/transactions.ts'
+import type {
+  CategorySource,
+  TransactionRow,
+} from '../../models/transactions.ts'
 import { getCategoryGroups } from '../db/categories.ts'
 import { applyDrawings, loadDrawingIds } from '../db/drawings.ts'
-import {
-  listAccounts,
-  listTransactions,
-  type SyncedTransaction,
-} from '../db/synced.ts'
+import { listAccounts, listTransactions } from '../db/synced.ts'
+import { errorClass } from '../error-class.ts'
 
 // /api/v1/accounts (prd-01, issue #32): the Dashboard's accounts and
 // transactions, read from what sync stored. These replace the live Akahu
@@ -210,7 +210,7 @@ function categoryFor(name: string): TransactionCategory {
     : { name, groups: { personal_finance: { name: group } } }
 }
 
-function toTransactionItem(row: SyncedTransaction): TransactionItem {
+function toTransactionItem(row: TransactionRow): TransactionItem {
   const pending = row.status === 'pending'
   let id: string
   if (pending) {
@@ -295,10 +295,6 @@ function parseAccountIds(raw: unknown): string[] | undefined | 'invalid' {
     .map((id) => id.trim())
     .filter((id) => id !== '')
   return ids.length === 0 ? 'invalid' : ids
-}
-
-function errorClass(err: unknown): string {
-  return err instanceof Error ? err.constructor.name : typeof err
 }
 
 const router = express.Router()

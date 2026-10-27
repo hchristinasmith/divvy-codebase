@@ -20,10 +20,13 @@ import { assertInMemory, closeDb } from '../../test-utils/app.ts'
 // What counts as a write, for every module:
 //   1. importing a writer: anything under server/sync/, server/xero/,
 //      server/routes/, server/db/seeds/ or server/db/migrations/; a
-//      server/db/** module that itself contains a write (found by running
-//      rule 2 over server/db/, recursively); a database driver; knex as a
-//      value; or a module in `BANNED_MODULES` (a module loader, the network,
-//      another process or thread, the file system);
+//      server/db/** module that contains a write, or imports or re-exports,
+//      transitively, a server/db/** module that does (rule 2 is run over
+//      every module in server/db/ and its subdirectories, then each one's
+//      server/db imports are followed; imports from outside server/db/ are
+//      not); a database driver; knex as a value; or a module in
+//      `BANNED_MODULES` (a module loader, the network, another process or
+//      thread, the file system);
 //   2. a knex write (`insert`, `update`, `del`, ...) whose chain does not
 //      start at a call naming an inbox table as a literal, or that starts at
 //      the knex instance itself (`trx.insert(row).into(...)`). A name is
@@ -299,19 +302,22 @@ function namedOnly(clause: ts.ImportClause): string[] | null {
   return bindings.elements.map((e) => (e.propertyName ?? e.name).text)
 }
 
-// Repo-relative paths of the writer modules a module imports or re-exports.
-function writerImports(path: string, text: string, ctx: Context): string[] {
+// What a module's import and export-from declarations resolve to, `export *`
+// included; a bare specifier is left as written.
+function importTargets(path: string, text: string): string[] {
   const found: string[] = []
   for (const statement of parse(path, text).statements) {
     if (ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement)) {
       const specifier = literalText(statement.moduleSpecifier)
-      if (specifier !== undefined && ctx.writers.has(resolve(path, specifier))) {
-        found.push(resolve(path, specifier))
-      }
+      if (specifier !== undefined) found.push(resolve(path, specifier))
     }
   }
   return found
 }
+
+// Repo-relative paths of the writer modules a module imports or re-exports.
+const writerImports = (path: string, text: string, writers: ReadonlySet<string>): string[] =>
+  importTargets(path, text).filter((target) => writers.has(target))
 
 function importProblems(path: string, source: ts.SourceFile, ctx: Context): string[] {
   const found: string[] = []
@@ -471,6 +477,29 @@ function treeProblems(files: SourceFile[], ctx: Context): Record<string, string[
 const agentModules = (): SourceFile[] =>
   modulesUnder(AGENTS).map((path) => ({ path, text: read(path) }))
 
+const dbModules = (): SourceFile[] =>
+  modulesUnder('server/db/').map((path) => ({ path, text: read(path) }))
+
+// `Context.writers` from a set of server/db modules (#336): a module that
+// `containsWrite`, then, to a fixed point, any module in the set that imports
+// or re-exports one already found. Only targets in the set are followed, so
+// an import from outside server/db/ is left to the directory rule and the
+// agent-side rules. Each pass only adds, so an import cycle ends.
+function writersAmong(files: SourceFile[]): Set<string> {
+  const writers = new Set(files.filter(({ path, text }) => containsWrite(path, text)).map((f) => f.path))
+  const targets = new Map(files.map(({ path, text }) => [path, importTargets(path, text)]))
+  for (let grew = true; grew; ) {
+    grew = false
+    for (const [path, imports] of targets) {
+      if (!writers.has(path) && imports.some((target) => writers.has(target))) {
+        writers.add(path)
+        grew = true
+      }
+    }
+  }
+  return writers
+}
+
 let ctx: Context
 
 beforeAll(async () => {
@@ -479,11 +508,8 @@ beforeAll(async () => {
   const tables: string[] = await connection('sqlite_master')
     .where({ type: 'table' })
     .pluck('name')
-  const writers = modulesUnder('server/db/').filter((path) =>
-    containsWrite(path, read(path)),
-  )
   ctx = {
-    writers: new Set(writers),
+    writers: writersAmong(dbModules()),
     others: tables.filter((t) => !INBOX.includes(t) && !/^(knex_|sqlite_)/.test(t)),
   }
 })
@@ -557,7 +583,7 @@ describe('the real tree', () => {
 
   it('the exemption is used, by the accept route alone', () => {
     const importers = agentModules()
-      .filter(({ path, text }) => writerImports(path, text, ctx).length > 0)
+      .filter(({ path, text }) => writerImports(path, text, ctx.writers).length > 0)
       .map((f) => f.path)
     expect(importers).toEqual([EXEMPTION.file])
   })
@@ -859,5 +885,87 @@ describe('planted violations', () => {
     ['a comment about writes', "// db('transactions').update({}) and db.raw()"],
   ])('%s passes', (_why, text) => {
     expect(problemsFor(RULES, text, ctx)).toEqual([])
+  })
+})
+
+// Rule 1's server/db writer set follows imports (#336): a server/db module
+// that holds no write of its own but imports or re-exports one that does, at
+// any depth, is a writer, so an agent importing it is flagged. #301's
+// reviewer reached server/db/overview.ts this way, through
+// server/db/drawings.ts. The fixtures are invented texts beside the real
+// server/db modules; no real module is edited.
+describe('a server/db module that reaches a writer through its server/db imports is a writer', () => {
+  const RULES = 'server/agents/category/rules.ts'
+  const WRITER: SourceFile = {
+    path: 'server/db/invented_writer.ts',
+    text: "import db from './connection.ts'\nexport const w = () => db('transactions').where({ id: 1 }).update({})",
+  }
+  const READER = 'server/db/invented_reader.ts'
+  const MIDDLE = 'server/db/invented_middle.ts'
+  const READS = "\nexport const r = () => db('transactions').where({ id: 1 }).first()"
+  const AGENT_IMPORT = "import { r } from '../../db/invented_reader.ts'"
+
+  // The control: without it, a writer set that came back empty would pass
+  // the rows that expect no writer, and one that took every module would
+  // pass the rest.
+  it('the invented writer is a writer, and importing it is flagged', () => {
+    const fixture: Context = { ...ctx, writers: writersAmong([...dbModules(), WRITER]) }
+    expect(fixture.writers.has(WRITER.path)).toBe(true)
+    expect(problemsFor(RULES, "import { w } from '../../db/invented_writer.ts'", fixture)).toEqual([
+      `imports writer ${WRITER.path}`,
+    ])
+  })
+
+  it.each([
+    [
+      'imports the invented writer',
+      "import db from './connection.ts'\nimport { w } from './invented_writer.ts'" + READS + '\nexport const go = () => w()',
+    ],
+    ['re-exports the invented writer', "export { w } from './invented_writer.ts'"],
+    ['re-exports all of the invented writer', "export * from './invented_writer.ts'"],
+    [
+      'imports overview.ts',
+      "import db from './connection.ts'\nimport { dismissAlert } from './overview.ts'" +
+        READS +
+        '\nexport const go = () => dismissAlert()',
+    ],
+  ])('a reader that %s is a writer, and an agent importing it is flagged', (_why, text) => {
+    const reader: SourceFile = { path: READER, text }
+    const fixture: Context = { ...ctx, writers: writersAmong([...dbModules(), WRITER, reader]) }
+    expect(fixture.writers.has(READER)).toBe(true)
+    expect(problemsFor(RULES, AGENT_IMPORT, fixture)).toEqual([`imports writer ${READER}`])
+  })
+
+  // The reader is listed before the module it imports, so one pass in file
+  // order finds the middle module and misses the reader: only a fixed point
+  // reaches it.
+  it('a reader two hops from the writer is a writer, and an agent importing it is flagged', () => {
+    const reader: SourceFile = {
+      path: READER,
+      text: "import db from './connection.ts'\nimport { m } from './invented_middle.ts'" + READS + '\nexport const go = () => m()',
+    }
+    const middle: SourceFile = {
+      path: MIDDLE,
+      text: "import { w } from './invented_writer.ts'\nexport const m = () => w()",
+    }
+    const fixture: Context = { ...ctx, writers: writersAmong([...dbModules(), reader, middle, WRITER]) }
+    expect(fixture.writers.has(MIDDLE)).toBe(true)
+    expect(fixture.writers.has(READER)).toBe(true)
+    expect(problemsFor(RULES, AGENT_IMPORT, fixture)).toEqual([`imports writer ${READER}`])
+  })
+
+  it('readers that import each other, and no writer, end the scan and stay readers', () => {
+    const reader: SourceFile = {
+      path: READER,
+      text: "import db from './connection.ts'\nimport { m } from './invented_middle.ts'" + READS + '\nexport const go = () => m()',
+    }
+    const middle: SourceFile = {
+      path: MIDDLE,
+      text: "import { r } from './invented_reader.ts'\nexport const m = () => r()",
+    }
+    const fixture: Context = { ...ctx, writers: writersAmong([...dbModules(), reader, middle]) }
+    expect(fixture.writers.has(READER)).toBe(false)
+    expect(fixture.writers.has(MIDDLE)).toBe(false)
+    expect(problemsFor(RULES, AGENT_IMPORT, fixture)).toEqual([])
   })
 })

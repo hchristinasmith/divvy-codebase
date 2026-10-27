@@ -1,7 +1,8 @@
 # Litestream: replicate the SQLite database off the Fly volume, continuously
 # (D2; prd-01 Done-when 6; #24). scripts/start.sh runs
-# `litestream replicate -config /app/litestream.yml -exec "npm start"` when
-# this file is in the image, so the app runs as Litestream's child.
+# `litestream replicate -config /app/litestream.yml -exec ...` when this file
+# is in the image. The -exec command runs the migrations, then
+# `node dist/server.js`, so the app runs as Litestream's child.
 #
 # Litestream expands environment variables over this whole file, comments
 # included, before it parses the YAML. So no comment here may contain a

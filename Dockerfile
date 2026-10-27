@@ -4,11 +4,20 @@
 # policy limits which peers get in. Built for Fly.io; see fly.toml and
 # docs/deploy.md.
 
+# ---- base image: node:22-bookworm-slim, pinned by its index digest ----
+# Every stage's FROM names the image by its multi-arch index digest, with the
+# tag kept beside it as the readable version. The digest is what the build
+# uses: a floating tag would move Node's bundled ICU, which the Unicode
+# property checks (\p{DI}) depend on. To bump, read the new index digest from
+# Docker Hub, then change every FROM line to it in one commit:
+#   TOKEN=$(curl -fsS "https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/node:pull" | jq -r .token)
+#   curl -fsSI -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.oci.image.index.v1+json" -H "Accept: application/vnd.docker.distribution.manifest.list.v2+json" https://registry-1.docker.io/v2/library/node/manifests/22-bookworm-slim | grep -i '^docker-content-digest'
+
 # ---- tools: fetch Tailscale and Litestream, pinned by version and sha256 ----
 # amd64 only, matching Fly's shared-cpu-1x. Changing architecture means
 # changing both URLs and both sums. To bump a tool, change its two ARGs
 # (docs/deploy.md, "Bumping Tailscale or Litestream").
-FROM node:22-bookworm-slim AS tools
+FROM node:22-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d AS tools
 WORKDIR /tools
 
 RUN apt-get update \
@@ -37,7 +46,7 @@ RUN curl -fsSL -o litestream.deb \
   && cp litestream-deb/usr/bin/litestream ./litestream
 
 # ---- build: install everything, build client + server, drop dev deps ----
-FROM node:22-bookworm-slim AS build
+FROM node:22-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d AS build
 WORKDIR /app
 
 # sqlite3 is a native module. It normally installs a prebuilt binary; these
@@ -52,8 +61,8 @@ RUN npm ci
 COPY . .
 RUN npm run build && npm prune --omit=dev
 
-# ---- runtime: only what start.sh and `npm start` need ----
-FROM node:22-bookworm-slim
+# ---- runtime: only what start.sh needs to migrate and serve ----
+FROM node:22-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d
 WORKDIR /app
 
 ENV NODE_ENV=production \
@@ -71,12 +80,13 @@ COPY --from=tools /tools/tailscale /tools/tailscaled /tools/litestream /usr/loca
 COPY --from=build /app/package.json /app/package-lock.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
-# `npm start` runs `knex migrate:latest` against this knexfile before the
-# server starts, so the migrations ship as source.
+# start.sh runs `npm run migrate:latest` (knex against this knexfile) before
+# the server starts, so the migrations ship as source (#255).
 COPY --from=build /app/server/db/knexfile.js ./server/db/knexfile.js
 COPY --from=build /app/server/db/migrations ./server/db/migrations
 
-# The boot path: join the tailnet, publish the app there, then `npm start`.
+# The boot path: join the tailnet, publish the app there, then migrate and
+# start the server.
 # chmod as well as git's exec bit, so any builder gets a runnable script.
 COPY --from=build /app/scripts/start.sh ./scripts/start.sh
 RUN chmod 755 /app/scripts/start.sh

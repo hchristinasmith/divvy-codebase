@@ -3,7 +3,7 @@ import { Link } from 'react-router'
 import { dismissOverviewAlert } from '../../apis/overview.ts'
 import { invalidateOverview } from '../../apis/queryKeys.ts'
 import { formatCents } from '../../../shared/money.ts'
-import type { Alert } from '../../../shared/contracts.ts'
+import type { Alert, IsoDate } from '../../../shared/contracts.ts'
 import { formatDay } from './format.ts'
 import { CARD, CARD_TITLE, ERROR, FOCUS, LINK, MUTED } from './styles.ts'
 
@@ -19,9 +19,9 @@ const DOTS: Record<Alert['kind'], string> = {
   bill_overdue: 'bg-warn',
 }
 
-function alertText(alert: Alert): string {
+function alertText(alert: Alert, today: IsoDate): string {
   const amount = formatCents(alert.amountCents)
-  const due = alert.dueDate === null ? '' : formatDay(alert.dueDate)
+  const due = alert.dueDate === null ? '' : formatDay(alert.dueDate, today)
   switch (alert.kind) {
     case 'over_budget':
       return `${alert.subject} is ${amount} over budget.`
@@ -38,7 +38,13 @@ function alertAction(alert: Alert): { label: string; to: string } {
     : { label: 'View bills', to: '/bills' }
 }
 
-export default function AlertsCard({ alerts }: { alerts: Alert[] }) {
+export default function AlertsCard({
+  alerts,
+  today,
+}: {
+  alerts: Alert[]
+  today: IsoDate
+}) {
   const client = useQueryClient()
   const dismiss = useMutation({
     mutationFn: dismissOverviewAlert,
@@ -69,7 +75,7 @@ export default function AlertsCard({ alerts }: { alerts: Alert[] }) {
       ) : (
         <ul className="m-0 flex list-none flex-col p-0">
           {alerts.map((alert) => {
-            const text = alertText(alert)
+            const text = alertText(alert, today)
             const action = alertAction(alert)
             const busy = dismiss.isPending && dismiss.variables === alert.id
             return (

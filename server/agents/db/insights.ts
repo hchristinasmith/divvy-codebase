@@ -13,7 +13,10 @@
 // ignored, and a read row has no `mermaid` key.
 //
 // A refused input throws an error naming the field, never its value, and a
-// refused write throws SQLite's words without the row (`scrubbed`, in
+// title, body_md or period past its length cap is a refused input, and so is
+// a title, body_md or period with nothing visible in it: control characters
+// count as invisible too (`notBlank` and `atMostLength`, in ./text-checks.ts).
+// A refused write throws SQLite's words without the row (`scrubbed`, in
 // ./scrubbed.ts).
 import {
   INSIGHT_KINDS,
@@ -26,9 +29,16 @@ import {
 } from '../../../models/insights.ts'
 import connection from '../../db/connection.ts'
 import { scrubbed } from './scrubbed.ts'
+import { atMostLength, notBlank } from './text-checks.ts'
 
 // A Record so that TypeScript refuses this file if `InsightScope` changes.
 const SCOPES: Record<InsightScope, true> = { personal: true, strawb: true }
+
+// Length caps, counted in code points, not UTF-16 units: a non-BMP character
+// is one code point and two units.
+const TITLE_MAX_LENGTH = 200
+const PERIOD_MAX_LENGTH = 32
+const BODY_MD_MAX_LENGTH = 20_000
 
 export interface NewInsight {
   kind: InsightKind
@@ -46,12 +56,6 @@ export type InsertInsightResult =
 
 type InsightRow = Omit<Insight, 'mermaid'>
 
-function notBlank(value: unknown, field: string): void {
-  if (typeof value !== 'string' || value.trim() === '') {
-    throw new Error(`${field} must not be blank`)
-  }
-}
-
 /**
  * Stores an insight. A chart spec the validator refuses returns its reason
  * and path and writes nothing.
@@ -68,8 +72,11 @@ export async function insertInsight(
     throw new Error('scope must be personal or strawb')
   }
   notBlank(insight.title, 'title')
+  atMostLength(insight.title, 'title', TITLE_MAX_LENGTH)
   notBlank(insight.body_md, 'body_md')
+  atMostLength(insight.body_md, 'body_md', BODY_MD_MAX_LENGTH)
   notBlank(insight.period, 'period')
+  atMostLength(insight.period, 'period', PERIOD_MAX_LENGTH)
 
   let chartSpecJson: string | null = null
   if (insight.chart_spec !== null && insight.chart_spec !== undefined) {

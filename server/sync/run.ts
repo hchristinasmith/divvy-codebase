@@ -3,6 +3,7 @@ import connection from '../db/connection.ts'
 import type { SyncRun } from '../../models/sync.ts'
 import { AkahuError } from './akahu-client.ts'
 import type { AkahuClient } from './akahu-client.ts'
+import { rankByStartedAt } from './ranked-runs.ts'
 import { replacePending, upsertAccounts, upsertSettled } from './upsert.ts'
 
 // One Akahu sync run (prd-01, issue #21): claim the run, fetch, then write
@@ -125,18 +126,11 @@ async function claim(
             error_message: ABANDONED_MESSAGE,
           })
       }
-      // Only a start in the exact `toISOString()` form is ranked; anything
-      // else is skipped (#169). As text, 'not-a-timestamp' sorts after every
-      // ISO time; and julianday() alone reads strings Date.parse does not,
-      // such as 'now', so windowFor would get a start it cannot use.
-      const lastSuccess: Pick<SyncRun, 'started_at'> | undefined = await trx(
-        'sync_runs',
-      )
-        .where({ outcome: 'success' })
-        .whereRaw("strftime('%Y-%m-%dT%H:%M:%fZ', started_at) = started_at")
-        .orderByRaw('julianday(started_at) DESC')
-        .orderBy('id', 'desc')
-        .first('started_at')
+      // The latest success with a start windowFor can read (#169).
+      const lastSuccess: Pick<SyncRun, 'started_at'> | undefined =
+        await rankByStartedAt(
+          trx('sync_runs').where({ outcome: 'success' }),
+        ).first('started_at')
       const [runId] = await trx('sync_runs').insert({
         started_at: startedIso,
         outcome: 'running',

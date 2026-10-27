@@ -28,6 +28,7 @@
 // foreign key with no guard fails it. Each guard also pins every child's
 // `createdBy`, so a child cannot be seeded later than its table exists.
 import { readdirSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import * as Path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import knex, { Knex } from 'knex'
@@ -307,6 +308,19 @@ function nothingRunsAfter(file: string): boolean {
 function canaryFile(parent: string): string {
   return `99999999999999_canary_rebuild_${parent}.js`
 }
+
+// The canary loads each real migration with node's own loader, as knex's
+// directory source does, and not with a dynamic `import()` written here.
+// vitest sends an `import()` in a test file through its module runner, which
+// transforms the file on vitest's main thread, and under parallel full runs
+// that thread is busy with every other test file. The first canary to load
+// the migrations then waited on it once per file and ran past its timeout
+// (#242), while the guard beside it, doing the same SQLite work through
+// knex's loader, did not. Node keeps one copy of each module, so the canary
+// runs the very modules knex has already loaded. A migration with top-level
+// await cannot be required: every canary then fails with
+// ERR_REQUIRE_ASYNC_MODULE while the guards beside them pass.
+const loadNatively = createRequire(import.meta.url)
 function withRebuild(parent: string): Knex.MigrationSource<{ file: string }> {
   const rebuild: Knex.Migration = {
     up: async (knex) => {
@@ -326,7 +340,7 @@ function withRebuild(parent: string): Knex.MigrationSource<{ file: string }> {
     getMigrationName: (migration) => migration.file,
     async getMigration(migration) {
       if (migration.file === canaryFile(parent)) return rebuild
-      return (await import(Path.join(MIGRATIONS, migration.file))) as Knex.Migration
+      return loadNatively(Path.join(MIGRATIONS, migration.file)) as Knex.Migration
     },
   }
 }

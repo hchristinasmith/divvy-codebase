@@ -1,4 +1,8 @@
-import type { Transaction } from '../../models/transactions.ts'
+import {
+  TRANSACTION_ROW_COLUMNS,
+  type Transaction,
+  type TransactionRow,
+} from '../../models/transactions.ts'
 import type {
   CategoryCorrection,
   CorrectionSource,
@@ -6,21 +10,32 @@ import type {
 } from '../../models/sync.ts'
 import connection from './connection.ts'
 
-export async function getTxns(db = connection): Promise<Transaction[]> {
-  return db('transactions').select().orderBy('created_at')
+// The pattern for a LIKE that finds `term` anywhere (#299). `%` and `_` in the
+// term are escaped so they match themselves, and so is `\`, the escape
+// character `searchTxns` declares. One replace pass, so the backslashes it adds
+// are never escaped again.
+function containsPattern(term: string): string {
+  return `%${term.replace(/[\\%_]/g, (c) => `\\${c}`)}%`
 }
 
+// Akahu rows only (prd-02 Ruling 4): a Xero row has no place in these answers.
 export async function searchTxns(
   description?: string,
   db = connection,
-): Promise<Transaction[]> {
+): Promise<TransactionRow[]> {
   let query = db('transactions')
+    .select([...TRANSACTION_ROW_COLUMNS])
+    .where({ source: 'akahu' })
 
   if (description) {
-    query = query.where('description', 'like', `%${description}%`)
+    // The pattern is a bound parameter; the ESCAPE clause names the character
+    // containsPattern escapes with.
+    query = query.whereRaw("description like ? escape '\\'", [
+      containsPattern(description),
+    ])
   }
 
-  return query.select()
+  return query
 }
 
 /**
@@ -64,16 +79,16 @@ export async function getTransactionCategory(
  * caller may pass its own transaction as `db`; the work then runs in a
  * savepoint inside it.
  *
- * Returns the updated row; `'pending'` when the row exists but is not
- * settled, in which case nothing is written; or undefined when no
- * transaction has that id.
+ * Returns the updated row, with the columns of TransactionRow and nothing
+ * else; `'pending'` when the row exists but is not settled, in which case
+ * nothing is written; or undefined when no transaction has that id.
  */
 export async function setUserCategory(
   id: number,
   category: string,
   db = connection,
   source: Extract<CorrectionSource, 'user' | 'rule'> = 'user',
-): Promise<Transaction | 'pending' | undefined> {
+): Promise<TransactionRow | 'pending' | undefined> {
   return db.transaction(async (trx) => {
     const before: Pick<Transaction, 'category'> | undefined = await trx(
       'transactions',
@@ -96,6 +111,9 @@ export async function setUserCategory(
     }
     await trx('category_corrections').insert(correction)
 
-    return trx('transactions').where({ id }).first()
+    const row: TransactionRow | undefined = await trx('transactions')
+      .where({ id })
+      .first([...TRANSACTION_ROW_COLUMNS])
+    return row
   })
 }

@@ -1,5 +1,5 @@
 import { formatCents } from '../../../shared/money.ts'
-import type { SubscriptionRow } from '../../../shared/contracts.ts'
+import type { IsoDate, SubscriptionRow } from '../../../shared/contracts.ts'
 import SideChip from './SideChip.tsx'
 import { cadenceLabel, cycleLabel, formatDay, plural } from './format.ts'
 import { FOCUS, PILL_BUTTON, SECONDARY_BUTTON } from './styles.ts'
@@ -13,26 +13,44 @@ import type { SubscriptionActions } from './useSubscriptionActions.ts'
 // bank. A cancelled row is dimmed and struck through, and its button undoes
 // the cancel. A charge after the cancel date makes the row active again,
 // and a warning line says when it landed.
+//
+// A possibly-stopped row (issue 392) carries a chip beside the side chip
+// and stays under Active with its Cancel button. The route leaves it out of
+// the totals, so its meta line does not say what it counts as a month.
 
-function metaLine(row: SubscriptionRow): string {
+function metaLine(row: SubscriptionRow, today: IsoDate): string {
   const parts = [
     cadenceLabel(row.cadence),
-    `Last charged ${formatDay(row.lastChargedOn)}`,
+    `Last charged ${formatDay(row.lastChargedOn, today)}`,
     plural(row.chargeCount, 'charge'),
     row.marked ? 'You marked it' : 'Found automatically',
   ]
   // A weekly or yearly charge, as the route counts it in the monthly total.
   if (
     row.status === 'active' &&
+    !row.possiblyStopped &&
     row.cadence !== 'monthly' &&
     row.perMonthCents !== null
   ) {
     parts.push(`counts as ${formatCents(row.perMonthCents)} a month`)
   }
   if (row.status === 'cancelled' && row.cancelledOn !== null) {
-    parts.push(`Cancelled ${formatDay(row.cancelledOn)}`)
+    parts.push(`Cancelled ${formatDay(row.cancelledOn, today)}`)
   }
   return parts.join(' · ')
+}
+
+// A part of a split merchant (prd-02 Ruling 16) has the merchant's plain
+// key plus a suffix: `#`, its first charge's date, `:`, its cents, and an
+// optional `.<n>` tie number. Only a suffix of exactly that shape at the
+// end is stripped. A `d:` key never holds `#`. A merchant whose `m:` id
+// holds `#` is never split; if its id happened to end in that exact shape
+// it would be stripped too, and the server refuses the shorter key unless
+// some charge in that scope carries it.
+const PART_SUFFIX = /#\d{4}-\d{2}-\d{2}:\d+(?:\.\d+)?$/
+
+function plainKey(merchantKey: string): string {
+  return merchantKey.replace(PART_SUFFIX, '')
 }
 
 const TEXT_BUTTON = `self-start cursor-pointer bg-transparent p-0 text-body-12 font-semibold text-deep hover:text-rose hover:underline disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS}`
@@ -40,9 +58,11 @@ const TEXT_BUTTON = `self-start cursor-pointer bg-transparent p-0 text-body-12 f
 export default function SubscriptionItem({
   row,
   actions,
+  today,
 }: {
   row: SubscriptionRow
   actions: SubscriptionActions
+  today: IsoDate
 }) {
   const cancelled = row.status === 'cancelled'
   const target = { scope: row.scope, merchantKey: row.merchantKey }
@@ -63,24 +83,36 @@ export default function SubscriptionItem({
             {row.name}
           </span>
           <SideChip scope={row.scope} />
+          {row.possiblyStopped && (
+            <span className="rounded-pill bg-canvas px-2 py-0.5 text-body-11 font-semibold text-warn">
+              Possibly stopped
+            </span>
+          )}
         </div>
         <span data-testid="subscription-meta" className="text-body-12 text-ink-muted">
-          {metaLine(row)}
+          {metaLine(row, today)}
         </span>
         {row.chargedAgainOn !== null && (
           <span className="text-body-12 text-warn">
-            {`Charged again on ${formatDay(row.chargedAgainOn)} after you cancelled`}
+            {`Charged again on ${formatDay(row.chargedAgainOn, today)} after you cancelled`}
           </span>
         )}
         {row.detected ? (
           // Clearing her answer would leave a detected row listed, so the
-          // way out is to say it is not one.
+          // way out is to say it is not one. On a part it is said of the
+          // whole merchant, through the plain key, which hides every part
+          // even when the part holding that key is not listed.
           <button
             type="button"
             className={TEXT_BUTTON}
             aria-label={`Not a subscription: ${row.name}`}
             disabled={actions.isPending}
-            onClick={() => actions.mark(target, 'not_subscription')}
+            onClick={() =>
+              actions.mark(
+                { scope: row.scope, merchantKey: plainKey(row.merchantKey) },
+                'not_subscription',
+              )
+            }
           >
             Not a subscription
           </button>

@@ -1,4 +1,4 @@
-import { Settings, Wand } from 'lucide-react'
+import { Settings } from 'lucide-react'
 
 // The screens of docs/design/handoff.md, by key.
 export type ScreenKey =
@@ -12,7 +12,7 @@ export type ScreenKey =
   | 'sync'
   | 'privacy'
 
-export type IconName = ScreenKey | 'wishlist' | 'settings'
+export type IconName = ScreenKey | 'settings'
 
 // Copied from `icon()` in docs/design/Divvy.dc.html: 24 viewBox line icons,
 // stroke 2, round caps.
@@ -47,9 +47,8 @@ const PATHS: Record<ScreenKey, string[]> = {
 }
 
 export default function NavIcon({ name }: { name: IconName }) {
-  // Wishlist and Settings are not handoff screens and have no handoff icon;
+  // Settings is not a handoff screen and has no handoff icon;
   // lucide's line icons match the stroke style.
-  if (name === 'wishlist') return <Wand size={16} strokeWidth={2} aria-hidden />
   if (name === 'settings') {
     return <Settings size={16} strokeWidth={2} aria-hidden />
   }

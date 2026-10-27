@@ -12,7 +12,8 @@ import {
   getTransactionCategory,
   setUserCategory,
 } from '../../db/transactions.ts'
-import type { Transaction } from '../../../models/transactions.ts'
+import type { TransactionRow } from '../../../models/transactions.ts'
+import { errorClass } from '../../error-class.ts'
 
 // /api/v1/agents/proposals (prd-04 Rulings 2 and 7, #51), mounted by
 // ./index.ts, which also refuses a cross-site POST before it reaches here.
@@ -54,7 +55,7 @@ interface ListProposalsResponse {
 
 interface AcceptProposalResponse {
   proposal: CategoryProposal
-  transaction: Transaction
+  transaction: TransactionRow
 }
 
 interface RejectProposalResponse {
@@ -77,10 +78,6 @@ function parseStatus(raw: unknown): ProposalStatus | null {
     (PROPOSAL_STATUSES as readonly string[]).includes(raw)
     ? (raw as ProposalStatus)
     : null
-}
-
-function errorClass(err: unknown): string {
-  return err instanceof Error ? err.constructor.name : typeof err
 }
 
 const router = express.Router()

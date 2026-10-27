@@ -25,15 +25,6 @@ export const MUTED = 'm-0 text-body-14 text-ink-muted'
 
 export const ERROR = 'm-0 text-body-13 text-danger'
 
-// The blush pill track the scope toggle uses, for the activity sub-filter.
-export const PILL_TRACK = 'flex gap-1 rounded-pill bg-blush p-[3px] shadow-pill'
-
-export function pill(active: boolean): string {
-  return `cursor-pointer rounded-pill px-3.5 py-1.5 text-body-13 font-medium ${FOCUS} ${
-    active ? 'bg-surface text-deep' : 'bg-transparent text-rose'
-  }`
-}
-
 // Blush: a lesser action such as "Try again".
 export const SECONDARY_BUTTON = `cursor-pointer rounded-pill bg-blush px-4 py-2 text-body-13 font-semibold text-rose hover:bg-blush-hover disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS}`
 

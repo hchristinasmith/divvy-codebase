@@ -1,0 +1,967 @@
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import connection from '../../../db/connection.ts'
+import { assertInMemory } from '../../../test-utils/app.ts'
+import { CHART_LIMITS, parseChartSpecJson, type ChartSpec } from '../../../../models/insights.ts'
+import { dismissInsight, type NewInsight } from '../../db/insights.ts'
+import { runInsightsAgent } from '../agent.ts'
+import { mdCode, monthlyMarkdown, topMerchantsMarkdown, weekOverWeekMarkdown } from '../prompt.ts'
+import { cleanLabel, collectAggregates, type Aggregates } from '../queries.ts'
+
+// The insights agent end to end (#47; prd-04 Rulings 2, 3, 7 and 8). Each
+// test starts from an empty, freshly migrated in-memory database and inserts
+// the rows it needs; every merchant, account and amount is invented.
+//
+// Seams, each a pass-through unless a test sets its hook: the template's
+// drafts can be replaced (a spec the validator refuses), the aggregate query
+// can be made to throw, and `insertInsight` calls are counted (one attempt,
+// no retry).
+//
+// The run's clock is passed in: `clockAt(NOW)` for a fixed time, or a
+// stepping clock where a test needs started_at and finished_at to differ.
+
+const hooks = vi.hoisted(() => ({
+  drafts: null as null | ((drafts: NewInsight[]) => NewInsight[]),
+  failQuery: false,
+  insertCalls: 0,
+}))
+
+// A thrown query error whose message carries SQL and a bound value, as a
+// knex error's does. Only its class may be logged.
+const QUERY_FAILURE = vi.hoisted(() => {
+  class FixtureQueryError extends Error {}
+  return {
+    FixtureQueryError,
+    message: "select * from transactions where merchant_name = 'Sentinel Bound Value'",
+  }
+})
+
+vi.mock('../prompt.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../prompt.ts')>()
+  return {
+    ...actual,
+    buildDrafts: (a: Aggregates, scope: 'personal' | 'strawb') => {
+      const drafts = actual.buildDrafts(a, scope)
+      return hooks.drafts ? hooks.drafts(drafts) : drafts
+    },
+  }
+})
+
+vi.mock('../queries.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../queries.ts')>()
+  return {
+    ...actual,
+    collectAggregates: async (...args: Parameters<typeof actual.collectAggregates>) => {
+      if (hooks.failQuery) throw new QUERY_FAILURE.FixtureQueryError(QUERY_FAILURE.message)
+      return actual.collectAggregates(...args)
+    },
+  }
+})
+
+vi.mock('../../db/insights.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../db/insights.ts')>()
+  return {
+    ...actual,
+    insertInsight: (...args: Parameters<typeof actual.insertInsight>) => {
+      hooks.insertCalls += 1
+      return actual.insertInsight(...args)
+    },
+  }
+})
+
+const spyOnErrors = () => vi.spyOn(console, 'error').mockImplementation(() => {})
+let errors: ReturnType<typeof spyOnErrors>
+
+beforeEach(async () => {
+  assertInMemory(connection)
+  await connection.migrate.rollback(undefined, true)
+  await connection.migrate.latest()
+  hooks.drafts = null
+  hooks.failQuery = false
+  hooks.insertCalls = 0
+  seq = 0
+  errors = spyOnErrors()
+})
+
+afterEach(() => {
+  errors.mockRestore()
+  vi.useRealTimers()
+})
+
+afterAll(async () => {
+  await connection.destroy()
+})
+
+const STAMP = '2026-10-01T00:00:00.000Z'
+const WEEK = '2026-W43' // Monday 2026-10-19 to Sunday 2026-10-25
+// Tuesday 27 October in NZ: the last complete week is 2026-W43.
+const NOW = new Date('2026-10-27T00:00:00.000Z')
+
+const day = (date: string) => `${date}T00:00:00.000Z`
+
+// A clock that always answers `at`.
+const clockAt = (at: Date) => (): Date => at
+
+// A clock that answers `first` on its first call and `then` on every call after.
+const steppingClock = (first: Date, then: Date) => {
+  let calls = 0
+  return vi.fn((): Date => {
+    calls += 1
+    return calls === 1 ? first : then
+  })
+}
+
+// The wall clock a year after NOW, so a finish that reads it, or takes the
+// later of it and the clock (the max(Date.now(), …) #305 removed), differs
+// from the clock's reading whatever today's date is. Only Date is faked, so
+// knex and SQLite keep their real timers.
+function wallClockAfterNow(): void {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(NOW.getTime() + 365 * 86_400_000)
+}
+
+const INSIGHT_KEYS = ['body_md', 'chart_spec_json', 'created_at', 'dismissed_at', 'id', 'kind', 'period', 'scope', 'title']
+const RUN_KEYS = [
+  'considered_count',
+  'cursor',
+  'finished_at',
+  'id',
+  'kind',
+  'outcome',
+  'started_at',
+  'sync_run_id',
+  'trigger',
+  'written_count',
+]
+const RESULT_KEYS = ['considered', 'outcome', 'period', 'rejected', 'runId', 'skipped', 'written']
+
+const PERSONAL = { merchant: 'Personal Only Bakery', category: 'Personal Only Cafes', cents: 66666, shown: '$666.66' }
+const STRAWB = { merchant: 'Strawb Only Supplies', category: 'Strawb Only Category', cents: 55555, shown: '$555.55' }
+const DESCRIPTION = 'SENTINEL DESC card 1234'
+
+async function seedAccounts(): Promise<void> {
+  await connection('accounts').insert(
+    [
+      ['acc_p1', 'personal'],
+      ['acc_p2', 'personal'],
+      ['acc_s1', 'strawb'],
+    ].map(([akahuId, scope]) => ({
+      akahu_id: akahuId,
+      source: 'akahu',
+      scope,
+      name: 'Invented account',
+      created_at: STAMP,
+      updated_at: STAMP,
+    })),
+  )
+}
+
+let seq = 0
+
+async function tx(account: string, at: string, cents: number, merchant: string | null, category: string | null) {
+  seq += 1
+  await connection('transactions').insert({
+    akahu_id: `trans_fixture_${seq}`,
+    account_id: account,
+    date: at,
+    amount_cents: cents,
+    merchant_name: merchant,
+    category,
+    status: 'settled',
+    source: 'akahu',
+    description: DESCRIPTION,
+    reference: 'SENTINEL REF',
+    particulars: 'SENTINEL PART',
+    code: 'SENTINEL CODE',
+  })
+}
+
+async function seedLedger(): Promise<void> {
+  await seedAccounts()
+  // Personal: the week, the week before, Sample Fuel's history, a transfer.
+  await tx('acc_p1', day('2026-10-19'), -1250, 'Fixture Bakery', 'Cafes')
+  await tx('acc_p1', day('2026-10-20'), -4500, 'Invented Grocer', 'Groceries')
+  await tx('acc_p1', day('2026-10-23'), -6000, 'Sample Fuel', 'Fuel')
+  await tx('acc_p1', day('2026-10-21'), -PERSONAL.cents, PERSONAL.merchant, PERSONAL.category)
+  await tx('acc_p1', day('2026-10-13'), -1000, 'Fixture Bakery', 'Cafes')
+  await tx('acc_p1', day('2026-09-01'), -1500, 'Sample Fuel', 'Fuel')
+  await tx('acc_p1', day('2026-09-15'), -1600, 'Sample Fuel', 'Fuel')
+  await tx('acc_p1', day('2026-10-06'), -1700, 'Sample Fuel', 'Fuel')
+  await tx('acc_p1', day('2026-07-15'), -3000, 'Sample Fuel', 'Fuel')
+  // The same spend both weeks: a category with no change.
+  await tx('acc_p1', day('2026-10-21'), -900, 'Invented Gym', 'Fitness')
+  await tx('acc_p1', day('2026-10-14'), -900, 'Invented Gym', 'Fitness')
+  await tx('acc_p1', day('2026-10-24'), -20000, null, 'Transfers')
+  await tx('acc_p2', day('2026-10-24'), 20000, null, 'Transfers')
+  // Strawb.
+  await tx('acc_s1', day('2026-10-20'), -STRAWB.cents, STRAWB.merchant, STRAWB.category)
+  await tx('acc_s1', day('2026-10-13'), -1200, 'Strawb Other Vendor', 'Supplies')
+}
+
+interface StoredInsight {
+  id: number
+  kind: string
+  title: string
+  body_md: string
+  chart_spec_json: string | null
+  scope: string
+  period: string
+  created_at: string
+  dismissed_at: string | null
+}
+
+const insightRows = (): Promise<StoredInsight[]> => connection('insights').orderBy('id')
+const runRows = (): Promise<Record<string, unknown>[]> => connection('agent_runs').orderBy('id')
+
+function specOf(row: StoredInsight): ChartSpec {
+  const checked = parseChartSpecJson(row.chart_spec_json)
+  if (!checked.ok) throw new Error(`stored spec refused: ${checked.reason}`)
+  return checked.spec
+}
+
+function numbersIn(value: unknown, into: number[] = []): number[] {
+  if (typeof value === 'number') into.push(value)
+  else if (Array.isArray(value)) for (const v of value) numbersIn(v, into)
+  else if (value !== null && typeof value === 'object') for (const v of Object.values(value)) numbersIn(v, into)
+  return into
+}
+
+const stripCodeSpans = (md: string) => md.replace(/`[^`]*`/g, '')
+
+describe('a run', () => {
+  it('writes the three insights with scope and period, and logs one successful run', async () => {
+    await seedLedger()
+    const result = await runInsightsAgent('personal', {}, clockAt(NOW))
+
+    const rows = await insightRows()
+    expect(rows).toHaveLength(3)
+    for (const r of rows) expect(Object.keys(r).sort()).toEqual([...INSIGHT_KEYS].sort())
+    expect(rows.map((r) => [r.kind, r.scope, r.period, r.title, r.dismissed_at, r.created_at])).toEqual([
+      ['pattern', 'personal', WEEK, `Top merchants and unusual spends, ${WEEK}`, null, NOW.toISOString()],
+      ['report', 'personal', WEEK, `Spending against last week, ${WEEK}`, null, NOW.toISOString()],
+      ['chart', 'personal', WEEK, 'Spend by category, last 6 months', null, NOW.toISOString()],
+    ])
+    for (const r of rows) expect(r.chart_spec_json).not.toBeNull()
+
+    // Personal rows May to the week's Sunday: everything above but strawb.
+    const considered = 13
+    expect(Object.keys(result).sort()).toEqual([...RESULT_KEYS].sort())
+    expect(result).toStrictEqual({
+      runId: result.runId,
+      outcome: 'success',
+      period: WEEK,
+      considered,
+      written: 3,
+      skipped: 0,
+      rejected: [],
+    })
+
+    const runs = await runRows()
+    expect(runs).toHaveLength(1)
+    const [run] = runs
+    expect(Object.keys(run).sort()).toEqual([...RUN_KEYS].sort())
+    expect(run).toMatchObject({
+      id: result.runId,
+      kind: 'insights',
+      trigger: 'manual',
+      outcome: 'success',
+      considered_count: considered,
+      written_count: 3,
+      sync_run_id: null,
+      cursor: null,
+      started_at: NOW.toISOString(),
+      finished_at: NOW.toISOString(),
+    })
+    expect((await collectAggregates('personal', WEEK)).ledgerRowCount).toBe(considered)
+  })
+
+  // The clock is read once at start and once at finish (#305). The start
+  // reading is the run's: started_at, every insight's created_at, and the
+  // period when none is given. The finish reading is finished_at.
+  it('reads the clock twice, and finishes at the second reading', async () => {
+    await seedLedger()
+    const later = new Date(NOW.getTime() + 3_600_000)
+    wallClockAfterNow()
+    const clock = steppingClock(NOW, later)
+    const result = await runInsightsAgent('personal', {}, clock)
+
+    expect(result).toMatchObject({ outcome: 'success', written: 3 })
+    expect(clock).toHaveBeenCalledTimes(2)
+    const [run] = await runRows()
+    expect(run).toMatchObject({ started_at: NOW.toISOString(), finished_at: later.toISOString() })
+    const rows = await insightRows()
+    expect(rows).toHaveLength(3)
+    for (const r of rows) expect(r.created_at).toBe(NOW.toISOString())
+  })
+
+  it('reads the clock twice on a failed run too, and finishes it at the second reading', async () => {
+    await seedLedger()
+    hooks.failQuery = true
+    const later = new Date(NOW.getTime() + 3_600_000)
+    wallClockAfterNow()
+    const clock = steppingClock(NOW, later)
+    const result = await runInsightsAgent('personal', {}, clock)
+
+    expect(result.outcome).toBe('failed')
+    expect(clock).toHaveBeenCalledTimes(2)
+    const [run] = await runRows()
+    expect(run).toMatchObject({
+      outcome: 'failed',
+      started_at: NOW.toISOString(),
+      finished_at: later.toISOString(),
+    })
+  })
+
+  // finished_at is the finish reading exactly, even one before the start
+  // reading: no max() with the start reading or the wall clock.
+  it('finishes at the second reading even when it is before the first', async () => {
+    await seedLedger()
+    const earlier = new Date(NOW.getTime() - 3_600_000)
+    wallClockAfterNow()
+    const clock = steppingClock(NOW, earlier)
+    const result = await runInsightsAgent('personal', {}, clock)
+
+    expect(result).toMatchObject({ outcome: 'success', written: 3 })
+    expect(clock).toHaveBeenCalledTimes(2)
+    const [run] = await runRows()
+    expect(run).toMatchObject({ started_at: NOW.toISOString(), finished_at: earlier.toISOString() })
+  })
+
+  it('takes a weekly trigger and an explicit period', async () => {
+    await seedLedger()
+    const result = await runInsightsAgent('personal', { period: '2026-W42', trigger: 'weekly' }, clockAt(NOW))
+    expect(result.period).toBe('2026-W42')
+    const [run] = await runRows()
+    expect(run.trigger).toBe('weekly')
+    expect((await insightRows()).every((r) => r.period === '2026-W42')).toBe(true)
+  })
+
+  it('every number in every stored spec is a number collectAggregates produced', async () => {
+    await seedLedger()
+    await runInsightsAgent('personal', {}, clockAt(NOW))
+    const produced = new Set(numbersIn(await collectAggregates('personal', WEEK)))
+    const stored = (await insightRows()).flatMap((r) => numbersIn(specOf(r)))
+    expect(stored.length).toBeGreaterThan(0)
+    for (const n of stored) expect(produced.has(n), String(n)).toBe(true)
+  })
+
+  it('the stored spec numbers equal a hand-written oracle', async () => {
+    await seedLedger()
+    await runInsightsAgent('personal', {}, clockAt(NOW))
+    const rows = await insightRows()
+    const byKind = new Map(rows.map((r) => [r.kind, specOf(r)]))
+
+    // Top merchants over NZ 2026-10-19 to 2026-10-25, transfers (no
+    // merchant) and inflows out.
+    const oracle = (await connection('transactions as t')
+      .join('accounts as a', 't.account_id', 'a.akahu_id')
+      .where({ 'a.scope': 'personal', 't.status': 'settled' })
+      .where('t.amount_cents', '<', 0)
+      .whereNotNull('t.merchant_name')
+      .whereBetween('t.date', ['2026-10-18T11:00:00.000Z', '2026-10-25T10:59:59.999Z'])
+      .select({ merchant: 't.merchant_name' })
+      .sum({ total: 't.amount_cents' })
+      .groupBy('t.merchant_name')
+      .orderBy([{ column: 'total', order: 'asc' }, 'merchant'])) as { merchant: string; total: number }[]
+    expect(byKind.get('pattern')?.data.values).toStrictEqual(
+      oracle.map((o) => ({ merchant: o.merchant, spend_cents: -o.total })),
+    )
+
+    // Change per category: this week minus the week before; Fitness did not
+    // change, so it is not charted.
+    expect(byKind.get('report')?.data.values).toStrictEqual([
+      { category: PERSONAL.category, change_cents: 66666 },
+      { category: 'Fuel', change_cents: 6000 },
+      { category: 'Groceries', change_cents: 4500 },
+      { category: 'Cafes', change_cents: 250 },
+    ])
+
+    // October: 1250 + 1000 Cafes, 4500 Groceries, 6000 + 1700 Fuel, 900 + 900
+    // Fitness.
+    const october = byKind.get('chart')?.data.values.filter((v) => v.month === '2026-10')
+    expect(october).toStrictEqual([
+      { month: '2026-10', category: PERSONAL.category, spend_cents: 66666 },
+      { month: '2026-10', category: 'Fuel', spend_cents: 7700 },
+      { month: '2026-10', category: 'Groceries', spend_cents: 4500 },
+      { month: '2026-10', category: 'Cafes', spend_cents: 2250 },
+      { month: '2026-10', category: 'Fitness', spend_cents: 1800 },
+    ])
+  })
+
+  it('the bodies show the same figures, labels in code spans', async () => {
+    await seedLedger()
+    // A second Fixture Bakery outflow this week: one merchant of two
+    // transactions, and a Cafes change whose two weeks differ.
+    await tx('acc_p1', day('2026-10-22'), -750, 'Fixture Bakery', 'Cafes')
+    await runInsightsAgent('personal', {}, clockAt(NOW))
+    const [pattern, report, chart] = await insightRows()
+    expect(pattern.body_md).toBe(
+      [
+        '## Top merchants',
+        '',
+        `- \`${PERSONAL.merchant}\` ${PERSONAL.shown} across 1 transaction`,
+        '- `Sample Fuel` $60.00 across 1 transaction',
+        '- `Invented Grocer` $45.00 across 1 transaction',
+        '- `Fixture Bakery` $20.00 across 2 transactions',
+        '- `Invented Gym` $9.00 across 1 transaction',
+        '',
+        '## Unusual spends',
+        '',
+        // History 1500, 1600, 1700: median 1600.
+        '- `Sample Fuel` on 2026-10-23, $60.00 against a typical $16.00 (`Fuel`)',
+      ].join('\n'),
+    )
+    // This week 66666 + 6000 + 4500 + 1250 + 750 + 900 = 80066; the week
+    // before 1000 + 900 = 1900; 78166 / 1900 is 4114%. Fitness did not
+    // change, so it has no line.
+    expect(report.body_md).toBe(
+      [
+        'Spend in 2026-W43 was $800.66, against $19.00 the week before, a change of +$781.66 (+4114%).',
+        '',
+        '## Biggest changes by category',
+        '',
+        `- \`${PERSONAL.category}\` +${PERSONAL.shown}, ${PERSONAL.shown} this week and $0.00 the week before`,
+        '- `Fuel` +$60.00, $60.00 this week and $0.00 the week before',
+        '- `Groceries` +$45.00, $45.00 this week and $0.00 the week before',
+        '- `Cafes` +$10.00, $20.00 this week and $10.00 the week before',
+      ].join('\n'),
+    )
+    // Categories in the order they first appear: Fuel in July, the rest in
+    // October by spend.
+    expect(chart.body_md).toBe(
+      [
+        'Spend by category for each month from 2026-05 to the week ending 2026-10-25.',
+        '',
+        `Categories shown \`Fuel\`, \`${PERSONAL.category}\`, \`Groceries\`, \`Cafes\`, \`Fitness\`.`,
+      ].join('\n'),
+    )
+  })
+
+  it('each stored spec is the fixed chart around its values', async () => {
+    await seedLedger()
+    await runInsightsAgent('personal', {}, clockAt(NOW))
+    const specs = new Map(
+      (await insightRows()).map((r) => [r.kind, JSON.parse(r.chart_spec_json ?? 'null') as Record<string, unknown>]),
+    )
+    const around = (kind: string) => {
+      const spec = specs.get(kind)
+      if (!spec) throw new Error(`no ${kind} spec`)
+      const { data, ...rest } = spec
+      expect(Object.keys(data as object)).toStrictEqual(['values'])
+      return rest
+    }
+    const spend = { field: 'spend_cents', type: 'quantitative', title: 'Spend in cents' }
+    expect(around('pattern')).toStrictEqual({
+      title: 'Top merchants by spend',
+      mark: 'bar',
+      encoding: { x: { field: 'merchant', type: 'nominal', title: 'Merchant' }, y: spend },
+    })
+    expect(around('report')).toStrictEqual({
+      title: 'Change in spend by category',
+      mark: 'bar',
+      encoding: {
+        x: { field: 'category', type: 'nominal', title: 'Category' },
+        y: { field: 'change_cents', type: 'quantitative', title: 'Change in cents' },
+      },
+    })
+    expect(around('chart')).toStrictEqual({
+      title: 'Spend by category per month',
+      mark: 'bar',
+      encoding: {
+        x: { field: 'month', type: 'ordinal', title: 'Month' },
+        y: spend,
+        color: { field: 'category', type: 'nominal', title: 'Category' },
+      },
+    })
+  })
+})
+
+describe('the template, from hand-built aggregates', () => {
+  const aggregates = (over: Partial<Aggregates>): Aggregates => ({
+    week: '2026-W43',
+    months: ['2026-05', '2026-06', '2026-07', '2026-08', '2026-09', '2026-10'],
+    asOf: '2026-10-25',
+    ledgerRowCount: 0,
+    topMerchants: [],
+    wow: { thisWeekCents: 0, lastWeekCents: 0, changeCents: 0, changePct: null, byCategory: [] },
+    unusual: [],
+    monthly: [],
+    ...over,
+  })
+
+  it('with no unusual spend, says nothing stood out; counts read 1 transaction and N transactions', () => {
+    const a = aggregates({
+      topMerchants: [
+        { merchant: 'Invented Shop', spendCents: 123456, count: 3 },
+        { merchant: 'Fixture Kiosk', spendCents: 500, count: 1 },
+      ],
+    })
+    expect(topMerchantsMarkdown(a)).toBe(
+      [
+        '## Top merchants',
+        '',
+        '- `Invented Shop` $1,234.56 across 3 transactions',
+        '- `Fixture Kiosk` $5.00 across 1 transaction',
+        '',
+        '## Unusual spends',
+        '',
+        "Nothing stood out against each merchant's recent spending.",
+      ].join('\n'),
+    )
+  })
+
+  it('with no spend the week before, shows no percent', () => {
+    const a = aggregates({
+      wow: {
+        thisWeekCents: 1500,
+        lastWeekCents: 0,
+        changeCents: 1500,
+        changePct: null,
+        byCategory: [{ category: 'Shops', thisCents: 1500, lastCents: 0, changeCents: 1500 }],
+      },
+    })
+    expect(weekOverWeekMarkdown(a)).toBe(
+      [
+        'Spend in 2026-W43 was $15.00, against $0.00 the week before, a change of +$15.00.',
+        '',
+        '## Biggest changes by category',
+        '',
+        '- `Shops` +$15.00, $15.00 this week and $0.00 the week before',
+      ].join('\n'),
+    )
+  })
+
+  it('a fall is signed and its percent negative; an unchanged category has no line', () => {
+    const a = aggregates({
+      wow: {
+        thisWeekCents: 1501,
+        lastWeekCents: 3500,
+        changeCents: -1999,
+        changePct: -57,
+        byCategory: [
+          { category: 'Shops', thisCents: 1001, lastCents: 3000, changeCents: -1999 },
+          { category: 'Same', thisCents: 500, lastCents: 500, changeCents: 0 },
+        ],
+      },
+    })
+    expect(weekOverWeekMarkdown(a)).toBe(
+      [
+        'Spend in 2026-W43 was $15.01, against $35.00 the week before, a change of -$19.99 (-57%).',
+        '',
+        '## Biggest changes by category',
+        '',
+        '- `Shops` -$19.99, $10.01 this week and $30.00 the week before',
+      ].join('\n'),
+    )
+  })
+
+  it('the monthly body names the first month, the as-of day, and each category once in first-seen order', () => {
+    const a = aggregates({
+      months: ['2026-04', '2026-05'],
+      asOf: '2026-05-10',
+      monthly: [
+        { month: '2026-04', category: 'Rent', spendCents: 100 },
+        { month: '2026-05', category: 'Food', spendCents: 300 },
+        { month: '2026-05', category: 'Rent', spendCents: 200 },
+      ],
+    })
+    expect(monthlyMarkdown(a)).toBe(
+      [
+        'Spend by category for each month from 2026-04 to the week ending 2026-05-10.',
+        '',
+        'Categories shown `Rent`, `Food`.',
+      ].join('\n'),
+    )
+  })
+})
+
+describe('scope', () => {
+  const textOf = (rows: StoredInsight[]) => rows.map((r) => [r.title, r.body_md, r.chart_spec_json].join('\n')).join('\n')
+
+  it('a personal run stores nothing derived from strawb rows', async () => {
+    await seedLedger()
+    await runInsightsAgent('personal', {}, clockAt(NOW))
+    const rows = await insightRows()
+    expect(rows.length).toBe(3)
+    const text = textOf(rows)
+    for (const sentinel of [STRAWB.merchant, STRAWB.category, String(STRAWB.cents), STRAWB.shown, 'Strawb Other Vendor']) {
+      expect(text, sentinel).not.toContain(sentinel)
+    }
+    expect(text).toContain(PERSONAL.merchant)
+  })
+
+  it('a strawb run stores nothing derived from personal rows', async () => {
+    await seedLedger()
+    await runInsightsAgent('strawb', {}, clockAt(NOW))
+    const rows = await insightRows()
+    expect(rows.length).toBe(3)
+    expect(rows.every((r) => r.scope === 'strawb')).toBe(true)
+    const text = textOf(rows)
+    for (const sentinel of [PERSONAL.merchant, PERSONAL.category, String(PERSONAL.cents), PERSONAL.shown, 'Sample Fuel']) {
+      expect(text, sentinel).not.toContain(sentinel)
+    }
+    expect(text).toContain(STRAWB.merchant)
+  })
+
+  it('no stored text holds an account id, a transaction id or a description', async () => {
+    await seedLedger()
+    await runInsightsAgent('personal', {}, clockAt(NOW))
+    await runInsightsAgent('strawb', {}, clockAt(NOW))
+    const rows = await insightRows()
+    expect(rows).toHaveLength(6)
+    const text = textOf(rows)
+    for (const sentinel of ['acc_p1', 'acc_p2', 'acc_s1', 'trans_fixture', DESCRIPTION, 'SENTINEL']) {
+      expect(text, sentinel).not.toContain(sentinel)
+    }
+  })
+})
+
+describe('drawings (prd-02 Ruling 15)', () => {
+  it('a strawb run stores nothing from a drawing, and counts its rows as considered', async () => {
+    await seedLedger()
+    const before = (await collectAggregates('strawb', WEEK)).ledgerRowCount
+    // Out of Strawb on Tuesday, into personal on Wednesday: a drawing.
+    await tx('acc_s1', day('2026-10-20'), -31415, 'Owner Pay Fixture', 'Owner Pay Category')
+    await tx('acc_p1', day('2026-10-21'), 31415, 'Owner Pay Fixture', 'Owner Pay Category')
+    const result = await runInsightsAgent('strawb', {}, clockAt(NOW))
+    expect(result).toMatchObject({ outcome: 'success', written: 3 })
+    // The strawb half is read and considered, though no insight counts it.
+    expect(result.considered).toBe(before + 1)
+    const rows = await insightRows()
+    expect(rows).toHaveLength(3)
+    const text = rows.map((r) => [r.title, r.body_md, r.chart_spec_json].join('\n')).join('\n')
+    for (const sentinel of ['Owner Pay Fixture', 'Owner Pay Category', '31415', '$314.15']) {
+      expect(text, sentinel).not.toContain(sentinel)
+    }
+    expect(text).toContain(STRAWB.merchant)
+  })
+})
+
+describe('hostile merchant text', () => {
+  const HOSTILE = [
+    'http://evil.example/x',
+    'PAYMENT: X',
+    'News: x',
+    'javascript:alert(1)',
+    '<script>alert(1)</script>',
+    'https\uFF1A//x',
+    'Bad\u202Eevil\u200Bname',
+    'z'.repeat(500),
+    'www.evil.com',
+    '[x](http://y)',
+    '   ',
+    '/',
+    'tick`tock',
+    '<img src=x onerror=alert(1)>',
+  ]
+  // Only the top merchants show in a list, so the names run in groups.
+  const groups = [HOSTILE.slice(0, 5), HOSTILE.slice(5, 10), HOSTILE.slice(10)]
+
+  it.each(groups.map((g, i) => [i, g] as const))('group %i is stored safely end to end', async (_i, names) => {
+    await seedAccounts()
+    let cents = 1000
+    for (const name of names) {
+      cents += 100
+      await tx('acc_p1', day('2026-10-20'), -cents, name, name)
+      await tx('acc_p1', day('2026-10-13'), -100, name, name)
+    }
+    const result = await runInsightsAgent('personal', {}, clockAt(NOW))
+    expect(result).toMatchObject({ outcome: 'success', written: 3, rejected: [] })
+
+    const rows = await insightRows()
+    expect(rows).toHaveLength(3)
+    for (const r of rows) {
+      expect(parseChartSpecJson(r.chart_spec_json).ok).toBe(true)
+      // No URL anywhere in the stored spec, `$schema` included.
+      expect(r.chart_spec_json?.toLowerCase()).not.toMatch(/https?:|javascript:|\/\//)
+      expect(r.body_md).not.toContain('<')
+      expect(r.body_md).not.toContain('](')
+      expect(r.body_md.toLowerCase()).not.toMatch(/https?:|javascript:|\/\//)
+      // Outside code spans there is no label at all.
+      const prose = stripCodeSpans(r.body_md)
+      expect(prose.toLowerCase()).not.toContain('http')
+      for (const name of names) {
+        const label = cleanLabel(name, 'Unknown merchant')
+        expect(prose, label).not.toContain(label)
+      }
+    }
+    const shown = rows.map((r) => r.body_md).join('\n')
+    expect(shown).toContain('`')
+  })
+})
+
+describe('mdCode', () => {
+  it.each([
+    ['Invented Shop', '`Invented Shop`'],
+    // Unreachable through cleanLabel, which drops both; held here anyway.
+    ['a`b', '`a b`'],
+    ['line\nbreak', '`line break`'],
+    ['`', '`?`'],
+  ])('%j becomes %j', (label, md) => {
+    expect(mdCode(label)).toBe(md)
+  })
+})
+
+describe('a refused spec', () => {
+  const swapPattern = (spec: unknown) => (drafts: NewInsight[]) =>
+    drafts.map((d) => (d.kind === 'pattern' ? { ...d, chart_spec: spec } : d))
+  const bar = (fields: Record<string, unknown>) => ({
+    data: { values: [{ merchant: 'Invented Shop', spend_cents: 100 }] },
+    mark: 'bar',
+    encoding: { x: { field: 'merchant', type: 'nominal' }, y: { field: 'spend_cents', type: 'quantitative' } },
+    ...fields,
+  })
+
+  it.each([
+    [
+      'a URL in a data value',
+      bar({ data: { values: [{ merchant: 'https://evil.example', spend_cents: 100 }] } }),
+      'url_in_string',
+      '$.data.values[0]',
+    ],
+    ['an unknown mark', bar({ mark: 'scatter' }), 'bad_mark', '$.mark'],
+    ['a javascript: title', bar({ title: 'javascript:alert(1)' }), 'url_in_string', '$.title'],
+  ])('%s stores nothing from that draft, and the run is logged failed', async (_why, spec, reason, path) => {
+    await seedLedger()
+    hooks.drafts = swapPattern(spec)
+    const result = await runInsightsAgent('personal', {}, clockAt(NOW))
+
+    expect(result).toMatchObject({ outcome: 'failed', written: 2, skipped: 0 })
+    expect(result.rejected).toStrictEqual([{ kind: 'pattern', reason, path }])
+    expect((await insightRows()).map((r) => r.kind)).toEqual(['report', 'chart'])
+    // One attempt per draft: no retry of the refused one.
+    expect(hooks.insertCalls).toBe(3)
+    const [run] = await runRows()
+    expect(run).toMatchObject({ outcome: 'failed', written_count: 2, considered_count: 13 })
+    expect(await runRows()).toHaveLength(1)
+    // The log names the kind, reason and path; never the hostile value.
+    expect(errors).toHaveBeenCalledWith('insights agent: spec rejected', 'pattern', reason, path)
+    const logged = JSON.stringify(errors.mock.calls)
+    expect(logged).not.toContain('evil')
+    expect(logged).not.toContain('alert')
+    expect(logged).not.toContain('scatter')
+  })
+
+  // Merchant text can sit in a value, a key or a title. The log names only the
+  // validator's closed reason and its path, and the path is built from schema
+  // keys and indices, so a marker placed in any of these positions must stop at
+  // the schema key before it. Each row is the reason and path the validator
+  // produces for that position, found by running it.
+  const MARKER = 'INVENTED_MERCHANT_7Q'
+  const ENC_Y = { field: 'spend_cents', type: 'quantitative' }
+  it.each([
+    [
+      'a merchant value that is a URL',
+      bar({ data: { values: [{ merchant: `${MARKER} https://x`, spend_cents: 100 }] } }),
+      'url_in_string',
+      '$.data.values[0]',
+    ],
+    [
+      'an unrecognised key on a data row',
+      bar({ data: { values: [{ merchant: 'Invented Shop', spend_cents: 100, [`${MARKER} https://x`]: 1 }] } }),
+      'unknown_key',
+      '$.data.values[0]',
+    ],
+    [
+      'an unrecognised key on encoding.x',
+      bar({ encoding: { x: { field: 'merchant', type: 'nominal', [MARKER]: 'v' }, y: ENC_Y } }),
+      'unknown_key',
+      '$.encoding.x',
+    ],
+    ['an unrecognised key at the root', bar({ [MARKER]: 'v' }), 'unknown_key', '$'],
+    [
+      'a channel title that is a URL',
+      bar({ encoding: { x: { field: 'merchant', type: 'nominal', title: `${MARKER} https://x` }, y: ENC_Y } }),
+      'url_in_string',
+      '$.encoding.x.title',
+    ],
+    [
+      'a key under an unknown key, with a URL title below it',
+      bar({ notes: { [MARKER]: { title: `${MARKER} https://x` } } }),
+      'unknown_key',
+      '$',
+    ],
+    [
+      'a long marker value under an unknown key, refused before the schema walk',
+      bar({ notes: { [MARKER]: { note: `${MARKER}${'x'.repeat(200)}` } } }),
+      'string_too_long',
+      '$',
+    ],
+  ])('%s: the log and the rejection carry the reason and path, never the marker', async (_why, spec, reason, path) => {
+    await seedLedger()
+    hooks.drafts = swapPattern(spec)
+    const result = await runInsightsAgent('personal', {}, clockAt(NOW))
+
+    expect(result).toMatchObject({ outcome: 'failed', written: 2 })
+    expect(result.rejected).toStrictEqual([{ kind: 'pattern', reason, path }])
+    expect(JSON.stringify(result.rejected)).not.toContain(MARKER)
+    expect(errors.mock.calls).toStrictEqual([['insights agent: spec rejected', 'pattern', reason, path]])
+    expect(JSON.stringify(errors.mock.calls)).not.toContain(MARKER)
+  })
+})
+
+describe('failure and repeat', () => {
+  it('a query that throws logs a failed run with nothing considered or written, and logs its class, not its SQL', async () => {
+    await seedLedger()
+    hooks.failQuery = true
+    const result = await runInsightsAgent('personal', {}, clockAt(NOW))
+    expect(result).toMatchObject({ outcome: 'failed', considered: 0, written: 0, skipped: 0, rejected: [] })
+    expect(await insightRows()).toEqual([])
+    const [run] = await runRows()
+    expect(run).toMatchObject({ outcome: 'failed', considered_count: 0, written_count: 0 })
+    expect(run.finished_at).not.toBeNull()
+    expect(errors).toHaveBeenCalledWith('insights agent: run failed', 'FixtureQueryError')
+    const logged = JSON.stringify(errors.mock.calls)
+    expect(logged).not.toContain('Sentinel Bound Value')
+    expect(logged).not.toContain('select')
+  })
+
+  it('a second run for the same period writes nothing and skips all three', async () => {
+    await seedLedger()
+    await runInsightsAgent('personal', {}, clockAt(NOW))
+    const before = await insightRows()
+    const again = await runInsightsAgent('personal', {}, clockAt(NOW))
+    expect(again).toMatchObject({ outcome: 'success', written: 0, skipped: 3 })
+    expect(await insightRows()).toStrictEqual(before)
+    const runs = await runRows()
+    expect(runs.map((r) => [r.outcome, r.written_count])).toEqual([
+      ['success', 3],
+      ['success', 0],
+    ])
+  })
+
+  it('a dismissed insight is not written again', async () => {
+    await seedLedger()
+    await runInsightsAgent('personal', {}, clockAt(NOW))
+    const [first] = await insightRows()
+    expect(await dismissInsight(first.id, NOW)).toBe(true)
+    const again = await runInsightsAgent('personal', {}, clockAt(NOW))
+    expect(again).toMatchObject({ written: 0, skipped: 3 })
+    const rows = await insightRows()
+    expect(rows).toHaveLength(3)
+    expect(rows.filter((r) => r.kind === first.kind)).toEqual([{ ...first, dismissed_at: NOW.toISOString() }])
+  })
+
+  it('the next week in the same scope is not a repeat', async () => {
+    await seedLedger()
+    const earlier = await runInsightsAgent('personal', { period: '2026-W42' }, clockAt(NOW))
+    const later = await runInsightsAgent('personal', { period: WEEK }, clockAt(NOW))
+    expect([earlier, later].map((r) => [r.written, r.skipped])).toEqual([
+      [3, 0],
+      [3, 0],
+    ])
+    expect((await insightRows()).map((r) => r.period)).toEqual([
+      '2026-W42',
+      '2026-W42',
+      '2026-W42',
+      WEEK,
+      WEEK,
+      WEEK,
+    ])
+  })
+
+  it('the same period in the other scope is not a repeat', async () => {
+    await seedLedger()
+    await runInsightsAgent('personal', {}, clockAt(NOW))
+    const strawb = await runInsightsAgent('strawb', {}, clockAt(NOW))
+    expect(strawb).toMatchObject({ written: 3, skipped: 0 })
+  })
+
+  it('an empty week writes nothing and succeeds', async () => {
+    await seedAccounts()
+    const result = await runInsightsAgent('personal', {}, clockAt(NOW))
+    expect(result).toMatchObject({ outcome: 'success', considered: 0, written: 0, skipped: 0, rejected: [] })
+    expect(await insightRows()).toEqual([])
+    const [run] = await runRows()
+    expect(run).toMatchObject({ outcome: 'success', considered_count: 0, written_count: 0 })
+  })
+
+  it.each([
+    ['an unknown scope', 'everyone', {}, 'scope must be personal or strawb'],
+    ['a bad period', 'personal', { period: '2026-W99' }, 'period must be an ISO week label (YYYY-Www)'],
+    ['a period past the year 9999', 'personal', { period: '9999-W52' }, 'period must be an ISO week label (YYYY-Www)'],
+    // #349: these weeks are real, but their analysis window (the monthly
+    // months, then the read's padding) starts before 0000-01-01.
+    ['a personal 0000-W01, whose window leaves the year 0000', 'personal', { period: '0000-W01' }, 'period must be an ISO week label (YYYY-Www)'],
+    ['a strawb 0000-W01, whose window leaves the year 0000', 'strawb', { period: '0000-W01' }, 'period must be an ISO week label (YYYY-Www)'],
+    ['a personal 0000-W25, whose window leaves the year 0000', 'personal', { period: '0000-W25' }, 'period must be an ISO week label (YYYY-Www)'],
+    ['a strawb 0000-W25, whose window leaves the year 0000', 'strawb', { period: '0000-W25' }, 'period must be an ISO week label (YYYY-Www)'],
+    ['a sync trigger', 'personal', { trigger: 'sync' }, 'trigger must be manual or weekly'],
+  ])('%s is refused before any run is logged', async (_why, scope, options, message) => {
+    await expect(
+      runInsightsAgent(scope as 'personal', options as { period?: string }, clockAt(NOW)),
+    ).rejects.toThrow(message)
+    expect(await runRows()).toEqual([])
+  })
+
+  // 0000-W26 (Monday 0000-06-26) is the first week of the year 0000 whose
+  // analysis window, padding included, fits after 0000-01-01 (#349; the sweep
+  // in queries.test.ts derives it). Its run is logged and succeeds.
+  it.each(['personal', 'strawb'] as const)('a %s run for 0000-W26 logs one successful run', async (scope) => {
+    await seedAccounts()
+    const result = await runInsightsAgent(scope, { period: '0000-W26' }, clockAt(NOW))
+    expect(result).toMatchObject({ outcome: 'success', period: '0000-W26', considered: 0, written: 0, rejected: [] })
+    const runs = await runRows()
+    expect(runs).toHaveLength(1)
+    expect(runs[0]).toMatchObject({ outcome: 'success' })
+    expect(errors).not.toHaveBeenCalled()
+  })
+})
+
+describe('what a run touches', () => {
+  it('changes only insights and agent_runs', async () => {
+    await seedLedger()
+    await connection('budgets').insert({
+      scope: 'personal',
+      category: 'Cafes',
+      limit_cents: 10000,
+      created_at: STAMP,
+      updated_at: STAMP,
+    })
+    const tables: string[] = (await connection('sqlite_master').where({ type: 'table' }).pluck('name')).filter(
+      (t: string) => !['insights', 'agent_runs'].includes(t) && !/^(knex_|sqlite_)/.test(t),
+    )
+    expect(tables).toEqual(expect.arrayContaining(['transactions', 'accounts', 'budgets', 'bills', 'goals', 'settings']))
+    const snapshot = async () => {
+      const out: Record<string, unknown[]> = {}
+      for (const t of tables) out[t] = await connection(t).select()
+      return out
+    }
+    const before = await snapshot()
+    await runInsightsAgent('personal', {}, clockAt(NOW))
+    expect(await snapshot()).toStrictEqual(before)
+    expect(await insightRows()).toHaveLength(3)
+  })
+
+  it('every chart stays within the row and key caps, and every body stays short', async () => {
+    await seedAccounts()
+    // Many long-named categories and merchants, every month.
+    for (let i = 0; i < 30; i += 1) {
+      const name = `Invented ${String(i).padStart(2, '0')} ${'n'.repeat(40)}`
+      for (const month of ['05', '06', '07', '08', '09', '10']) {
+        await tx('acc_p1', day(`2026-${month}-20`), -(1000 + i), name, name)
+      }
+      await tx('acc_p1', day('2026-10-13'), -(10 + i), name, name)
+    }
+    const result = await runInsightsAgent('personal', {}, clockAt(NOW))
+    expect(result).toMatchObject({ outcome: 'success', written: 3 })
+    const rows = await insightRows()
+    const counts = new Map<string, { rows: number; keys: number; categories: number }>()
+    for (const r of rows) {
+      const spec = specOf(r)
+      const values = spec.data.values
+      expect(values.length).toBeLessThanOrEqual(CHART_LIMITS.maxRows)
+      for (const v of values) expect(Object.keys(v).length).toBeLessThanOrEqual(CHART_LIMITS.maxKeys)
+      expect(r.body_md.length).toBeLessThanOrEqual(2000)
+      counts.set(r.kind, {
+        rows: values.length,
+        keys: Math.max(...values.map((v) => Object.keys(v).length)),
+        categories: new Set(values.map((v) => v.category)).size,
+      })
+    }
+    expect(counts.get('pattern')?.rows).toBe(5)
+    expect(counts.get('report')?.rows).toBe(8)
+    // Six named categories and the rest summed, in each of six months.
+    expect(counts.get('chart')).toEqual({ rows: 42, keys: 3, categories: 7 })
+  })
+})

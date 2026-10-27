@@ -14,7 +14,7 @@ import {
   validateCreateBill,
   type NewBill,
 } from '../bills.ts'
-import { billOccurrencesThrough } from '../overview.ts'
+import { billOccurrencesThrough } from '../../../shared/nz-dates.ts'
 import type { BillRepeat } from '../../../models/planning.ts'
 import type { BillResponse } from '../../../shared/contracts.ts'
 
@@ -603,6 +603,15 @@ describe('listBills', () => {
     await listBills('all', NOW)
 
     expect(await snapshot()).toStrictEqual(before)
+  })
+
+  // #321: bills takes `nzCalendarDate` from shared/nz-dates.ts, whose
+  // RangeError its guard turns into this fixed text. The overview's wrapper
+  // would throw OverviewDataError instead.
+  it('turns an invalid now into BillsDataError, not the overview’s OverviewDataError', async () => {
+    const read = listBills('all', new Date('not a date'))
+    await expect(read).rejects.toBeInstanceOf(BillsDataError)
+    await expect(read).rejects.toThrow('bills input invalid')
   })
 
   describe('dueBeforePaydayCents', () => {

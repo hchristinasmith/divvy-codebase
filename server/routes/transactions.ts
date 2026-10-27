@@ -3,24 +3,22 @@ import * as db from '../db/transactions.ts'
 import { isSelectableCategory } from '../db/categories.ts'
 import { applyDrawings, loadDrawingIds } from '../db/drawings.ts'
 import type { UpdateTransactionCategoryResponse } from '../../models/transactions.ts'
+import { errorClass } from '../error-class.ts'
 
 const router = express.Router()
-
-// What a 500 logs: the error's class only, as routes/accounts.ts does. Never
-// the error, its message or its stack: knex puts the SQL and its bound values
-// into the message, the stack repeats it, and a search string is one of them.
-function errorClass(err: unknown): string {
-  return err instanceof Error ? err.constructor.name : typeof err
-}
 
 // GET /api/v1/transactions?description=
 // Each row shows its effective category: a half of a drawing is Drawings,
 // set by `rule`, unless Hannah categorised it by hand (prd-02 Ruling 15).
-// Nothing is written; the row's keys are the stored columns, as before.
+// Nothing is written. Rows carry the explicit column list (#212), Akahu rows
+// only. A repeated or nested ?description= is refused before anything is read.
 router.get('/', async (req, res) => {
   const { description } = req.query
+  if (description !== undefined && typeof description !== 'string') {
+    return res.status(400).json({ error: 'description must be a single string' })
+  }
   try {
-    const rows = await db.searchTxns(description as string)
+    const rows = await db.searchTxns(description)
     const txns = applyDrawings(rows, await loadDrawingIds())
     res.json({ txns })
   } catch (error) {

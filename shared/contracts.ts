@@ -580,14 +580,24 @@ export interface SubscriptionRow extends SubscriptionMerchant {
   cancelledOn: IsoDate | null
   /** The first charge after `cancelledOn`, which makes it active again. */
   chargedAgainOn: IsoDate | null
-  /** Null exactly when `cadence` is null. */
+  /**
+   * Null exactly when `cadence` is null. A possibly-stopped row keeps its
+   * figures; only the totals leave it out.
+   */
   perMonthCents: Cents | null
   perYearCents: Cents | null
+  /**
+   * Active, with a cadence, and no charge for more than two billing cycles
+   * before today (issue #392). Computed on read, never stored: it clears
+   * when a charge the detector joins to this row lands, and a charge it
+   * does not join (#409) leaves it set. It never makes a row cancelled.
+   */
+  possiblyStopped: boolean
 }
 
 /**
- * Over active rows with a cadence. Cancelled rows, questions and
- * not-a-subscription merchants are never in a total.
+ * Over active rows with a cadence that are not possibly stopped. Cancelled
+ * rows, questions and not-a-subscription merchants are never in a total.
  */
 export interface SubscriptionTotals {
   perMonthCents: Cents
@@ -597,6 +607,8 @@ export interface SubscriptionTotals {
   countedCount: number
   /** Active rows left out because their cadence is null. */
   uncountedCount: number
+  /** Active rows left out because they are possibly stopped. */
+  possiblyStoppedCount: number
 }
 
 /** GET /api/v1/subscriptions?scope= */

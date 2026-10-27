@@ -7,6 +7,7 @@ import {
   type InsightScope,
 } from '../../../models/insights.ts'
 import { dismissInsight, getInsight, listInsights } from '../db/insights.ts'
+import { errorClass } from '../../error-class.ts'
 
 // /api/v1/agents/insights (prd-04 Rulings 2, 3 and 8, #51), mounted by
 // ./index.ts, which also refuses a cross-site POST before it reaches here.
@@ -50,10 +51,6 @@ function parseKind(raw: unknown): InsightKind | 'any' | null {
     (INSIGHT_KINDS as readonly string[]).includes(raw)
     ? (raw as InsightKind)
     : null
-}
-
-function errorClass(err: unknown): string {
-  return err instanceof Error ? err.constructor.name : typeof err
 }
 
 const router = express.Router()

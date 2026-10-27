@@ -192,6 +192,17 @@ describe('insertProposal', () => {
     ],
     ['reason empty', { reason: '' }, /^reason must not be blank$/],
     ['reason spaces', { reason: '   ' }, /^reason must not be blank$/],
+    ['reason U+3164 only', { reason: '\u3164' }, /^reason must not be blank$/],
+    ['reason U+200B only', { reason: '\u200b' }, /^reason must not be blank$/],
+    ['reason U+3164 and spaces', { reason: '\u3164 \u3164' }, /^reason must not be blank$/],
+    ['reason tag characters (non-BMP)', { reason: '\u{E0041}\u{E0042}' }, /^reason must not be blank$/],
+    ['reason a variation selector', { reason: '\ufe0f' }, /^reason must not be blank$/],
+    ['reason U+200B, space, U+3164 and tab', { reason: '\u200b \u3164\t' }, /^reason must not be blank$/],
+    // The blank check runs before the cap: a blank value over the cap is blank.
+    ['reason 2,001 spaces', { reason: ' '.repeat(2_001) }, /^reason must not be blank$/],
+    ['reason 2,001 U+200B', { reason: '\u200b'.repeat(2_001) }, /^reason must not be blank$/],
+    ['reason 2,001 U+0001', { reason: '\u0001'.repeat(2_001) }, /^reason must not be blank$/],
+    ['reason 42', { reason: 42 as unknown as string }, /^reason must not be blank$/],
     [
       'origin claude',
       { origin: 'claude' as unknown as NewProposal['origin'] },
@@ -223,6 +234,218 @@ describe('insertProposal', () => {
       /^insertProposal failed: SQLITE_CONSTRAINT: FOREIGN KEY constraint failed$/,
     )
     await expect(attempt).rejects.not.toThrow(SENTINEL)
+  })
+
+  // The reason cap (#313) is counted in code points. The constant is not
+  // exported, so the cap is pinned here as a literal. Non-BMP characters are
+  // two UTF-16 units each, so these strings are over the cap by `.length`.
+  it('accepts a reason of exactly 2000 code points, and stores it whole', async () => {
+    const txId = await transaction('a')
+    const reason = '\u{20000}'.repeat(2_000)
+    expect(Array.from(reason)).toHaveLength(2_000)
+    expect(reason.length).toBeGreaterThan(2_000)
+
+    const result = await insertProposal(proposal(txId, { reason }), NOW)
+    expect(result).toStrictEqual({ inserted: true, id: expect.any(Number) })
+
+    const stored = await rows()
+    expect(stored).toHaveLength(1)
+    expect(Object.keys(stored[0]).sort()).toEqual([...PROPOSAL_COLUMNS].sort())
+    expect(stored[0].reason).toBe(reason)
+  })
+
+  it('counts a reason in code points, not UTF-16 units: 1,001 non-BMP code points (2,002 units) is accepted', async () => {
+    const txId = await transaction('a')
+    const reason = '\u{20000}'.repeat(1_001)
+    expect(Array.from(reason)).toHaveLength(1_001)
+    expect(reason.length).toBe(2_002)
+
+    const result = await insertProposal(proposal(txId, { reason }), NOW)
+    expect(result).toStrictEqual({ inserted: true, id: expect.any(Number) })
+    expect((await rows())[0].reason).toBe(reason)
+  })
+
+  // The refusal names the field and the cap, never the value. The value here
+  // holds a sentinel, so the not.toContain assertion has something to find.
+  it('refuses a reason one code point over the cap, naming the field and the cap but not the value, and writes nothing', async () => {
+    const txId = await transaction('a')
+    const reason = SENTINEL + '\u{20000}'.repeat(2_001 - Array.from(SENTINEL).length)
+    expect(Array.from(reason)).toHaveLength(2_001)
+
+    const error = await insertProposal(proposal(txId, { reason }), NOW).then(
+      () => new Error('expected a refusal'),
+      (e: unknown) => e,
+    )
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toBe('reason must be at most 2000 characters')
+    expect((error as Error).message).not.toContain(SENTINEL)
+    expect(await rows()).toEqual([])
+  })
+
+  // The cap counts the reason as given: a space is a code point, so the reason
+  // is not trimmed before it is counted (#313).
+  it.each([
+    ['a trailing space', 'a'.repeat(2_000) + ' '],
+    ['a leading space', ' ' + 'a'.repeat(2_000)],
+  ])(
+    'refuses 2,000 non-space code points with %s, counting the space, and writes nothing',
+    async (_, reason) => {
+      const txId = await transaction('a')
+      expect(Array.from(reason)).toHaveLength(2_001)
+
+      const error = await insertProposal(proposal(txId, { reason }), NOW).then(
+        () => new Error('expected a refusal'),
+        (e: unknown) => e,
+      )
+      expect((error as Error).message).toBe('reason must be at most 2000 characters')
+      expect(await rows()).toEqual([])
+    },
+  )
+
+  // The cap counts the reason as given, in raw code points, not after NFKC, and
+  // the stored reason is not normalised either (#313). U+FDFA is one code point
+  // that NFKC expands to 18, so 200 of them are 200 raw and 3,600 after NFKC.
+  it('counts the cap on the raw code points as given, not after NFKC: 200 U+FDFA is accepted and stored unchanged', async () => {
+    const txId = await transaction('a')
+    const reason = 'ﷺ'.repeat(200)
+    expect(Array.from(reason)).toHaveLength(200)
+    expect(Array.from(reason.normalize('NFKC'))).toHaveLength(3_600)
+
+    const result = await insertProposal(proposal(txId, { reason }), NOW)
+    expect(result).toStrictEqual({ inserted: true, id: expect.any(Number) })
+    expect((await rows())[0].reason).toBe(reason)
+  })
+
+  // current_category is the raw category the transaction had when the proposal
+  // was made. It is capped at the column's 255 code points and never trimmed,
+  // normalised or blank-checked: the accept route compares it with the raw
+  // transactions.category (#329).
+  const CURRENT_SENTINEL = 'Fixture Category 9042'
+  const CURRENT_CAP = /^current_category must be at most 255 characters$/
+
+  it('accepts a current_category of exactly 255 code points, and stores it whole', async () => {
+    const txId = await transaction('a')
+    const current = 'a'.repeat(255)
+    expect(Array.from(current)).toHaveLength(255)
+
+    const result = await insertProposal(proposal(txId, { current_category: current }), NOW)
+    expect(result).toStrictEqual({ inserted: true, id: expect.any(Number) })
+    expect((await rows())[0].current_category).toBe(current)
+  })
+
+  // Non-BMP characters are two UTF-16 units each: 255 of them are 510 units,
+  // and a `.length` cap would refuse this value.
+  it('counts current_category in code points, not UTF-16 units: 255 non-BMP code points (510 units) is accepted', async () => {
+    const txId = await transaction('a')
+    const current = '\u{20000}'.repeat(255)
+    expect(Array.from(current)).toHaveLength(255)
+    expect(current.length).toBe(510)
+
+    const result = await insertProposal(proposal(txId, { current_category: current }), NOW)
+    expect(result).toStrictEqual({ inserted: true, id: expect.any(Number) })
+    expect((await rows())[0].current_category).toBe(current)
+  })
+
+  it('refuses a current_category of 256 code points, naming the field and the cap, and writes nothing', async () => {
+    const txId = await transaction('a')
+    const attempt = insertProposal(proposal(txId, { current_category: 'a'.repeat(256) }), NOW)
+    await expect(attempt).rejects.toThrow(CURRENT_CAP)
+    expect(await rows()).toEqual([])
+  })
+
+  // The refusal never echoes the value, so the message must not hold the sentinel.
+  it('refuses a 256-code-point current_category holding a sentinel, with a message that does not contain it', async () => {
+    const txId = await transaction('a')
+    const current = CURRENT_SENTINEL + 'a'.repeat(256 - Array.from(CURRENT_SENTINEL).length)
+    expect(Array.from(current)).toHaveLength(256)
+
+    const attempt = insertProposal(proposal(txId, { current_category: current }), NOW)
+    await expect(attempt).rejects.toThrow(CURRENT_CAP)
+    await expect(attempt).rejects.not.toThrow(CURRENT_SENTINEL)
+    expect(await rows()).toEqual([])
+  })
+
+  it('refuses a current_category of 100,000 code points, and writes nothing', async () => {
+    const txId = await transaction('a')
+    const attempt = insertProposal(proposal(txId, { current_category: 'a'.repeat(100_000) }), NOW)
+    await expect(attempt).rejects.toThrow(CURRENT_CAP)
+    expect(await rows()).toEqual([])
+  })
+
+  const NOT_STRINGS: [label: string, value: unknown][] = [
+    ['the number 42', 42],
+    ['undefined', undefined],
+    ['an object', {}],
+    ['true', true],
+  ]
+  it.each(NOT_STRINGS)(
+    'refuses current_category as %s, naming the field and the type, and writes nothing',
+    async (_, value) => {
+      const txId = await transaction('a')
+      const attempt = insertProposal(
+        proposal(txId, { current_category: value as unknown as string }),
+        NOW,
+      )
+      await expect(attempt).rejects.toThrow(/^current_category must be a string or null$/)
+      expect(await rows()).toEqual([])
+    },
+  )
+
+  it('stores a null current_category as null', async () => {
+    const txId = await transaction('a')
+    await inserted(proposal(txId, { current_category: null }))
+    expect((await rows())[0].current_category).toBeNull()
+  })
+
+  // Raw: leading and trailing spaces and an invisible character are kept as given.
+  it('stores a current_category with spaces and U+3164 byte-for-byte unchanged', async () => {
+    const txId = await transaction('a')
+    const current = '  \u3164 Bakeries \u3164  '
+    await inserted(proposal(txId, { current_category: current }))
+    expect((await rows())[0].current_category).toBe(current)
+  })
+
+  // The cap counts the value as given: the trailing space is the 256th code point.
+  it('refuses 255 code points followed by a space, counting the space: the cap is on the raw value', async () => {
+    const txId = await transaction('a')
+    const attempt = insertProposal(proposal(txId, { current_category: 'a'.repeat(255) + ' ' }), NOW)
+    await expect(attempt).rejects.toThrow(CURRENT_CAP)
+    expect(await rows()).toEqual([])
+  })
+
+  // A reason with visible text keeps its invisible characters as given: the
+  // blank check refuses only a value with nothing visible, and never strips.
+  it.each([
+    ['visible text and U+3164', 'Moved\u3164 twice'],
+    ['one visible character among U+200B', '\u200bx\u200b'],
+    ['visible text after a leading U+0085', '\u0085Moved twice'],
+  ])('stores a reason of %s byte-for-byte unchanged', async (_, reason) => {
+    const txId = await transaction('a')
+
+    const result = await insertProposal(proposal(txId, { reason }), NOW)
+    expect(result).toStrictEqual({ inserted: true, id: expect.any(Number) })
+    expect((await rows())[0].reason).toBe(reason)
+  })
+})
+
+// A control character is invisible to the blank check (#342): a reason made
+// only of control characters, whitespace and tabs is refused, and nothing is
+// written. Nothing is stripped, so a reason with visible text is stored as
+// given (see the byte-for-byte rows above).
+describe('insertProposal refuses a reason made only of control characters (#342)', () => {
+  it.each([
+    ['U+0001', '\u0001'],
+    ['U+0085', '\u0085'],
+    ['U+0090', '\u0090'],
+    ['DEL', '\u007f'],
+    ['U+0001, space, U+0085 and tab', '\u0001 \u0085\t'],
+  ])('refuses a reason made only of %s, and writes nothing', async (_, reason) => {
+    const txId = await transaction('a')
+
+    await expect(insertProposal(proposal(txId, { reason }), NOW)).rejects.toThrow(
+      /^reason must not be blank$/,
+    )
+    expect(await rows()).toEqual([])
   })
 })
 
@@ -353,6 +576,7 @@ describe('every module under server/agents/db/ touches only the inbox tables', (
       '../../db/connection.ts',
       '../contracts.ts',
       './scrubbed.ts',
+      './text-checks.ts',
     ],
   }
   const NAMED = /\b(transactions|category_corrections|budgets|bills|goals|settings)\b/
@@ -400,6 +624,8 @@ describe('every module under server/agents/db/ touches only the inbox tables', (
         }
       } else if (ts.isImportEqualsDeclaration(node)) {
         problems.push('import = require')
+      } else if (ts.isImportTypeNode(node)) {
+        problems.push('type-position import(')
       } else if (ts.isCallExpression(node)) {
         if (node.expression.kind === ts.SyntaxKind.ImportKeyword) problems.push('dynamic import(')
         if (ts.isIdentifier(node.expression) && node.expression.text === 'require') {
@@ -463,6 +689,8 @@ describe('every module under server/agents/db/ touches only the inbox tables', (
     ['a dynamic import', "await import('../../sync/upsert.ts')", 'dynamic import('],
     ['a require', "const m = require('../../sync/upsert.ts')", 'require('],
     ['import = require', "import m = require('../../sync/upsert.ts')", 'import = require'],
+    ['a typeof import', "export type C = typeof import('../../db/connection.ts')", 'type-position import('],
+    ['a type from import()', "export type U = import('../../sync/upsert.ts').default", 'type-position import('],
     ["db['raw']", "db['raw']('select 1')", "computed member access ['raw']"],
     ['db["raw"]', 'db["raw"]("select 1")', 'computed member access ["raw"]'],
     ['a computed key in a variable', 'db[method]()', 'computed member access [method]'],
@@ -506,6 +734,17 @@ describe('every module under server/agents/db/ touches only the inbox tables', (
     for (const [dir, allowed] of Object.entries(IMPORTS)) {
       expect([...(used[dir] ?? [])].sort(), dir).toEqual([...allowed].sort())
     }
+  })
+
+  // #358: scrubbed.ts and text-checks.ts say in their headers that they import
+  // nothing. The directory list above would let either one import anything it
+  // allows, so each is held to no specifier and no import problem. Named here
+  // rather than read from the headers, so a rename fails as a missing module.
+  const IMPORTS_NOTHING = ['scrubbed.ts', 'text-checks.ts']
+  it.each(IMPORTS_NOTHING)('%s exists and imports nothing, by any import route', (file) => {
+    expect(modules()).toContain(file)
+    const { specifiers, problems: reached } = imports(source(file))
+    expect([...specifiers, ...reached], file).toEqual([])
   })
 
   it.each(Object.entries(OWN_TABLE))('%s names its own table, %s', (file, table) => {
