@@ -560,3 +560,271 @@ describe('GET /api/v1/categories', () => {
   }, 20_000)
 })
 
+
+// GET /api/v1/transactions?scope=&month=&category= (#272): the Spending
+// screen's list under one category. Accounts and rows are inserted per test
+// beside the seeded fixture, whose rows sit on no stored account and so are
+// never listed. NZ is UTC+13 throughout October 2026. Every value is
+// invented.
+describe('GET /api/v1/transactions?scope=&month=&category=', () => {
+  const EVERYDAY = 'acc_272_everyday'
+  const TRADING = 'acc_272_trading'
+  const UNSTORED = 'acc_272_unstored'
+  const GROCER = 'Groceries Invented 272'
+  const CAFE = 'Cafes Invented 272'
+  const STAMP = '2026-10-20T00:00:00.000Z'
+
+  type Row = Record<string, unknown>
+
+  // A copy of the builders in ./spending.test.ts.
+  function tx(accountId: string, date: string | null, amountCents: number, fields: Row = {}): Row {
+    return {
+      account_id: accountId,
+      date,
+      amount_cents: amountCents,
+      description: 'Invented shop',
+      status: 'settled',
+      source: 'akahu',
+      category: null,
+      category_source: 'akahu',
+      ...fields,
+    }
+  }
+
+  async function insertAll(table: string, rows: Row[]) {
+    // One insert per row, so a column a row leaves out keeps its default.
+    for (const row of rows) await connection(table).insert(row)
+  }
+
+  async function seedAccounts() {
+    await insertAll('accounts', [
+      { id: 2721, akahu_id: EVERYDAY, source: 'akahu', scope: 'personal', name: 'Everyday Invented', created_at: STAMP, updated_at: STAMP },
+      { id: 2722, akahu_id: TRADING, source: 'akahu', scope: 'strawb', name: 'Trading Invented', created_at: STAMP, updated_at: STAMP },
+    ])
+  }
+
+  // Groceries in October: personal 1205 (pending) + 2310 + 999 (NZ 1 Oct),
+  // strawb 1100. Everything else is a reason a row is not listed.
+  async function seed() {
+    await seedAccounts()
+    await insertAll('transactions', [
+      tx(EVERYDAY, '2026-10-05T00:00:00.000Z', -2310, { category: GROCER }),
+      tx(EVERYDAY, '2026-10-06T00:00:00.000Z', -1205, { category: GROCER, status: 'pending' }),
+      // 12:30 UTC on 30 September is 01:30 on 1 October in NZ.
+      tx(EVERYDAY, '2026-09-30T12:30:00.000Z', -999, { category: GROCER }),
+      // 11:30 UTC on 31 October is 00:30 on 1 November in NZ.
+      tx(EVERYDAY, '2026-10-31T11:30:00.000Z', -444, { category: GROCER }),
+      tx(EVERYDAY, '2026-10-07T00:00:00.000Z', -450, { category: CAFE }),
+      tx(EVERYDAY, '2026-10-08T00:00:00.000Z', -615),
+      // A refund is money in, never spending.
+      tx(EVERYDAY, '2026-10-09T00:00:00.000Z', 300, { category: GROCER }),
+      tx(TRADING, '2026-10-12T00:00:00.000Z', -1100, { category: GROCER }),
+      tx(UNSTORED, '2026-10-14T00:00:00.000Z', -88888, { category: GROCER }),
+      tx(EVERYDAY, '2026-10-14T00:00:00.000Z', -77777, { category: GROCER, source: 'xero' }),
+      tx(EVERYDAY, '2026-09-15T00:00:00.000Z', -55555, { category: GROCER }),
+    ])
+  }
+
+  const list = (query: Record<string, string>) =>
+    api.get('/api/v1/transactions').query(query)
+
+  const amounts = (res: { body: { txns: { amount_cents: number }[] } }) =>
+    res.body.txns.map((t) => t.amount_cents)
+
+  it('lists one scope’s outflows in the category and NZ month, newest first', async () => {
+    await seed()
+
+    const personal = await list({ scope: 'personal', month: '2026-10', category: GROCER })
+    expect(personal.status).toBe(200)
+    expect(Object.keys(personal.body)).toEqual(['txns'])
+    expect(amounts(personal)).toEqual([-1205, -2310, -999])
+    for (const row of personal.body.txns) {
+      expect(Object.keys(row).sort()).toEqual([...ROW_KEYS].sort())
+      expect(row.category).toBe(GROCER)
+      expect(row.account_id).toBe(EVERYDAY)
+    }
+
+    const strawb = await list({ scope: 'strawb', month: '2026-10', category: GROCER })
+    expect(amounts(strawb)).toEqual([-1100])
+
+    const all = await list({ scope: 'all', month: '2026-10', category: GROCER })
+    expect(amounts(all)).toEqual([-1100, -1205, -2310, -999])
+  })
+
+  it('places a row by its NZ date, not its UTC one', async () => {
+    await seed()
+
+    const september = await list({ scope: 'personal', month: '2026-09', category: GROCER })
+    // The 30 September 12:30 UTC row is October in NZ, so it is not here.
+    expect(amounts(september)).toEqual([-55555])
+
+    const november = await list({ scope: 'personal', month: '2026-11', category: GROCER })
+    expect(amounts(november)).toEqual([-444])
+  })
+
+  it('matches the category exactly and lists another category apart', async () => {
+    await seed()
+
+    expect(amounts(await list({ scope: 'all', month: '2026-10', category: CAFE }))).toEqual([-450])
+    expect(
+      amounts(await list({ scope: 'all', month: '2026-10', category: GROCER.toLowerCase() })),
+    ).toEqual([])
+  })
+
+  it('lists nothing for a scope with no stored account', async () => {
+    await insertAll('accounts', [
+      { id: 2721, akahu_id: EVERYDAY, source: 'akahu', scope: 'personal', name: 'Everyday Invented', created_at: STAMP, updated_at: STAMP },
+    ])
+    await insertAll('transactions', [
+      tx(EVERYDAY, '2026-10-05T00:00:00.000Z', -2310, { category: GROCER }),
+    ])
+
+    const res = await list({ scope: 'strawb', month: '2026-10', category: GROCER })
+    expect(res.status).toBe(200)
+    expect(res.body).toStrictEqual({ txns: [] })
+  })
+
+  describe('drawings are not spending (prd-02 Ruling 15)', () => {
+    // A strawb out-half on the 15th and its personal in-half on the 16th.
+    async function seedDrawing(outFields: Row = {}) {
+      await seedAccounts()
+      await insertAll('transactions', [
+        tx(TRADING, '2026-10-15T00:00:00.000Z', -25000, { category: GROCER, ...outFields }),
+        tx(EVERYDAY, '2026-10-16T00:00:00.000Z', 25000),
+        tx(TRADING, '2026-10-17T00:00:00.000Z', -1100, { category: GROCER }),
+      ])
+    }
+
+    it('leaves the drawn half out of its Akahu category and lists nothing under Drawings', async () => {
+      await seedDrawing()
+
+      expect(amounts(await list({ scope: 'strawb', month: '2026-10', category: GROCER }))).toEqual([-1100])
+      expect(amounts(await list({ scope: 'all', month: '2026-10', category: 'Drawings' }))).toEqual([])
+    })
+
+    it('lists the half under the category Hannah set by hand', async () => {
+      await seedDrawing({ category_source: 'user' })
+
+      expect(amounts(await list({ scope: 'strawb', month: '2026-10', category: GROCER }))).toEqual([
+        -1100, -25000,
+      ])
+    })
+  })
+
+  it('lists, for every category the aggregate reports, rows that add up to its figure', async () => {
+    await seed()
+    await insertAll('transactions', [
+      tx(TRADING, '2026-10-15T00:00:00.000Z', -25000, { category: CAFE }),
+      tx(EVERYDAY, '2026-10-16T00:00:00.000Z', 25000),
+    ])
+
+    for (const scope of ['all', 'personal', 'strawb']) {
+      const aggregate = await api
+        .get('/api/v1/spending/categories')
+        .query({ scope, month: '2026-10' })
+      expect(aggregate.status).toBe(200)
+      expect(aggregate.body.categories.length, scope).toBeGreaterThan(0)
+      for (const line of aggregate.body.categories as { category: string; spentCents: number }[]) {
+        const res = await list({ scope, month: '2026-10', category: line.category })
+        expect(res.body.txns.map((t: { category: string }) => t.category)).toEqual(
+          res.body.txns.map(() => line.category),
+        )
+        const listed = res.body.txns.reduce(
+          (sum: number, t: { amount_cents: number }) => sum - t.amount_cents,
+          0,
+        )
+        expect(listed, `${scope} ${line.category}`).toBe(line.spentCents)
+      }
+    }
+  })
+
+  it('leaves the answer without the filters exactly as before: every Akahu row, money in included', async () => {
+    await seed()
+
+    const res = await api.get('/api/v1/transactions')
+    expect(res.status).toBe(200)
+    const shown: number[] = res.body.txns.map((t: { amount_cents: number }) => t.amount_cents)
+    expect(shown).toEqual(expect.arrayContaining([300, -88888, -55555, -444, -615]))
+    expect(shown).not.toContain(-77777)
+    expect(res.body.txns).toHaveLength(fixture.items.length + 10)
+  })
+
+  // Each refusal is checked with the table renamed away: a read that got past
+  // the check would answer 500, not 400.
+  async function refusedBeforeRead(url: string, error: string) {
+    await connection.schema.renameTable('transactions', 'transactions_aside')
+    try {
+      const res = await api.get(url)
+      expect(res.status).toBe(400)
+      expect(res.body).toStrictEqual({ error })
+    } finally {
+      await connection.schema.renameTable('transactions_aside', 'transactions')
+    }
+  }
+
+  it.each([
+    ['scope alone', '?scope=all'],
+    ['month alone', '?month=2026-10'],
+    ['category alone', '?category=Bakeries'],
+    ['no category', '?scope=all&month=2026-10'],
+    ['no month', '?scope=all&category=Bakeries'],
+    ['no scope', '?month=2026-10&category=Bakeries'],
+    ['a misspelt category', '?scope=all&month=2026-10&categry=Bakeries'],
+  ])('refuses %s with 400', async (_, query) => {
+    await refusedBeforeRead(
+      `/api/v1/transactions${query}`,
+      'scope, month and category must be sent together',
+    )
+  })
+
+  it.each([
+    ['a repeated scope', '?scope=all&scope=personal&month=2026-10&category=Bakeries'],
+    ['a repeated month', '?scope=all&month=2026-10&month=2026-11&category=Bakeries'],
+    ['a repeated category', '?scope=all&month=2026-10&category=Bakeries&category=Cafes'],
+    ['a nested category', '?scope=all&month=2026-10&category[a]=Bakeries'],
+    ['a repeated scope alone', '?scope=all&scope=strawb'],
+  ])('refuses %s with 400', async (_, query) => {
+    await refusedBeforeRead(
+      `/api/v1/transactions${query}`,
+      'scope, month and category must each be sent once',
+    )
+  })
+
+  it.each([
+    ['an unknown scope', { scope: 'both', month: '2026-10', category: 'Bakeries' }, 'scope must be all, personal or strawb'],
+    ['a month that is not YYYY-MM', { scope: 'all', month: '2026-13', category: 'Bakeries' }, 'month must be YYYY-MM'],
+    ['a date for a month', { scope: 'all', month: '2026-10-01', category: 'Bakeries' }, 'month must be YYYY-MM'],
+    ['an empty category', { scope: 'all', month: '2026-10', category: '' }, 'category must be 1 to 200 characters'],
+    ['a category over 200 characters', { scope: 'all', month: '2026-10', category: 'x'.repeat(201) }, 'category must be 1 to 200 characters'],
+    ['a description beside the filters', { scope: 'all', month: '2026-10', category: 'Bakeries', description: 'Shop' }, 'description cannot be sent with scope, month and category'],
+  ])('refuses %s with 400', async (_, query, error) => {
+    await refusedBeforeRead(`/api/v1/transactions?${new URLSearchParams(query)}`, error)
+  })
+
+  it('accepts a category of exactly 200 characters', async () => {
+    await seed()
+    const res = await list({ scope: 'all', month: '2026-10', category: 'x'.repeat(200) })
+    expect(res.status).toBe(200)
+    expect(res.body).toStrictEqual({ txns: [] })
+  })
+
+  it("answers 500 with a fixed text and logs the error's class, never the category", async () => {
+    const CATEGORY = 'Invented secret category'
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await seedAccounts()
+    await connection.schema.renameTable('transactions', 'transactions_aside')
+    try {
+      const res = await list({ scope: 'all', month: '2026-10', category: CATEGORY })
+
+      expect(res.status).toBe(500)
+      expect(res.body).toStrictEqual({ error: "Couldn't list transactions" })
+      expect(logged.mock.calls).toStrictEqual([
+        ['Error listing spending transactions:', 'Error'],
+      ])
+      expect(logged.mock.calls.flat().map(String).join('\n')).not.toContain(CATEGORY)
+    } finally {
+      await connection.schema.renameTable('transactions_aside', 'transactions')
+      logged.mockRestore()
+    }
+  })
+})

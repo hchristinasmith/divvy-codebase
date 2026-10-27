@@ -3,6 +3,7 @@ import '../styles/App.css'
 import Shell from './Shell/Shell.tsx'
 import { ScopeProvider } from '../context/ScopeContext.tsx'
 import { screenRoutes } from '../screens/routes.tsx'
+import Spending from '../screens/Spending/index.tsx'
 import Dashboard from './Dashboard/Dashboard.tsx'
 import Settings from './Settings.tsx'
 import Challenges from './Challenges/ChallengesDashboard.tsx'
@@ -17,12 +18,18 @@ import Targets from './Targets/targets.tsx'
 // the rest stay reachable by URL only until the prd-02 w5 sweep deletes
 // them (prd-02 Ruling 8). The old Dashboard moved to /dashboard when the
 // Overview took "/".
+//
+// /spending (issue 272) is a handoff-style screen routed here rather than in
+// screens/routes.tsx: that table also feeds the sidebar and the tab bar, and
+// the handoff gives Spending no entry in either. It is reached from the
+// Overview's "Spending by category" card.
 export default function App() {
   return (
     <ScopeProvider>
       <Shell>
         <Routes>
           {screenRoutes}
+          <Route path="/spending" element={<Spending />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/transactions" element={<Transactions />} />

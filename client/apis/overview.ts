@@ -11,13 +11,15 @@ import type {
   CategoryGroup,
 } from '../../models/categories.ts'
 import type {
+  TransactionRow,
   UpdateTransactionCategory,
   UpdateTransactionCategoryResponse,
 } from '../../models/transactions.ts'
 
 // The Overview screen's requests (prd-02, issue 45): the overview read, an
-// alert dismissal, the category list, the inline category edit and the
-// spending-by-category card's read (#271). A
+// alert dismissal, the category list, the inline category edit, the
+// spending-by-category card's read (#271), and the Spending screen's two
+// reads (#272). A
 // refused request rejects with an Error whose message is the server's own
 // `{ error }` text, so the screen can show it as it is.
 //
@@ -84,6 +86,59 @@ export function spendingByCategoryQuery(scope: Scope) {
   return queryOptions({
     queryKey: [...queryKeys.overview.scoped(scope), 'spending'] as const,
     queryFn: () => grabSpendingByCategory(scope),
+  })
+}
+
+/** One month's spending by category, every category listed (no "Other"). */
+export function grabMonthSpending(
+  scope: Scope,
+  month: string,
+): Promise<SpendingByCategoryResponse> {
+  const query = new URLSearchParams({ scope, month })
+  return call(`/spending/categories?${query}`)
+}
+
+// The Spending screen's month (#272), under the overview's scoped key for
+// the reason given on `spendingByCategoryQuery`.
+export function monthSpendingQuery(scope: Scope, month: string) {
+  return queryOptions({
+    queryKey: [...queryKeys.overview.scoped(scope), 'spending', month] as const,
+    queryFn: () => grabMonthSpending(scope, month),
+  })
+}
+
+/** GET /api/v1/transactions?scope=&month=&category=, the rows under one line. */
+interface SpendingTransactionsResponse {
+  txns: TransactionRow[]
+}
+
+/** The rows the month's figure for one category counts, newest first. */
+export async function grabSpendingTransactions(
+  scope: Scope,
+  month: string,
+  category: string,
+): Promise<TransactionRow[]> {
+  const query = new URLSearchParams({ scope, month, category })
+  const body = await call<SpendingTransactionsResponse>(`/transactions?${query}`)
+  return body.txns
+}
+
+// Under the month's key, so a category edit that refreshes the Overview
+// refreshes the open list too.
+export function spendingTransactionsQuery(
+  scope: Scope,
+  month: string,
+  category: string,
+) {
+  return queryOptions({
+    queryKey: [
+      ...queryKeys.overview.scoped(scope),
+      'spending',
+      month,
+      'transactions',
+      category,
+    ] as const,
+    queryFn: () => grabSpendingTransactions(scope, month, category),
   })
 }
 

@@ -8,7 +8,12 @@ import type {
   CorrectionSource,
   TransactionStatus,
 } from '../../models/sync.ts'
+import type { RowScope, Scope } from '../../shared/contracts.ts'
+import { countsAsSpending } from '../../shared/spending.ts'
+import { nzCalendarDate } from '../../shared/nz-dates.ts'
 import connection from './connection.ts'
+import { applyDrawings, loadDrawingIds } from './drawings.ts'
+import { listAccounts } from './synced.ts'
 
 // The pattern for a LIKE that finds `term` anywhere (#299). `%` and `_` in the
 // term are escaped so they match themselves, and so is `\`, the escape
@@ -36,6 +41,69 @@ export async function searchTxns(
   }
 
   return query
+}
+
+/** One category's spending in one scope and NZ month (#272). */
+export interface SpendingTransactionsQuery {
+  scope: Scope
+  /** `YYYY-MM`, already checked by the caller. */
+  month: string
+  /** An effective category, matched exactly. */
+  category: string
+}
+
+/**
+ * The rows the Spending screen lists under one category (#272): exactly the
+ * rows `spendingByCategory` (shared/spending.ts) adds up for that category,
+ * as GET /api/v1/spending/categories reads them (./spending.ts). Akahu
+ * outflows, settled and pending, on stored Akahu accounts in the scope
+ * (`all` is both); whose NZ calendar date falls in the month; whose
+ * effective category, drawings laid over (prd-02 Ruling 15), is the one
+ * asked; and that `countsAsSpending` keeps. Newest first (`date`
+ * descending, then `id` descending). Reads only.
+ *
+ * The aggregate refuses a row with no date or no amount; this list cannot
+ * place such a row in a month, so it leaves it out.
+ */
+export async function listSpendingTransactions(
+  query: SpendingTransactionsQuery,
+  db = connection,
+): Promise<TransactionRow[]> {
+  const accountScopes = new Map<string, RowScope>()
+  for (const account of await listAccounts(db)) {
+    if (account.akahu_id === null) continue
+    if (query.scope !== 'all' && account.scope !== query.scope) continue
+    accountScopes.set(account.akahu_id, account.scope)
+  }
+  if (accountScopes.size === 0) return []
+
+  const rows: TransactionRow[] = await db('transactions')
+    .select([...TRANSACTION_ROW_COLUMNS])
+    .where({ source: 'akahu' })
+    .where('amount_cents', '<', 0)
+    .whereIn('account_id', [...accountScopes.keys()])
+    .orderBy([
+      { column: 'date', order: 'desc' },
+      { column: 'id', order: 'desc' },
+    ])
+
+  return applyDrawings(rows, await loadDrawingIds(db)).filter((row) => {
+    const scope =
+      row.account_id === null ? undefined : accountScopes.get(row.account_id)
+    if (scope === undefined || row.date === null || row.amount_cents === null)
+      return false
+    const at = new Date(row.date)
+    if (Number.isNaN(at.getTime())) return false
+    const date = nzCalendarDate(at)
+    if (date.slice(0, 7) !== query.month) return false
+    if (row.category !== query.category) return false
+    return countsAsSpending({
+      scope,
+      date,
+      amountCents: row.amount_cents,
+      category: row.category,
+    })
+  })
 }
 
 /**
