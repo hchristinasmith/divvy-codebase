@@ -1,8 +1,10 @@
 import express from 'express'
-import type { Request, Response } from 'express'
+import type { Response } from 'express'
 
-import type { Scope, Verdict } from '../../shared/contracts.ts'
+import type { Verdict } from '../../shared/contracts.ts'
 import { HabitsDataError, readHabits, setVerdict } from '../db/habits.ts'
+import { errorClass } from '../error-class.ts'
+import { fromThisSite, parseScope } from '../http.ts'
 
 // /api/v1/habits (prd-02, issue #52): the Habits screen's read and
 // Hannah's "worth it" verdicts. Mounted by ./index.ts.
@@ -21,45 +23,6 @@ import { HabitsDataError, readHabits, setVerdict } from '../db/habits.ts'
 // Errors are fixed text and never echo what was sent. A `HabitsDataError`
 // carries one of its own constant messages, which name no value; anything
 // else is a generic text. Only the error's class is logged.
-
-/**
- * A copy of `parseScope` in ./overview.ts, ./subscriptions.ts and ./bills.ts;
- * change all together (#236 lifts them). A plain scope; anything else is
- * refused.
- */
-function parseScope(raw: unknown): Scope | null {
-  return raw === 'all' || raw === 'personal' || raw === 'strawb' ? raw : null
-}
-
-/**
- * A copy of `fromThisSite` in ./sync.ts, ./overview.ts, ./subscriptions.ts
- * and ./bills.ts; change all together (#236 lifts them).
- * `Sec-Fetch-Site` when the browser sends it; otherwise no `Origin` (curl)
- * passes and an `Origin` must name this host.
- */
-function fromThisSite(req: Request): boolean {
-  const site = req.headers['sec-fetch-site']
-  if (site !== undefined) return site === 'same-origin' || site === 'none'
-  const origin = req.headers.origin
-  if (origin === undefined) return true
-  const host = req.headers.host
-  if (host === undefined) return false
-  try {
-    return new URL(origin).host === host.toLowerCase()
-  } catch {
-    // `Origin: null` (a sandboxed frame, a file: page) and anything else
-    // that is not a URL.
-    return false
-  }
-}
-
-/**
- * A copy of `errorClass` in ./overview.ts, ./accounts.ts, ./subscriptions.ts
- * and ./bills.ts; change all together (#236 lifts them).
- */
-function errorClass(err: unknown): string {
-  return err instanceof Error ? err.constructor.name : typeof err
-}
 
 type Body = Record<string, unknown>
 
