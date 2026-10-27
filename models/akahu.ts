@@ -61,9 +61,9 @@ export interface Accounts {
  * `server/sync/akahu-client.ts` reads Akahu's amounts as exact text, converts
  * them with `parseDollars` and returns its own cents types
  * (`server/sync/types.ts`, prd-01 Ruling 3).
- * The Dashboard renders this shape, in dollars, from the database through
- * `GET /api/v1/accounts/transactions` (`server/routes/accounts.ts`, #32),
- * which adds `pending` and `category_source`.
+ * `GET /api/v1/accounts/transactions` (`server/routes/accounts.ts`, #32)
+ * serves this shape, in dollars, from the database, adding `pending` and
+ * `category_source`.
  */
 export interface AkahuTransaction {
   _id: string
