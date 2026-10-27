@@ -127,9 +127,9 @@ export async function getTransactionCategory(
  * received.
  *
  * `source` defaults to `'user'`, which is what PATCH /transactions writes by
- * passing none. `'rule'` is for the agent accept route only (prd-04 Ruling 7,
- * decision 3cb449c6 on #51): an accepted proposal is marked as the rule's
- * category, not the user's, in both columns.
+ * passing none. `'rule'` and `'claude'` are for the agent accept route only
+ * (prd-04 Ruling 2, decision 3cb449c6 on #51): an accepted proposal is marked
+ * with its origin, not the user's, in both columns.
  *
  * The correction's `from_category` is the row's `category` before the write:
  * the effective category, which is the user's if one was set and Akahu's
@@ -155,7 +155,7 @@ export async function setUserCategory(
   id: number,
   category: string,
   db = connection,
-  source: Extract<CorrectionSource, 'user' | 'rule'> = 'user',
+  source: Extract<CorrectionSource, 'user' | 'rule' | 'claude'> = 'user',
 ): Promise<TransactionRow | 'pending' | undefined> {
   return db.transaction(async (trx) => {
     const before: Pick<Transaction, 'category'> | undefined = await trx(
