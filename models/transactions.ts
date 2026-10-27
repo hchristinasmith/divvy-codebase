@@ -72,8 +72,8 @@ export interface Transaction {
 //
 // Deliberately absent: the legacy category_* and Akahu's akahu_category_*,
 // because the response carries the effective `category` and its
-// `category_source` (prd-01 Ruling 4); conversion_*, which the Dashboard's
-// envelope does not carry; and source, posted_date and merchant_nzbn.
+// `category_source` (prd-01 Ruling 4); conversion_*, which the old Dashboard's
+// envelope did not carry; and source, posted_date and merchant_nzbn.
 //
 // Nullability follows the migrations, not the Transaction interface above:
 // every column the original table created is nullable, and a pending row
