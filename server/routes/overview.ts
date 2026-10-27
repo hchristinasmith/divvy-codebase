@@ -30,7 +30,7 @@ import { fromThisSite, parseScope } from '../http.ts'
 
 // `<kind>:<positive row id>:<YYYY-MM-DD>`, as `deriveAlerts` builds them.
 const ALERT_ID =
-  /^(over_budget|bill_due_soon|bill_overdue):[1-9]\d*:\d{4}-\d{2}-\d{2}$/
+  /^(over_budget|bill_due_soon|bill_overdue|bill_too_many_unpaid):[1-9]\d*:\d{4}-\d{2}-\d{2}$/
 const MAX_ALERT_ID_LENGTH = 255
 
 const router = express.Router()

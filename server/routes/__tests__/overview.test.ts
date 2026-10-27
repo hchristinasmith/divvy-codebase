@@ -811,6 +811,67 @@ describe('D5: alerts and dismissal', () => {
     expect(ids).toContain('bill_due_soon:1:2026-10-28')
   })
 
+  // #247 (Hannah, 2026-10-26): a bill past the unpaid-occurrence limit is
+  // left out of the totals and named by an alert, never a 500. A weekly
+  // bill anchored 1000 weeks before the next payday (11-03) has 1001
+  // occurrences through it, one over the limit.
+  describe('#247: a bill with too many unpaid occurrences', () => {
+    const backdated = () => {
+      const d = new Date('2026-11-03T00:00:00Z')
+      d.setUTCDate(d.getUTCDate() - 7 * 1000)
+      return bill(
+        9,
+        'strawb',
+        'Backdated',
+        'weekly',
+        4200,
+        d.toISOString().slice(0, 10),
+      )
+    }
+    const LEFT_OUT = 'bill_too_many_unpaid:9:2026-10-27'
+
+    it('GET answers 200 with the alert in the bill’s scope and all, and the totals as without it', async () => {
+      await seedMain()
+      const before = (await getOverview('strawb')).body as OverviewResponse
+      await connection('bills').insert(backdated())
+
+      const res = await getOverview('strawb')
+
+      expect(res.status).toBe(200)
+      const body = res.body as OverviewResponse
+      expect(body.safeToSpend).toStrictEqual(before.safeToSpend)
+      expect(body.alerts[0]).toStrictEqual({
+        id: LEFT_OUT,
+        kind: 'bill_too_many_unpaid',
+        scope: 'strawb',
+        subject: 'Backdated',
+        amountCents: 4200,
+        dueDate: null,
+      })
+      expect(body.alerts.map((a) => a.id)).toStrictEqual([LEFT_OUT, HOSTING])
+      expect(await alertIds('personal')).toStrictEqual(PERSONAL_IDS)
+      expect((await alertIds('all'))[0]).toBe(LEFT_OUT)
+    })
+
+    it('its alert can be dismissed, and comes back next pay period while the bill is still left out', async () => {
+      await seedMain()
+      await connection('bills').insert(backdated())
+
+      const res = await dismiss(LEFT_OUT)
+
+      expect(res.status).toBe(200)
+      expect(res.body).toStrictEqual({ id: LEFT_OUT, dismissedAt: NOW_ISO })
+      expect(await alertIds('strawb')).toStrictEqual([HOSTING])
+      expect(await alertIds('all')).not.toContain(LEFT_OUT)
+
+      // Wednesday 4 November NZDT: the last payday is now 11-03.
+      vi.setSystemTime('2026-11-03T23:30:00.000Z')
+      expect(await alertIds('strawb')).toContain(
+        'bill_too_many_unpaid:9:2026-11-03',
+      )
+    })
+  })
+
   it('a dismissal outlives the server: it is in the database, not in memory', async () => {
     await seedMain()
     expect((await dismiss('bill_overdue:2:2026-09-30')).status).toBe(200)

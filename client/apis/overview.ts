@@ -4,6 +4,7 @@ import type {
   DismissAlertResponse,
   OverviewResponse,
   Scope,
+  SpendingByCategoryResponse,
 } from '../../shared/contracts.ts'
 import type {
   CategoriesResponse,
@@ -15,7 +16,8 @@ import type {
 } from '../../models/transactions.ts'
 
 // The Overview screen's requests (prd-02, issue 45): the overview read, an
-// alert dismissal, the category list and the inline category edit. A
+// alert dismissal, the category list, the inline category edit and the
+// spending-by-category card's read (#271). A
 // refused request rejects with an Error whose message is the server's own
 // `{ error }` text, so the screen can show it as it is.
 //
@@ -59,6 +61,29 @@ export function overviewQuery(scope: Scope) {
   return queryOptions({
     queryKey: queryKeys.overview.scoped(scope),
     queryFn: () => grabOverview(scope),
+  })
+}
+
+/** How many categories the Overview's spending card lists before "Other". */
+export const SPENDING_CARD_TOP = 5
+
+/** This month's spending by category, the top few and the rest folded. */
+export function grabSpendingByCategory(
+  scope: Scope,
+): Promise<SpendingByCategoryResponse> {
+  return call(
+    `/spending/categories?scope=${encodeURIComponent(scope)}&top=${SPENDING_CARD_TOP}`,
+  )
+}
+
+// Keyed under the overview's scoped key, so `invalidateOverview` (a category
+// edit, a dismissal, anything that can move spending) refetches it too. Its
+// own query, so a failure here never blanks the Overview. No `retry`, for
+// the reason given on `overviewQuery`.
+export function spendingByCategoryQuery(scope: Scope) {
+  return queryOptions({
+    queryKey: [...queryKeys.overview.scoped(scope), 'spending'] as const,
+    queryFn: () => grabSpendingByCategory(scope),
   })
 }
 

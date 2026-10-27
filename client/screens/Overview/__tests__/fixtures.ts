@@ -7,6 +7,7 @@ import type {
   OverviewResponse,
   SafeToSpendResult,
   Scope,
+  SpendingByCategoryResponse,
 } from '../../../../shared/contracts.ts'
 import type { CategoryGroup } from '../../../../models/categories.ts'
 
@@ -226,6 +227,7 @@ export interface Handlers {
   dismiss?: Handler
   categories?: Handler
   patch?: Handler
+  spending?: Handler
 }
 
 export interface FetchCall {
@@ -239,9 +241,16 @@ export interface FetchCall {
  * mid-test through the returned object. Anything without a handler,
  * including the sync pill's `/sync/status`, never settles. Every call is
  * recorded.
+ *
+ * The one default: GET /spending/categories answers `spendingByScope()`
+ * unless the test passes its own handler (`() => undefined` to leave it
+ * pending). The spending card's query sits under the overview's key, and
+ * `invalidateOverview` waits for every query under it, so a spending read
+ * that never settled would hold every invalidation, and every mutation
+ * awaiting one, open for good.
  */
 export function installFetch(initial: Handlers = {}) {
-  const handlers: Handlers = { ...initial }
+  const handlers: Handlers = { spending: spendingByScope(), ...initial }
   const calls: FetchCall[] = []
 
   function route(call: FetchCall): Handler | undefined {
@@ -260,6 +269,9 @@ export function installFetch(initial: Handlers = {}) {
     }
     if (call.method === 'PATCH' && /^\/api\/v1\/transactions\/[^/]+$/.test(path)) {
       return handlers.patch
+    }
+    if (call.method === 'GET' && path === '/api/v1/spending/categories') {
+      return handlers.spending
     }
     return undefined
   }
@@ -301,5 +313,64 @@ export function overviewByScope(
   return (call) => {
     const scope = call.url.searchParams.get('scope') as Scope
     return { body: overviewFixture(scope, overrides[scope]) }
+  }
+}
+
+// What GET /spending/categories would answer for each scope. The names and
+// figures collide with no other fixture's, so a test can find each one on
+// its own.
+// `all` is both scopes; each one's lines, other and uncategorised add up to
+// its total.
+const SPENDING_BY_SCOPE: Record<Scope, Omit<SpendingByCategoryResponse, 'scope'>> = {
+  all: {
+    month: '2026-10',
+    totalCents: 101773,
+    categories: [
+      { category: 'Groceries Invented', spentCents: 31217 },
+      { category: 'Takeaways Invented', spentCents: 18833 },
+      { category: 'Software Invented', spentCents: 14451 },
+      { category: 'Fuel Invented', spentCents: 9119 },
+      { category: 'Books Invented', spentCents: 7707 },
+    ],
+    otherCents: 13391,
+    uncategorisedCents: 7055,
+  },
+  personal: {
+    month: '2026-10',
+    totalCents: 62337,
+    categories: [
+      { category: 'Groceries Invented', spentCents: 31217 },
+      { category: 'Takeaways Invented', spentCents: 18833 },
+      { category: 'Books Invented', spentCents: 7707 },
+    ],
+    otherCents: 0,
+    uncategorisedCents: 4580,
+  },
+  strawb: {
+    month: '2026-10',
+    totalCents: 39436,
+    categories: [
+      { category: 'Software Invented', spentCents: 14451 },
+      { category: 'Fuel Invented', spentCents: 9119 },
+    ],
+    otherCents: 13391,
+    uncategorisedCents: 2475,
+  },
+}
+
+export function spendingFixture(
+  scope: Scope,
+  overrides: Partial<SpendingByCategoryResponse> = {},
+): SpendingByCategoryResponse {
+  return { scope, ...SPENDING_BY_SCOPE[scope], ...overrides }
+}
+
+/** Answers GET /spending/categories with the fixture for the requested scope. */
+export function spendingByScope(
+  overrides: Partial<Record<Scope, Partial<SpendingByCategoryResponse>>> = {},
+): Handler {
+  return (call) => {
+    const scope = call.url.searchParams.get('scope') as Scope
+    return { body: spendingFixture(scope, overrides[scope]) }
   }
 }

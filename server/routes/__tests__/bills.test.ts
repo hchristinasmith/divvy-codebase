@@ -1087,7 +1087,7 @@ describe('the bills figure and the overview hero agree', () => {
 })
 
 describe('the 1000-occurrence limit is the overview’s', () => {
-  it('a bill created at 1000 still lets the overview answer; 1001 is refused; stored anyway, the overview fails', async () => {
+  it('a bill created at 1000 still lets the overview answer; 1001 is refused; stored anyway, the overview leaves it out with an alert', async () => {
     await seedAccounts()
 
     const at1000 = await postBill({
@@ -1108,11 +1108,16 @@ describe('the 1000-occurrence limit is the overview’s', () => {
     await connection('bills').insert(
       bill(99, 'personal', 'Invented legacy', 'weekly', 100, ANCHOR_1001),
     )
-    vi.spyOn(console, 'error').mockImplementation(() => {})
+    // #247 (Hannah, 2026-10-26): left out of the totals, named by an alert.
     const overview = await getOverview('all')
-    expect(overview.status).toBe(500)
-    expect(overview.body).toStrictEqual({
-      error: 'a bill has too many unpaid occurrences',
+    expect(overview.status).toBe(200)
+    expect((overview.body as OverviewResponse).alerts).toContainEqual({
+      id: 'bill_too_many_unpaid:99:2026-10-27',
+      kind: 'bill_too_many_unpaid',
+      scope: 'personal',
+      subject: 'Invented legacy',
+      amountCents: 100,
+      dueDate: null,
     })
     // The list has no such limit on read.
     expect((await getBills('all')).status).toBe(200)

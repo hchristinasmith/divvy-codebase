@@ -8,13 +8,15 @@ import ActivityCard from './ActivityCard.tsx'
 import AlertsCard from './AlertsCard.tsx'
 import HeroCard from './HeroCard.tsx'
 import MoreLinks from './MoreLinks.tsx'
+import SpendingCard from './SpendingCard.tsx'
 import TaxCard from './TaxCard.tsx'
 import { CARD, ERROR, MUTED, SECONDARY_BUTTON } from './styles.ts'
 
 // The Overview screen (prd-02, issue 45; docs/design/handoff.md Screen 1 as
 // docs/design/CHANGES-2.md §2 lays it out): the safe-to-spend hero and its
 // ledger, the account cards, Strawb's tax set-aside, alerts and recent
-// activity, all from one overview read for the chosen scope.
+// activity, all from one overview read for the chosen scope, and spending
+// by category (issue 271), which reads its own.
 //
 // The read is keyed by scope, so a scope switch shows the loading card until
 // that scope's numbers arrive, never the previous scope's. A failed refetch
@@ -87,6 +89,7 @@ function OverviewBody({
         )}
         {scope !== 'personal' && <TaxCard result={data.safeToSpend} />}
       </div>
+      <SpendingCard scope={scope} />
       <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] items-start gap-4.5">
         {/* Keyed by scope, so a switch drops a failed request's message and
             the sub-filter rather than carrying them into the new scope. */}
