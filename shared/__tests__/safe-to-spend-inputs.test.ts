@@ -141,6 +141,11 @@ describe('settings', () => {
 
   it.each<[string, unknown]>([
     ['a decimal', '12.5'],
+    // Each of these reads as a safe integer, so only the whole-number test
+    // refuses it.
+    ['a whole number written as a decimal', '5.0'],
+    ['in exponent form', '1e3'],
+    ['padded', ' 5'],
     ['blank', ''],
     ['not a number', 'sentinel-bad-1234'],
     ['beyond a safe integer', '9007199254740993'],

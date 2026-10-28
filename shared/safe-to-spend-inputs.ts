@@ -1,7 +1,7 @@
 // Safe-to-spend's inputs, gathered from stored rows (#472). The overview
 // (server/db/overview.ts) and prd-03's `get_safe_to_spend` load the same
-// rows and hand them here, so the two feed `safeToSpend` from one
-// piece of code and cannot differ by a cent (prd-02 Ruling 1). `mcp/` imports
+// rows and hand them here, so every caller feeds `safeToSpend` from one
+// piece of code and none can differ by a cent (prd-02 Ruling 1). `mcp/` imports
 // `shared/`, never `server/` (prd-03 Ruling 6), which is why this lives
 // here and not beside the queries.
 //
@@ -95,7 +95,9 @@ export class SafeToSpendInputError extends Error {
 
 /**
  * Runs a call into shared date or money code, turning its RangeError or
- * TypeError into the fixed text.
+ * TypeError into the fixed text. A copy of `guard` in server/db/overview.ts
+ * (and ./bills.ts, ./goals.ts there), throwing this module's error instead;
+ * change all together.
  */
 function guard<T>(fn: () => T): T {
   try {
