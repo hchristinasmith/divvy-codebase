@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render } from '@testing-library/react'
 import InsightBody, { MAX_BODY_CHARS } from '../InsightBody.tsx'
 
@@ -10,6 +10,27 @@ afterEach(cleanup)
 
 function body(markdown: string): HTMLElement {
   return render(<InsightBody markdown={markdown} />).container
+}
+
+// How many characters `String.prototype.indexOf` scans while `renderOnce`
+// runs: the span from each search's start to its hit, or to the end on a miss.
+function charsSearched(renderOnce: () => void): number {
+  const original = String.prototype.indexOf
+  let scanned = 0
+  const spy = vi
+    .spyOn(String.prototype, 'indexOf')
+    .mockImplementation(function (this: string, needle: string, from?: number) {
+      const at = original.call(this, needle, from)
+      const start = from ?? 0
+      scanned += at === -1 ? Math.max(0, this.length - start) : at - start + needle.length
+      return at
+    })
+  try {
+    renderOnce()
+  } finally {
+    spy.mockRestore()
+  }
+  return scanned
 }
 
 function tags(root: HTMLElement): string[] {
@@ -103,12 +124,16 @@ describe('hostile markdown renders as text', () => {
     expect(root.textContent).toContain('The rest of this insight is too long to show.')
   })
 
-  it('stays fast on unclosed delimiters at the length cap', () => {
-    const started = performance.now()
-    body('[*_`'.repeat(MAX_BODY_CHARS / 4))
-    body('[a](' .repeat(MAX_BODY_CHARS / 4))
-    body('**a'.repeat(MAX_BODY_CHARS / 3))
-    expect(performance.now() - started).toBeLessThan(1000)
+  it('searches a linear number of characters on unclosed delimiters at the length cap', () => {
+    // Counts characters searched by indexOf, not time, so load cannot move it.
+    const renders = [
+      () => body('[*_`'.repeat(MAX_BODY_CHARS / 4)),
+      () => body('[a]('.repeat(MAX_BODY_CHARS / 4)),
+      () => body('**a'.repeat(MAX_BODY_CHARS / 3)),
+    ]
+    for (const render of renders) {
+      expect(charsSearched(render)).toBeLessThan(10 * MAX_BODY_CHARS)
+    }
   })
 })
 
