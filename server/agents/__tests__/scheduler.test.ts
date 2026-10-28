@@ -282,6 +282,37 @@ describe('a blocked category run (#430)', () => {
   })
 })
 
+describe('no API key (#430)', () => {
+  it('a sync whose only rows need the model is run once and processed, not retried every tick', async () => {
+    await seedAccounts()
+    seq += 1
+    await connection('transactions').insert({
+      akahu_id: `trans_fixture_${seq}`,
+      account_id: 'acc_fixture_p',
+      date: STAMP,
+      amount_cents: -1000,
+      merchant_id: 'merchant_fixture_two',
+      merchant_name: 'Invented Florist',
+      description: 'INVENTED FLORIST',
+      category: GROCER,
+      category_source: 'akahu',
+      status: 'settled',
+      source: 'akahu',
+    })
+    const sync = await syncRun()
+    const never = untouchable()
+    const s = scheduler({
+      runCategoryAgent: (options, clock, db) =>
+        runCategoryAgent(options, clock, db, { transport: never.transport, env: { ANTHROPIC_API_KEY: '' } }),
+    })
+
+    await tick(s)
+    await tick(s)
+    expect((await categoryRuns()).map((r) => [r.outcome, r.sync_run_id])).toEqual([['success', sync]])
+    expect(never.calls()).toBe(0)
+  })
+})
+
 describe('one pass at a time', () => {
   it('two overlapping triggers, and a manual run during them, run one agent pass', async () => {
     await syncRun()

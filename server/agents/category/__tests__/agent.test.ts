@@ -1033,6 +1033,54 @@ describe('the model fallback (Ruling 9, #430)', () => {
     expect(JSON.stringify(errors.mock.calls)).not.toContain('Sentinel')
   })
 
+  it("a thrown call's batch counts as sent: the run stores the cursor past it, and the next run never resends it", async () => {
+    await seedAccounts()
+    await learn(BAKERY)
+    const ruled = await tx()
+    const thrown = [await unruled(), await unruled()]
+    const throwing: Transport = async () => {
+      throw new Error('Sentinel Thrown Message')
+    }
+    const failed = await run({}, { transport: throwing, env: ENV })
+    expect(failed).toMatchObject({ outcome: 'failed', written: 1 })
+    expect(JSON.parse(String(failed.cursor)).model).toBe(thrown[1])
+    expect((await runRows())[0]).toMatchObject({ outcome: 'failed', cursor: failed.cursor })
+
+    const later = await unruled()
+    const working = model(everyRow(CAFE))
+    expect(await run({}, using(working))).toMatchObject({ outcome: 'success', written: 1 })
+    expect(working.bodies).toHaveLength(1)
+    expect(dataOf(working.bodies[0]).rows).toHaveLength(1)
+    expect(await proposedIds()).toEqual([ruled, later])
+  })
+
+  it('with no API key, the model pass is skipped and the run succeeds with the rules results, as before Ruling 9', async () => {
+    await seedAccounts()
+    const sent = await unruled()
+    await run()
+    await learn(BAKERY)
+    const ruled = await tx()
+    await unruled()
+    const never = untouchable()
+    const result = await run({}, { transport: never.transport, env: { ANTHROPIC_API_KEY: '' } })
+
+    expect(result).toMatchObject({ outcome: 'success', written: 1, discarded: 0 })
+    expect(await proposedIds()).toEqual([ruled])
+    expect(never.calls()).toBe(0)
+    // The model position is where the keyed run left it.
+    expect(JSON.parse(String(result.cursor)).model).toBe(sent)
+    const runs = await runRows()
+    expect(runs[runs.length - 1]).toMatchObject({
+      outcome: 'success',
+      model: null,
+      input_tokens: null,
+      output_tokens: null,
+      cost_micro_usd: null,
+    })
+    expect(infos).toHaveBeenCalledWith('category agent: no API key, model pass skipped')
+    expect(errors).not.toHaveBeenCalled()
+  })
+
   it('an unreadable reply discards its batch, the run goes on, and the rows are not sent again', async () => {
     await seedAccounts()
     await unruled()

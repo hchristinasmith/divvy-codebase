@@ -19,7 +19,8 @@
 //
 // The model pass sweeps its own batch, ascending by id after its own
 // position. A row with a rule for its scope and merchant is never sent, nor
-// is a row with no merchant key. The rest go to the model in batches of
+// is a row with no merchant key. A row the sweep passed while a rule covered
+// its merchant is never sent later either, even if that rule dies. The rest go to the model in batches of
 // the client config's size, one call each (./prompt.ts builds the request
 // from Ruling 4's fields only, with Hannah's corrections and rejections of
 // the same merchants as examples). Changed rows are not sent again: a row
@@ -40,11 +41,19 @@
 // row is never sent twice. A cursor without `model` (from before Ruling 9)
 // resumes the model pass from the beginning.
 //
-// The model position moves past a batch only when its call returned. A
+// The model position moves past a batch once its call returned or threw. A
 // blocked call (the kill switch or the daily budget, in the client) was not
 // sent: the run stops calling, keeps the proposals already written, ends
-// `blocked` and stores the position of what was sent. A call that throws
-// leaves its batch unsent too, and the run ends `failed`.
+// `blocked` and stores the position of what was sent. A call that throws may
+// have been sent and billed, so its batch counts as sent and the run ends
+// `failed` with the cursor past it. The accepted cost: the rows of a batch
+// whose call threw never get a model proposal. Otherwise each retry of a
+// failed run would resend them, without bound.
+//
+// No API key configured: the model pass is skipped before any call. The
+// model position stays where it was, a fixed line is logged, and the run
+// ends `success` with the rules' results, as rules-only runs did. The
+// backlog is sent once a key is set.
 //
 // Disabled (`enabled: false`) returns before a run is logged. A logged
 // `success` would mark its sync run processed, and `failed` would be a false
@@ -293,55 +302,68 @@ export async function runCategoryAgent(
     after = last
 
     // ---- The model pass (Ruling 9) ----
-    const perCall = loadLlmConfig(deps.env).batchSize
-    const sweep = await loadCandidates(db, { afterId: modelAfter, limit: config.batchSize })
-    // Each batch with the id the model position may move to once its call
-    // returns: its last row, or the sweep's end for the final batch, so the
-    // rows between batches that are not sent are passed with them.
-    const batches: { rows: Candidate[]; through: number }[] = []
-    let open: Candidate[] = []
-    for (const row of sweep) {
-      examined.add(row.id)
-      if (row.key !== null && !byMerchant.has(ruleId(row.scope, row.key))) open.push(row)
-      if (open.length === perCall) {
-        batches.push({ rows: open, through: row.id })
-        open = []
+    const llm = loadLlmConfig(deps.env)
+    const modelPass = async () => {
+      const perCall = llm.batchSize
+      const sweep = await loadCandidates(db, { afterId: modelAfter, limit: config.batchSize })
+      // Each batch with the id the model position moves to once its call
+      // returns or throws: its last row, or the sweep's end for the final batch, so the
+      // rows between batches that are not sent are passed with them.
+      const batches: { rows: Candidate[]; through: number }[] = []
+      let open: Candidate[] = []
+      for (const row of sweep) {
+        examined.add(row.id)
+        if (row.key !== null && !byMerchant.has(ruleId(row.scope, row.key))) open.push(row)
+        if (open.length === perCall) {
+          batches.push({ rows: open, through: row.id })
+          open = []
+        }
       }
-    }
-    const end = sweep.at(-1)?.id ?? modelAfter
-    if (open.length > 0) batches.push({ rows: open, through: end })
+      const end = sweep.at(-1)?.id ?? modelAfter
+      if (open.length > 0) batches.push({ rows: open, through: end })
 
-    const examples = batches.length > 0 ? await loadExamples(db) : { corrections: [], rejections: [] }
-    for (const batch of batches) {
-      const rows = await loadModelRows(db, batch.rows.map((r) => r.id))
-      const merchants = new Set(batch.rows.map((r) => ruleId(r.scope, r.key ?? '')))
-      const result = await run.complete(categoryRequest(rows, examplesFor(examples, merchants)))
-      if (result.status === 'blocked') {
-        blocked = true
-        break
-      }
-      modelAfter = batch.through
-      const reply = readCategoryReply(replyText(result.message), rows.length)
-      if (reply === null) {
-        console.warn('category agent: unreadable model reply, batch discarded')
-        discarded += rows.length
-        continue
-      }
-      discarded += reply.unusable
-      const byHandle = new Map(rows.map((r, i) => [i + 1, r]))
-      const answered = new Set<number>()
-      for (const entry of reply.entries) {
-        const row = byHandle.get(entry.row)
-        const proposed = parseProposedCategory(entry.category)
-        if (row === undefined || answered.has(entry.row) || proposed === null || proposed === row.category) {
-          discarded += 1
+      const examples = batches.length > 0 ? await loadExamples(db) : { corrections: [], rejections: [] }
+      for (const batch of batches) {
+        const rows = await loadModelRows(db, batch.rows.map((r) => r.id))
+        const merchants = new Set(batch.rows.map((r) => ruleId(r.scope, r.key ?? '')))
+        let result: Awaited<ReturnType<typeof run.complete>>
+        try {
+          result = await run.complete(categoryRequest(rows, examplesFor(examples, merchants)))
+        } catch (err) {
+          // It may have been sent: never again (see the header).
+          modelAfter = batch.through
+          throw err
+        }
+        if (result.status === 'blocked') {
+          blocked = true
+          break
+        }
+        modelAfter = batch.through
+        const reply = readCategoryReply(replyText(result.message), rows.length)
+        if (reply === null) {
+          console.warn('category agent: unreadable model reply, batch discarded')
+          discarded += rows.length
           continue
         }
-        answered.add(entry.row)
-        await store(row, proposed, 'claude', { confidence: MODEL_CONFIDENCE, reason: MODEL_REASON })
+        discarded += reply.unusable
+        const byHandle = new Map(rows.map((r, i) => [i + 1, r]))
+        const answered = new Set<number>()
+        for (const entry of reply.entries) {
+          const row = byHandle.get(entry.row)
+          const proposed = parseProposedCategory(entry.category)
+          if (row === undefined || answered.has(entry.row) || proposed === null || proposed === row.category) {
+            discarded += 1
+            continue
+          }
+          answered.add(entry.row)
+          await store(row, proposed, 'claude', { confidence: MODEL_CONFIDENCE, reason: MODEL_REASON })
+        }
       }
+      if (!blocked) modelAfter = Math.max(modelAfter, end)
     }
-    if (!blocked) modelAfter = Math.max(modelAfter, end)
+    // No key: skipped before any call (see the header).
+    if (llm.apiKey === null) console.info('category agent: no API key, model pass skipped')
+    else await modelPass()
   } catch (err) {
     failed = true
     console.error('category agent: run failed', errorClass(err))
