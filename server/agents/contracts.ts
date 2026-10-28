@@ -102,8 +102,10 @@ export function parseProposedCategory(value: unknown): string | null {
 
 // ---- Configuration (Ruling 7, Ruling 9) ----
 
-// Resolved values only; reading them from the environment belongs to the
-// agent runner.
+// Resolved values only. server/agents/llm/config.ts reads the model path's
+// settings from the environment (the Anthropic API key, AGENT_KILL_SWITCH,
+// AGENT_DAILY_TOKEN_BUDGET). Nothing reads the rest from the environment:
+// they are constants in server/agents/category/agent.ts and llm/config.ts.
 export interface AgentConfig {
   batchSize: number
   // N in Ruling 7: how many matching corrections, with none later away from
@@ -112,7 +114,7 @@ export interface AgentConfig {
   // False stops both agents.
   enabled: boolean
   // Read by the category agent's model path only (Ruling 9). Optional so a
-  // rules-only config still type-checks; their defaults belong to the runner.
+  // rules-only config still type-checks; llm/config.ts supplies their values.
   // Tokens the model path may spend in a day, input and output together.
   dailyTokenBudget?: number
   // The model id the category agent calls.
