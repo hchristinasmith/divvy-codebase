@@ -55,9 +55,12 @@
 // for null, never the stored column.
 //
 // Money is integer cents (M1 #8). This module must not import
-// shared/safe-to-spend.ts, which imports it; its day arithmetic is its own.
+// shared/safe-to-spend.ts, which imports it; its day arithmetic is its own,
+// and dates parse in shared/nz-dates.ts.
 
 import type { CategorySource, Cents, IsoDate, RowScope } from './contracts.ts'
+import type { CivilDate } from './nz-dates.ts'
+import { parseIsoDate } from './nz-dates.ts'
 
 /** The category a drawing shows, and the one Hannah can pick by hand. */
 export const DRAWINGS_CATEGORY = 'Drawings'
@@ -86,41 +89,28 @@ export interface CategoryOnRow {
   categorySource: CategorySource
 }
 
-const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
-
-function daysInMonth(year: number, month: number): number {
-  if (month === 2) {
-    const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0
-    return leap ? 29 : 28
-  }
-  return [4, 6, 9, 11].includes(month) ? 30 : 31
-}
-
 /**
  * Whole days from 1970-01-01 to a `YYYY-MM-DD` date. Built with
  * `setUTCFullYear`, never `Date.UTC`, which reads the years 0 to 99 as 1900
  * to 1999.
  */
 function dayNumber(value: IsoDate, what: string): number {
-  const match = ISO_DATE.exec(value)
-  if (match) {
-    const year = Number(match[1])
-    const month = Number(match[2])
-    const day = Number(match[3])
-    if (
-      month >= 1 &&
-      month <= 12 &&
-      day >= 1 &&
-      day <= daysInMonth(year, month)
-    ) {
-      const d = new Date(0)
-      d.setUTCFullYear(year, month - 1, day)
-      return Math.round(d.getTime() / 86_400_000)
+  let civil: CivilDate
+  try {
+    civil = parseIsoDate(value)
+  } catch (error) {
+    // parseIsoDate's text names a bill; this module keeps its own, which
+    // names the field and echoes the value.
+    if (error instanceof RangeError) {
+      throw new RangeError(
+        `${what} must be a YYYY-MM-DD calendar date, got "${value}"`,
+      )
     }
+    throw error
   }
-  throw new RangeError(
-    `${what} must be a YYYY-MM-DD calendar date, got "${value}"`,
-  )
+  const d = new Date(0)
+  d.setUTCFullYear(civil.year, civil.month - 1, civil.day)
+  return Math.round(d.getTime() / 86_400_000)
 }
 
 interface Half {
