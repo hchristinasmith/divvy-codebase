@@ -341,9 +341,16 @@ function isInvisible(char: string, code: number): boolean {
 }
 
 // Embedding, override and isolate controls: they reorder how a label reads,
-// so a merchant name could be shown as something it is not.
+// so a merchant name could be shown as something it is not. The direction
+// marks (LRM, RLM, Arabic letter mark) are refused here too (#341), before
+// the invisible-character strip, so they are refused as bidi, not stripped.
 function isBidiControl(code: number): boolean {
-  return (code >= 0x202a && code <= 0x202e) || (code >= 0x2066 && code <= 0x2069)
+  return (
+    code === 0x061c ||
+    (code >= 0x200e && code <= 0x200f) ||
+    (code >= 0x202a && code <= 0x202e) ||
+    (code >= 0x2066 && code <= 0x2069)
+  )
 }
 
 // Rejects on doubt: "Metadata: x" is refused along with "data:x".

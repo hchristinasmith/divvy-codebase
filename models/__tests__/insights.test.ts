@@ -291,7 +291,6 @@ const URL_TEXT: [string, string][] = [
   ['a word joiner (U+2060) inside the scheme', `java\u2060script:${CANARY}`],
   ['a NEL (U+0085) inside the scheme', `java\u0085script:${CANARY}`],
   ['a combining grapheme joiner (U+034F) inside the scheme', `java\u034fscript:${CANARY}`],
-  ['an Arabic letter mark (U+061C) inside the scheme', `java\u061cscript:${CANARY}`],
   ['a Mongolian vowel separator (U+180E) inside the scheme', `java\u180escript:${CANARY}`],
   ['an invisible plus (U+2064) inside the scheme', `java\u2064script:${CANARY}`],
   ['a DEL (U+007F) inside the scheme', `java\u007Fscript:${CANARY}`],
@@ -313,10 +312,16 @@ const TEXT_SITES: [string, (spec: MutableSpec, text: string) => void, string][] 
   ['a channel title', (s, text) => { s.encoding.y.title = text }, '$.encoding.y.title'],
 ]
 
-// Embedding, override and isolate controls reorder how a label reads.
-const BIDI_TEXT: [string, string][] = [0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069].map(
-  (code): [string, string] => [`U+${code.toString(16).toUpperCase()}`, `Example${String.fromCodePoint(code)}${CANARY}`],
-)
+// Embedding, override and isolate controls reorder how a label reads. The
+// direction marks (LRM, RLM, ALM) are refused too (#341): they are invisible,
+// so a label could carry one where a reader cannot see it.
+const BIDI_TEXT: [string, string][] = [
+  ...[0x061c, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069].map(
+    (code): [string, string] => [`U+${code.toString(16).toUpperCase()}`, `Example${String.fromCodePoint(code)}${CANARY}`],
+  ),
+  // Moved from the URL list (#341): refused as bidi, before the scheme check.
+  ['an Arabic letter mark (U+061C) inside the scheme', `java\u061cscript:${CANARY}`],
+]
 
 type TextCase = [string, string, (spec: MutableSpec, text: string) => void, string, ChartSpecRejection, string]
 
@@ -348,8 +353,9 @@ describe('strings carrying URLs or markup', () => {
 // invisible list strips today (C0, DEL and C1, the zero-width and direction
 // marks, the embedding and isolate controls, soft hyphen, combining grapheme
 // joiner, Arabic letter mark, Mongolian vowel separator, byte order mark).
-// Inside `java<c>script:` it is stripped, the scheme shows, and the title is
-// refused; the bidi controls are refused first, as bidi_in_string.
+// Inside `java<c>script:` a character that is not a bidi control is stripped,
+// the scheme shows, and the title is refused; the bidi controls, the direction
+// marks (#341) among them, are refused first, as bidi_in_string.
 const range = (from: number, to: number): number[] =>
   Array.from({ length: to - from + 1 }, (_, i) => from + i)
 
@@ -365,7 +371,9 @@ const STRIPPED_TODAY: number[] = [
   0x180e,
   0xfeff,
 ]
-const BIDI_TODAY = new Set([0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069])
+const BIDI_TODAY = new Set([
+  0x061c, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069,
+])
 
 describe('invisible characters inside a scheme (every input refused today is still refused)', () => {
   it.each(

@@ -63,6 +63,16 @@ import type {
 } from './contracts.ts'
 import { isDrawingCategory } from './drawings.ts'
 import { sumCents } from './money.ts'
+import {
+  addDaysCivil,
+  formatIsoDate,
+  parseIsoDate,
+  type CivilDate,
+} from './nz-dates.ts'
+
+// The day helpers live in nz-dates.ts (#335). Re-exported so existing callers
+// keep importing `daysInMonth` from here.
+export { daysInMonth } from './nz-dates.ts'
 
 export interface SafeToSpendAccount {
   id: string
@@ -132,32 +142,17 @@ export interface SafeToSpendInput {
 // Dates
 // ---------------------------------------------------------------------------
 
-const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
-
-interface CivilDate {
-  year: number
-  month: number // 1 to 12
-  day: number
-}
-
+// The texts are safe-to-spend's own (prd-02 Ruling 1): `what` names the
+// argument and the value is echoed, as they always were.
 function parseDate(value: IsoDate, what: string): CivilDate {
-  const match = ISO_DATE.exec(value)
-  if (match) {
-    const year = Number(match[1])
-    const month = Number(match[2])
-    const day = Number(match[3])
-    if (
-      month >= 1 &&
-      month <= 12 &&
-      day >= 1 &&
-      day <= daysInMonth(year, month)
-    ) {
-      return { year, month, day }
-    }
+  try {
+    return parseIsoDate(value)
+  } catch (error) {
+    if (!(error instanceof RangeError)) throw error
+    throw new RangeError(
+      `${what} must be a YYYY-MM-DD calendar date, got "${value}"`,
+    )
   }
-  throw new RangeError(
-    `${what} must be a YYYY-MM-DD calendar date, got "${value}"`,
-  )
 }
 
 function formatDate({ year, month, day }: CivilDate): IsoDate {
@@ -168,9 +163,7 @@ function formatDate({ year, month, day }: CivilDate): IsoDate {
       `a payday must fall in the years 0000 to 9999, got year ${year}`,
     )
   }
-  const mm = String(month).padStart(2, '0')
-  const dd = String(day).padStart(2, '0')
-  return `${String(year).padStart(4, '0')}-${mm}-${dd}`
+  return formatIsoDate({ year, month, day })
 }
 
 function assertPaydayWeekday(paydayWeekday: number): void {
@@ -206,29 +199,10 @@ function weekday(date: CivilDate): number {
   return new Date(utcMidnight(date)).getUTCDay()
 }
 
-/** `date` moved by `days` calendar days (negative moves back). */
-function addDays({ year, month, day }: CivilDate, days: number): CivilDate {
-  const d = new Date(utcMidnight({ year, month, day: day + days }))
-  return {
-    year: d.getUTCFullYear(),
-    month: d.getUTCMonth() + 1,
-    day: d.getUTCDate(),
-  }
-}
-
-/** Days in a month (1 to 12) of the proleptic Gregorian calendar. */
-export function daysInMonth(year: number, month: number): number {
-  if (month === 2) {
-    const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0
-    return leap ? 29 : 28
-  }
-  return [4, 6, 9, 11].includes(month) ? 30 : 31
-}
-
 function lastPaydayDate(today: IsoDate, paydayWeekday: number): CivilDate {
   assertPaydayWeekday(paydayWeekday)
   const t = parseDate(today, 'today')
-  return addDays(t, -((weekday(t) - paydayWeekday + 7) % 7))
+  return addDaysCivil(t, -((weekday(t) - paydayWeekday + 7) % 7))
 }
 
 /**
@@ -244,7 +218,7 @@ export function lastPayday(today: IsoDate, paydayWeekday: number): IsoDate {
  * (prd-02 Ruling 9), so a week from today on payday itself.
  */
 export function nextPayday(today: IsoDate, paydayWeekday: number): IsoDate {
-  return formatDate(addDays(lastPaydayDate(today, paydayWeekday), 7))
+  return formatDate(addDaysCivil(lastPaydayDate(today, paydayWeekday), 7))
 }
 
 /** Whole calendar days from `from` to `to` (negative if `to` is earlier). */

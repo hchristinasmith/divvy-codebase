@@ -32,6 +32,27 @@ describe('nzCalendarDate', () => {
     at.setUTCHours(1)
     expect(nzCalendarDate(at)).toMatch(/^0050-\d{2}-\d{2}$/)
   })
+
+  // #371: the en-NZ formatter prints the year as an era year, so year 0
+  // (1 BC) came out as "1". The year is read from UTC instead.
+  it('reads year 0 as 0000 and year 1 as 0001, not as their era years', () => {
+    expect(nzCalendarDate(new Date('0000-03-01T00:00:00.000Z'))).toBe('0000-03-01')
+    expect(nzCalendarDate(new Date('0001-03-01T00:00:00.000Z'))).toBe('0001-03-01')
+  })
+
+  it('rolls New Year over year 0 to 0001, and not before it', () => {
+    // Pacific/Auckland before 1868 is LMT, +11:39:04. 12:00 UTC on 31 December
+    // is 23:39:04 that day in NZ, so it is still 0000-12-31; 12:30 UTC is
+    // 00:09:04 on 1 January.
+    expect(nzCalendarDate(new Date('0000-12-31T12:00:00.000Z'))).toBe('0000-12-31')
+    expect(nzCalendarDate(new Date('0000-12-31T12:30:00.000Z'))).toBe('0001-01-01')
+  })
+
+  it('rolls New Year over to the next year in NZDT (+13)', () => {
+    // 11:30 UTC on 31 December is 00:30 on 1 January in NZDT.
+    expect(nzCalendarDate(new Date('2026-12-31T11:30:00Z'))).toBe('2027-01-01')
+    expect(nzCalendarDate(new Date('2026-12-31T10:30:00Z'))).toBe('2026-12-31')
+  })
 })
 
 describe('billOccurrencesThrough', () => {

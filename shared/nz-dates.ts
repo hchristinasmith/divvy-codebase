@@ -1,6 +1,5 @@
 import type { Bill } from '../models/planning.ts'
 import type { IsoDate } from './contracts.ts'
-import { daysInMonth } from './safe-to-spend.ts'
 
 // Calendar dates as Divvy reads them (#233): today in Hannah's timezone,
 // and which occurrences of a repeating bill fall due. The overview
@@ -30,10 +29,10 @@ import { daysInMonth } from './safe-to-spend.ts'
 // so it runs wherever the rest of shared/ does.
 
 // Built once. `formatToParts` is read field by field rather than trusting a
-// locale's string order.
+// locale's string order. The year is not in the formatter: en-NZ prints eras,
+// so year 0 (1 BC) comes out as "1" (#371). The year comes from UTC instead.
 const NZ_DATE = new Intl.DateTimeFormat('en-NZ', {
   timeZone: 'Pacific/Auckland',
-  year: 'numeric',
   month: '2-digit',
   day: '2-digit',
 })
@@ -51,23 +50,36 @@ export function nzCalendarDate(at: Date): IsoDate {
   if (Number.isNaN(at.getTime())) {
     throw new RangeError('date is not a valid instant')
   }
-  let year = ''
   let month = ''
   let day = ''
   for (const part of NZ_DATE.formatToParts(at)) {
-    if (part.type === 'year') year = part.value
-    else if (part.type === 'month') month = part.value
+    if (part.type === 'month') month = part.value
     else if (part.type === 'day') day = part.value
   }
-  return `${year.padStart(4, '0')}-${month}-${day}`
+  // Pacific/Auckland is ahead of UTC by less than a day, so the NZ date is
+  // the UTC date or the day after. The year is therefore the UTC year, plus
+  // one when New Year has come in NZ before UTC reaches it.
+  let year = at.getUTCFullYear()
+  if (Number(month) === 1 && at.getUTCMonth() === 11) year += 1
+  return `${String(year).padStart(4, '0')}-${month}-${day}`
 }
 
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
 
-interface CivilDate {
+/** A calendar date as its year, month (1 to 12) and day. */
+export interface CivilDate {
   year: number
   month: number // 1 to 12
   day: number
+}
+
+/** Days in a month (1 to 12) of the proleptic Gregorian calendar. */
+export function daysInMonth(year: number, month: number): number {
+  if (month === 2) {
+    const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0
+    return leap ? 29 : 28
+  }
+  return [4, 6, 9, 11].includes(month) ? 30 : 31
 }
 
 /**
@@ -94,7 +106,11 @@ export function parseIsoDate(value: IsoDate): CivilDate {
   throw new RangeError('a bill date is not a YYYY-MM-DD calendar date')
 }
 
-function formatIsoDate({ year, month, day }: CivilDate): IsoDate {
+/**
+ * A calendar date as `YYYY-MM-DD`. A year outside 0000 to 9999 has no such
+ * form, so it is a RangeError with a fixed text; the value is not echoed.
+ */
+export function formatIsoDate({ year, month, day }: CivilDate): IsoDate {
   if (year < 0 || year > 9999) {
     throw new RangeError('a bill date falls outside the years 0000 to 9999')
   }
@@ -106,18 +122,22 @@ function formatIsoDate({ year, month, day }: CivilDate): IsoDate {
 
 /**
  * `date` moved by `days` calendar days (negative moves back). Built with
- * `setUTCFullYear`, as shared/safe-to-spend.ts does, never `Date.UTC`, which
- * reads the years 0 to 99 as 1900 to 1999.
+ * `setUTCFullYear`, never `Date.UTC`, which reads the years 0 to 99 as 1900
+ * to 1999.
  */
-export function addDaysIso(date: IsoDate, days: number): IsoDate {
-  const { year, month, day } = parseIsoDate(date)
+export function addDaysCivil(date: CivilDate, days: number): CivilDate {
   const d = new Date(0)
-  d.setUTCFullYear(year, month - 1, day + days)
-  return formatIsoDate({
+  d.setUTCFullYear(date.year, date.month - 1, date.day + days)
+  return {
     year: d.getUTCFullYear(),
     month: d.getUTCMonth() + 1,
     day: d.getUTCDate(),
-  })
+  }
+}
+
+/** `date` moved by `days` calendar days (negative moves back). */
+export function addDaysIso(date: IsoDate, days: number): IsoDate {
+  return formatIsoDate(addDaysCivil(parseIsoDate(date), days))
 }
 
 /**
