@@ -201,14 +201,18 @@ describe('a hostile spec renders "Chart unavailable" and no iframe', () => {
     expect(texts(doc, 'text')).toContain('מאפייה')
   })
 
-  it('strips the LRM and RLM marks the spec check lets through', () => {
+  // #341: the spec check refuses the direction marks as bidi, so a label
+  // carrying LRM or RLM never reaches the renderer.
+  it.each([
+    ['LRM', 'Invented\u200e Cafe'],
+    ['RLM', 'Invented Cafe\u200f'],
+  ])('refuses a label with an %s mark', (_, merchant) => {
     const { container } = renderSpec({
       ...TOP_MERCHANTS,
-      data: { values: [{ merchant: 'Invented‎ Cafe‏', spend_cents: 2500 }] },
+      data: { values: [{ merchant, spend_cents: 2500 }] },
     })
-    const markup = frame(container).getAttribute('srcdoc') ?? ''
-    expect(markup).not.toMatch(/[‎‏]/)
-    expect(texts(frameDoc(container), 'rect > title')).toEqual(['Invented Cafe: $25.00'])
+    expect(container.textContent).toBe('Chart unavailable')
+    expect(container.querySelector('iframe')).toBeNull()
   })
 })
 
