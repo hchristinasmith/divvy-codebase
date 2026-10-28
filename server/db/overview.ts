@@ -1,40 +1,36 @@
 import type { Account, SyncRun } from '../../models/sync.ts'
-import type { BillRepeat } from '../../models/planning.ts'
 import type { CategorySource } from '../../models/transactions.ts'
-import {
-  SETTING_KEYS,
-  SETTINGS_DEFAULTS,
-  type AccountRole,
-  type AccountSummary,
-  type ActivityRow,
-  type Alert,
-  type AlertKind,
-  type DismissAlertResponse,
-  type IsoDate,
-  type OverviewResponse,
-  type RowScope,
-  type SafeToSpendResult,
-  type Scope,
-  type TransactionStatus,
+import type {
+  ActivityRow,
+  Alert,
+  AlertKind,
+  DismissAlertResponse,
+  IsoDate,
+  OverviewResponse,
+  SafeToSpendResult,
+  Scope,
+  TransactionStatus,
 } from '../../shared/contracts.ts'
+import { safeToSpend } from '../../shared/safe-to-spend.ts'
 import {
-  lastPayday,
-  nextPayday,
-  safeToSpend,
-  type SafeToSpendAccount,
-  type SafeToSpendBill,
-  type SafeToSpendBudget,
-  type SafeToSpendTransaction,
-} from '../../shared/safe-to-spend.ts'
+  SAFE_TO_SPEND_SETTING_KEYS,
+  SafeToSpendInputError,
+  gatherSafeToSpendInputs,
+  safeToSpendWindowStart,
+  type BillOccurrence,
+  type GatheredSafeToSpendInputs,
+  type InputAccountRoleRow,
+  type InputBillPaymentRow,
+  type InputBillRow,
+  type InputBudgetRow,
+  type InputSettingRow,
+  type InputTransactionRow,
+  type LeftOutBill,
+} from '../../shared/safe-to-spend-inputs.ts'
 import { effectiveCategory } from '../../shared/drawings.ts'
-import {
-  MAX_UNPAID_OCCURRENCES,
-  addDaysIso,
-  billOccurrencesThrough,
-  nzCalendarDate as sharedNzCalendarDate,
-} from '../../shared/nz-dates.ts'
+import { nzCalendarDate as sharedNzCalendarDate } from '../../shared/nz-dates.ts'
 import connection from './connection.ts'
-import { loadDrawingIds } from './drawings.ts'
+import { loadDrawingCandidates } from './drawings.ts'
 import { listAccounts } from './synced.ts'
 import { rankByStartedAt } from '../sync/ranked-runs.ts'
 
@@ -44,32 +40,31 @@ import { rankByStartedAt } from '../sync/ranked-runs.ts'
 // This module does no money arithmetic. Every figure it sends is either a
 // stored value passed through (a balance, a bill's amount) or read off what
 // `safeToSpend` in shared/safe-to-spend.ts returned (prd-02 Ruling 1).
-// Calendar dates are not computed here either: today in Hannah's timezone,
-// which occurrences of a repeating bill are due, and the limit on unpaid
-// ones come from shared/nz-dates.ts, the module the Bills screen reads too.
+// Calendar dates are not computed here either: they come from
+// shared/nz-dates.ts, the module the Bills screen reads too.
 //
-// Inputs. `safeToSpend` is handed every stored Akahu account, bill
-// occurrence, budget and window transaction, whatever the scope asked for;
-// it applies the scope itself. A Xero row (prd-01 Ruling 9) is never read:
-// prd-02 Ruling 4 keeps Xero receivables out of safe-to-spend.
+// Inputs. This module loads the rows; `gatherSafeToSpendInputs` in
+// shared/safe-to-spend-inputs.ts turns them into `safeToSpend`'s inputs
+// (#472), so prd-03's `get_safe_to_spend`, which may import only shared/
+// (prd-03 Ruling 6), feeds it from the same code. That module's header
+// says what each row becomes: setting defaults and whole-number checks,
+// account roles, every unpaid bill occurrence through the next payday and
+// the limit on unpaid ones (#151, #247), the transaction window, NZ dates
+// and the drawings overlay (prd-02 Ruling 15). `safeToSpend` is handed
+// every stored Akahu account, bill occurrence, budget and window
+// transaction, whatever the scope asked for; it applies the scope itself.
+// A Xero row (prd-01 Ruling 9) is never read: prd-02 Ruling 4 keeps Xero
+// receivables out of safe-to-spend.
 //
-// Categories are effective ones with drawings laid over them (prd-02 Ruling
-// 15): the drawing ids are loaded once per read (server/db/drawings.ts) and
-// a half of a drawing that Hannah has not categorised by hand is handed to
-// `safeToSpend` and shown in the activity as Drawings, set by `rule`, which
-// the shared module never counts as spent.
+// The activity list lays the same drawing ids over its rows: a half of a
+// drawing that Hannah has not categorised by hand shows as Drawings, set
+// by `rule`.
 //
-// Bills (#35 option C, as ruled on #151, option A): every unpaid occurrence
-// of a bill due on or before the next payday is its own input, overdue ones
-// included, so a weekly bill two cycles behind holds back both weeks. A
-// paid occurrence is one with a `bill_payments` row for its date.
-//
-// Nothing is defaulted silently. An absent setting takes its documented
-// default (`SETTINGS_DEFAULTS`); a present one that is not a whole number is
-// an error, never the default. An Akahu account with no balance is an
-// error, never 0. Errors the client may see are `OverviewDataError`s with a
-// fixed text; the shared module's RangeError and TypeError, whose messages
-// name ids and values, are turned into one of those before leaving here.
+// Nothing is defaulted silently. Errors the client may see are
+// `OverviewDataError`s with a fixed text: the gathering's
+// `SafeToSpendInputError` leaves here with its own text, one of the same
+// closed set, and the shared module's RangeError and TypeError, whose
+// messages name ids and values, are turned into one of those texts.
 //
 // Alerts are derived on every read from the same result and occurrences;
 // only a dismissal is stored (`alert_dismissals`). Each id is stable for
@@ -139,7 +134,8 @@ type Db = typeof connection
 /**
  * Runs a call into shared date or money code, turning its RangeError or
  * TypeError (whose messages name ids and values) into the fixed text.
- * Copied as `guard` in ./bills.ts and ./goals.ts; change all together.
+ * Copied as `guard` in ./bills.ts, ./goals.ts and
+ * shared/safe-to-spend-inputs.ts; change all together.
  */
 function guard<T>(fn: () => T): T {
   try {
@@ -153,244 +149,62 @@ function guard<T>(fn: () => T): T {
 }
 
 /**
- * The drawing ids, with the shared matcher's RangeError or TypeError (whose
- * messages name ids and values) turned into the fixed text.
+ * Runs the shared gathering, its fixed-text error leaving as an
+ * `OverviewDataError` with the same text.
  */
-async function loadDrawings(db: Db): Promise<Set<number>> {
+function gathered<T>(fn: () => T): T {
   try {
-    return await loadDrawingIds(db)
+    return fn()
   } catch (err) {
-    if (err instanceof RangeError || err instanceof TypeError) {
-      throw new OverviewDataError('safe-to-spend input invalid')
+    if (err instanceof SafeToSpendInputError) {
+      throw new OverviewDataError(err.reason)
     }
     throw err
   }
 }
 
-interface Settings {
-  taxRateBasisPoints: number
-  profitCents: number
-  paydayWeekday: number
-  personalTaxOwedCents: number
+interface Inputs extends GatheredSafeToSpendInputs {
+  /** Every stored Akahu account, in id order. */
+  accountRows: Account[]
 }
 
-const NUMERIC_SETTINGS = [
-  'taxRateBasisPoints',
-  'profitCents',
-  'paydayWeekday',
-  'personalTaxOwedCents',
-] as const satisfies readonly (keyof Settings)[]
-
-const WHOLE_NUMBER = /^-?\d+$/
-
 /**
- * The settings safe-to-spend needs. `settings` has a UNIQUE `key`
- * (migration 20261025150000, #46), so a key has at most one row; the query's
- * ordering (newest `updated_at`, then higher integer `id`) picks between rows
- * only on a table without that constraint, and is kept as a guard. An absent
- * key takes its default; a present one must be a whole number. Range is left
- * to the shared module.
+ * Loads the rows safe-to-spend reads and gathers them in the shared module.
+ * The window's start depends on the payday setting, so the settings load
+ * and are checked first; a bad setting is refused before anything else is
+ * read.
  */
-async function readSettings(db: Db): Promise<Settings> {
-  const rows: { key: string; value: unknown }[] = await db('settings')
+async function loadInputs(now: Date, db: Db): Promise<Inputs> {
+  // `settings` has a UNIQUE `key` (migration 20261025150000, #46), so a key
+  // has at most one row; the ordering (newest `updated_at`, then higher
+  // integer `id`) picks between rows only on a table without that
+  // constraint, and is kept as a guard. The first row per key wins.
+  const settings: InputSettingRow[] = await db('settings')
     .select('key', 'value')
-    .whereIn(
-      'key',
-      NUMERIC_SETTINGS.map((field) => SETTING_KEYS[field]),
-    )
+    .whereIn('key', [...SAFE_TO_SPEND_SETTING_KEYS])
     .orderBy([
       { column: 'key' },
       { column: 'updated_at', order: 'desc' },
       { column: 'id', order: 'desc' },
     ])
-  const newest = new Map<string, unknown>()
-  for (const row of rows) {
-    if (!newest.has(row.key)) newest.set(row.key, row.value)
-  }
-  const settings: Settings = {
-    taxRateBasisPoints: SETTINGS_DEFAULTS.tax_rate_bp,
-    profitCents: SETTINGS_DEFAULTS.profit_cents,
-    paydayWeekday: SETTINGS_DEFAULTS.payday_weekday,
-    personalTaxOwedCents: SETTINGS_DEFAULTS.personal_tax_owed_cents,
-  }
-  for (const field of NUMERIC_SETTINGS) {
-    const key = SETTING_KEYS[field]
-    if (!newest.has(key)) continue
-    const value = newest.get(key)
-    // `value` is NOT NULL (#46), so the type test is a guard; the whole-number
-    // test is live, since stored text such as a blank or a decimal reaches it.
-    if (typeof value !== 'string' || !WHOLE_NUMBER.test(value)) {
-      throw new OverviewDataError('a stored setting is not valid')
-    }
-    const parsed = Number(value)
-    if (!Number.isSafeInteger(parsed)) {
-      throw new OverviewDataError('a stored setting is not valid')
-    }
-    settings[field] = parsed
-  }
-  return settings
-}
+  const windowStart = gathered(() => safeToSpendWindowStart(settings, now))
 
-/**
- * A bill with more unpaid occurrences than `MAX_UNPAID_OCCURRENCES`. None of
- * its occurrences reach safe-to-spend or the alerts; it is named by its own
- * alert instead (#247, ruled by Hannah 2026-10-26).
- */
-interface LeftOutBill {
-  id: number
-  name: string
-  scope: RowScope
-  amount_cents: number
-}
-
-/** One unpaid occurrence of a bill, as the alerts need it. */
-interface BillOccurrence {
-  billId: number
-  name: string
-  scope: RowScope
-  amountCents: number
-  dueDate: IsoDate
-}
-
-interface BillRow {
-  id: number
-  scope: RowScope
-  name: string
-  amount_cents: number
-  repeat: BillRepeat
-  first_due_date: IsoDate
-}
-
-interface WindowTransactionRow {
-  id: number
-  account_id: string | null
-  date: string | null
-  amount_cents: number | null
-  category: string | null
-  category_source: CategorySource
-  status: TransactionStatus
-}
-
-interface Inputs {
-  today: IsoDate
-  settings: Settings
-  /** Every stored Akahu account, in id order. */
-  accountRows: Account[]
-  /** The same accounts as cards, picked field by field, never spread. */
-  cards: AccountSummary[]
-  accounts: SafeToSpendAccount[]
-  bills: SafeToSpendBill[]
-  occurrences: BillOccurrence[]
-  /** Bills past the unpaid-occurrence limit, in id order. */
-  leftOutBills: LeftOutBill[]
-  budgets: SafeToSpendBudget[]
-  transactions: SafeToSpendTransaction[]
-  /** Both halves of every drawing (prd-02 Ruling 15), loaded once per read. */
-  drawingIds: Set<number>
-}
-
-async function loadInputs(now: Date, db: Db): Promise<Inputs> {
-  const today = nzCalendarDate(now)
-  const settings = await readSettings(db)
-  const last = guard(() => lastPayday(today, settings.paydayWeekday))
-  const next = guard(() => nextPayday(today, settings.paydayWeekday))
-
-  // Accounts and their roles. No role row means no role.
   const accountRows = await listAccounts(db)
-  const roleRows: { account_id: number; role: AccountRole }[] = await db(
+  const accountRoles: InputAccountRoleRow[] = await db(
     'account_settings',
   ).select('account_id', 'role')
-  const accountRoles = new Map(roleRows.map((r) => [r.account_id, r.role]))
-  const accounts: SafeToSpendAccount[] = []
-  const cards: AccountSummary[] = []
-  for (const row of accountRows) {
-    // Sync always writes a balance; a missing one is not fabricated as 0.
-    if (row.balance_cents === null) {
-      throw new OverviewDataError('an account has no balance')
-    }
-    const role = accountRoles.get(row.id) ?? null
-    accounts.push({
-      id: String(row.id),
-      scope: row.scope,
-      role,
-      balanceCents: row.balance_cents,
-    })
-    cards.push({
-      id: String(row.id),
-      name: row.name,
-      scope: row.scope,
-      role,
-      balanceCents: row.balance_cents,
-    })
-  }
-
-  // Bills: every unpaid occurrence through the next payday.
-  const billRows: BillRow[] = await db('bills')
+  const bills: InputBillRow[] = await db('bills')
     .select('id', 'scope', 'name', 'amount_cents', 'repeat', 'first_due_date')
     .orderBy('id')
-  const paymentRows: { bill_id: number; due_date: IsoDate }[] = await db(
-    'bill_payments',
-  ).select('bill_id', 'due_date')
-  const paid = new Set(paymentRows.map((p) => `${p.bill_id}|${p.due_date}`))
-  const bills: SafeToSpendBill[] = []
-  const occurrences: BillOccurrence[] = []
-  const leftOutBills: LeftOutBill[] = []
-  for (const bill of billRows) {
-    const unpaid = guard(() => billOccurrencesThrough(bill, next)).filter(
-      (dueDate) => !paid.has(`${bill.id}|${dueDate}`),
-    )
-    // Past the limit the bill is left out whole, never truncated, and
-    // named by an alert so the missing amount is visible (#247).
-    if (unpaid.length > MAX_UNPAID_OCCURRENCES) {
-      leftOutBills.push({
-        id: bill.id,
-        name: bill.name,
-        scope: bill.scope,
-        amount_cents: bill.amount_cents,
-      })
-      continue
-    }
-    for (const dueDate of unpaid) {
-      bills.push({
-        id: `${bill.id}:${dueDate}`,
-        scope: bill.scope,
-        amountCents: bill.amount_cents,
-        dueDate,
-        paid: false,
-      })
-      occurrences.push({
-        billId: bill.id,
-        name: bill.name,
-        scope: bill.scope,
-        amountCents: bill.amount_cents,
-        dueDate,
-      })
-    }
-  }
-
-  const budgetRows: {
-    id: number
-    scope: RowScope
-    category: string
-    limit_cents: number
-  }[] = await db('budgets')
+  const billPayments: InputBillPaymentRow[] = await db('bill_payments').select(
+    'bill_id',
+    'due_date',
+  )
+  const budgets: InputBudgetRow[] = await db('budgets')
     .select('id', 'scope', 'category', 'limit_cents')
     .orderBy('id')
-  const budgets: SafeToSpendBudget[] = budgetRows.map((row) => ({
-    id: String(row.id),
-    scope: row.scope,
-    category: row.category,
-    limitCents: row.limit_cents,
-  }))
-
-  // The window: Akahu rows from the day before the last payday. Stored
-  // dates are UTC instants and NZ is ahead of UTC, so a row on the NZ
-  // payday is never dated earlier than the day before it in UTC; the
-  // shared module drops whatever falls before the payday once the NZ date
-  // is known. A row with no date is read too, so it is refused rather than
-  // silently left out of spent.
-  const windowStart = guard(() => addDaysIso(last, -1))
-  const windowRows: WindowTransactionRow[] = await db('transactions')
+  // The window: Akahu rows from `windowStart`, and every row with no date.
+  const windowTransactions: InputTransactionRow[] = await db('transactions')
     .select(
       'id',
       'account_id',
@@ -402,48 +216,24 @@ async function loadInputs(now: Date, db: Db): Promise<Inputs> {
     )
     .where({ source: 'akahu' })
     .where((q) => q.where('date', '>=', windowStart).orWhereNull('date'))
-  const accountIdByAkahuId = new Map<string, string>()
-  for (const row of accountRows) {
-    if (row.akahu_id !== null)
-      accountIdByAkahuId.set(row.akahu_id, String(row.id))
-  }
-  const drawingIds = await loadDrawings(db)
-  const transactions: SafeToSpendTransaction[] = []
-  for (const row of windowRows) {
-    // A row on an account that is not stored has no scope to count in.
-    const accountId =
-      row.account_id === null
-        ? undefined
-        : accountIdByAkahuId.get(row.account_id)
-    if (accountId === undefined) continue
-    if (row.date === null || row.amount_cents === null) {
-      throw new OverviewDataError('a transaction is incomplete')
-    }
-    transactions.push({
-      accountId,
-      date: nzCalendarDate(new Date(row.date)),
-      amountCents: row.amount_cents,
-      category: effectiveCategory(
-        { category: row.category, categorySource: row.category_source },
-        drawingIds.has(row.id),
-      ).category,
-      status: row.status,
-    })
-  }
+  const drawingCandidates = await loadDrawingCandidates(db)
 
-  return {
-    today,
-    settings,
-    accountRows,
-    cards,
-    accounts,
-    bills,
-    occurrences,
-    leftOutBills,
-    budgets,
-    transactions,
-    drawingIds,
-  }
+  const inputs = gathered(() =>
+    gatherSafeToSpendInputs(
+      {
+        accounts: accountRows,
+        accountRoles,
+        settings,
+        bills,
+        billPayments,
+        budgets,
+        windowTransactions,
+        drawingCandidates,
+      },
+      now,
+    ),
+  )
+  return { ...inputs, accountRows }
 }
 
 function computeSafeToSpend(scope: Scope, inputs: Inputs): SafeToSpendResult {
@@ -451,10 +241,10 @@ function computeSafeToSpend(scope: Scope, inputs: Inputs): SafeToSpendResult {
     safeToSpend({
       scope,
       today: inputs.today,
-      paydayWeekday: inputs.settings.paydayWeekday,
-      taxRateBasisPoints: inputs.settings.taxRateBasisPoints,
-      profitCents: inputs.settings.profitCents,
-      personalTaxOwedCents: inputs.settings.personalTaxOwedCents,
+      paydayWeekday: inputs.paydayWeekday,
+      taxRateBasisPoints: inputs.taxRateBasisPoints,
+      profitCents: inputs.profitCents,
+      personalTaxOwedCents: inputs.personalTaxOwedCents,
       accounts: inputs.accounts,
       bills: inputs.bills,
       budgets: inputs.budgets,

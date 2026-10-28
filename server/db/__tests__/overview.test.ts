@@ -1325,6 +1325,42 @@ describe('readOverview: recent activity', () => {
     },
   )
 
+  // The window query starts on the day before the last payday (10-26, as a
+  // stored UTC date): a row from that day on is read, so an incomplete one
+  // is refused; a row before it is not read at all. Newer complete rows
+  // keep the incomplete one out of the activity list, so only the window
+  // query decides.
+  it.each([
+    [
+      'the last instant before the window start is not read',
+      '2026-10-25T23:59:59.999Z',
+      false,
+    ],
+    [
+      'the first instant of the window start is read and refused',
+      '2026-10-26T00:00:00.000Z',
+      true,
+    ],
+  ])('an amountless row at %s', async (_why, date, refused) => {
+    await connection('accounts').insert(
+      account({ id: 1, akahu_id: 'acc_a', balance_cents: 100 }),
+    )
+    await connection('transactions').insert([
+      tx('acc_a', date, null),
+      ...Array.from({ length: RECENT_ACTIVITY_LIMIT }, () =>
+        tx('acc_a', '2026-10-27T03:00:00.000Z', -1),
+      ),
+    ])
+
+    if (refused) {
+      const err = await errorOf(() => readOverview('all', NOW, connection))
+      expect(err).toBeInstanceOf(OverviewDataError)
+      expect((err as Error).message).toBe('a transaction is incomplete')
+    } else {
+      await expect(readOverview('all', NOW, connection)).resolves.toBeDefined()
+    }
+  })
+
   it('an incomplete row on an account that is not stored is ignored', async () => {
     await connection('accounts').insert(
       account({ id: 1, akahu_id: 'acc_a', balance_cents: 100 }),

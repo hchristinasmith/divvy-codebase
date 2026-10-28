@@ -1,11 +1,9 @@
 import type { CategorySource } from '../../models/transactions.ts'
-import type { RowScope } from '../../shared/contracts.ts'
+import { effectiveCategory } from '../../shared/drawings.ts'
 import {
-  effectiveCategory,
-  findDrawingIds,
-  type DrawingCandidate,
-} from '../../shared/drawings.ts'
-import { nzCalendarDate } from '../../shared/nz-dates.ts'
+  drawingIdsFromCandidates,
+  type DrawingCandidateRow,
+} from '../../shared/safe-to-spend-inputs.ts'
 import connection from './connection.ts'
 
 // Drawings on read (prd-02 Ruling 15): which stored transactions are a half
@@ -24,8 +22,11 @@ import connection from './connection.ts'
 // row with no date, or a date that is not an instant, cannot be placed in
 // the window and so is never a drawing; nothing else about it changes.
 //
-// `nzCalendarDate` is the shared one; a Date that is not an instant is
-// skipped before it is called, so its RangeError is never reached here.
+// This module loads the candidate rows; which of them the matcher sees (a
+// date that is not an instant, or a row it cannot place, is skipped) is
+// `drawingIdsFromCandidates` in shared/safe-to-spend-inputs.ts (#472), so
+// the overview's safe-to-spend and prd-03's `get_safe_to_spend` filter
+// them with the same code (prd-02 Ruling 1, prd-03 Ruling 6).
 //
 // The insights agent imports this module, so it must stay write-free and
 // must not import a module that writes (./overview.ts does).
@@ -36,21 +37,14 @@ import connection from './connection.ts'
 
 type Db = typeof connection
 
-/** The only date shape the shared matcher accepts. */
-const NZ_DAY = /^\d{4}-\d{2}-\d{2}$/
-
-interface CandidateRow {
-  id: number
-  scope: RowScope
-  date: string
-  amount_cents: number
-}
-
-/** The ids of both halves of every drawing in the database, as of now. */
-export async function loadDrawingIds(
+/**
+ * Every drawing candidate row in the database, as of now: all-time, as
+ * loaded, before any is skipped.
+ */
+export async function loadDrawingCandidates(
   db: Db = connection,
-): Promise<Set<number>> {
-  const rows: CandidateRow[] = await db('transactions as t')
+): Promise<DrawingCandidateRow[]> {
+  const rows: DrawingCandidateRow[] = await db('transactions as t')
     .join('accounts as a', 'a.akahu_id', 't.account_id')
     .where('t.source', 'akahu')
     .where('a.source', 'akahu')
@@ -65,23 +59,14 @@ export async function loadDrawingIds(
         ),
     )
     .select('t.id', 'a.scope', 't.date', 't.amount_cents')
-  const candidates: DrawingCandidate[] = []
-  for (const row of rows) {
-    const at = new Date(row.date)
-    if (Number.isNaN(at.getTime())) continue
-    // The shared matcher is strict and throws on one bad candidate; a row it
-    // cannot place (a year past 9999, an amount that is not whole cents) is
-    // skipped here instead, so one odd row never fails every list.
-    const date = nzCalendarDate(at)
-    if (!NZ_DAY.test(date) || !Number.isSafeInteger(row.amount_cents)) continue
-    candidates.push({
-      id: row.id,
-      scope: row.scope,
-      date,
-      amountCents: row.amount_cents,
-    })
-  }
-  return findDrawingIds(candidates)
+  return rows
+}
+
+/** The ids of both halves of every drawing in the database, as of now. */
+export async function loadDrawingIds(
+  db: Db = connection,
+): Promise<Set<number>> {
+  return drawingIdsFromCandidates(await loadDrawingCandidates(db))
 }
 
 /** A row as the overlay sees it: its id and its stored category columns. */
