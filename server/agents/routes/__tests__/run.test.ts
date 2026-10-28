@@ -96,7 +96,7 @@ afterAll(closeDb)
 const STAMP = '2026-10-01T00:00:00.000Z'
 const RESPONSE_KEYS = ['agent', 'runs']
 const ERROR_KEYS = ['error', 'runId']
-const CATEGORY_RESULT_KEYS = ['considered', 'cursor', 'outcome', 'runId', 'skipped', 'written']
+const CATEGORY_RESULT_KEYS = ['considered', 'cursor', 'discarded', 'outcome', 'runId', 'skipped', 'written']
 const INSIGHTS_RESULT_KEYS = ['considered', 'outcome', 'period', 'rejected', 'runId', 'skipped', 'written']
 
 const sorted = (keys: string[]) => [...keys].sort()

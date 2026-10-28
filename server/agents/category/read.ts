@@ -1,17 +1,25 @@
-// The category agent's reads (prd-04 Rulings 2 and 7; #42). Selects and
-// joins only: `transactions`, `accounts`, `category_corrections` and
-// `category_proposals` are read here and written nowhere in this directory.
+// The category agent's reads (prd-04 Rulings 2, 4, 7 and 9; #42, #430).
+// Selects and joins only: `transactions`, `accounts`, `category_corrections`
+// and `category_proposals` are read here and written nowhere in this
+// directory.
 //
-// Each row leaves this file reduced to its scope and merchant key
-// (`merchantKeyOf`, the stored subscription-mark contract), so a
-// description, reference, particulars, code, card suffix or account id never
-// reaches the learner, the reason text or a log.
+// For the rules (Ruling 7), each row leaves this file reduced to its scope
+// and merchant key (`merchantKeyOf`, the stored subscription-mark contract),
+// so a description, reference, particulars, code, card suffix or account id
+// never reaches the learner, the reason text or a log.
+//
+// For the model (Ruling 9), `loadModelRows` and `loadExamples` select
+// Ruling 4's fields by name and nothing else: date, amount, merchant,
+// description and categories. The merchant id and the account's scope are
+// read only to key an example to its merchant, and are not returned. Never
+// `select *`: a column added to `transactions` must not reach a prompt.
 //
 // Scope comes from the row's account, joined on the Akahu account id as the
 // insights queries join it.
 import type { AccountScope } from '../../../models/sync.ts'
 import { merchantKeyOf } from '../../../shared/subscriptions.ts'
 import connection from '../../db/connection.ts'
+import type { CorrectionExample, PromptRow, RejectionExample } from './prompt.ts'
 import type { CorrectionFact, RejectionFact } from './rules.ts'
 
 /** A row the agent may propose for, reduced. */
@@ -150,6 +158,108 @@ export async function loadEvidence(db = connection): Promise<Evidence> {
     const key = keyOf(row)
     if (key === null) continue
     rejections.push({ transactionId: row.transaction_id, scope: row.scope, key, category: row.proposed_category })
+  }
+
+  return { corrections, rejections }
+}
+
+/** A row as the model may see it (Ruling 4), with the id it is stored under. */
+export interface ModelRow extends PromptRow {
+  id: number
+}
+
+/**
+ * Ruling 4's fields of exactly these rows, ascending by id. The caller
+ * passes ids `loadCandidates` returned, at most one batch's worth.
+ */
+export async function loadModelRows(db = connection, ids: readonly number[]): Promise<ModelRow[]> {
+  if (ids.length > IDS_PER_READ) throw new Error('too many rows for one read')
+  const rows: {
+    id: number
+    date: string | null
+    amount_cents: number | null
+    merchant_name: string | null
+    description: string | null
+    category: string | null
+  }[] = await db('transactions as t')
+    .whereIn('t.id', ids)
+    .orderBy('t.id', 'asc')
+    .select('t.id', 't.date', 't.amount_cents', 't.merchant_name', 't.description', 't.category')
+  return rows.map((r) => ({
+    id: r.id,
+    date: r.date,
+    amountCents: r.amount_cents,
+    merchant: r.merchant_name,
+    description: r.description,
+    category: r.category,
+  }))
+}
+
+/** An example keyed by the merchant it is about. */
+export interface Keyed<T> {
+  scope: AccountScope
+  key: string
+  example: T
+}
+
+interface Examples {
+  corrections: Keyed<CorrectionExample>[]
+  rejections: Keyed<RejectionExample>[]
+}
+
+/**
+ * Hannah's own corrections (`source = 'user'`) and every rejected proposal,
+ * newest first, as Ruling 4's fields of the row each is about, keyed by
+ * that row's scope and merchant. A fact on a row with no key is dropped.
+ */
+export async function loadExamples(db = connection): Promise<Examples> {
+  const corrected: (KeyedRow & {
+    merchant_name: string | null
+    from_category: string | null
+    to_category: string
+  })[] = await db('category_corrections as c')
+    .join('transactions as t', 'c.transaction_id', 't.id')
+    .join('accounts as a', 't.account_id', 'a.akahu_id')
+    .where({ 'c.source': 'user' })
+    .orderBy('c.id', 'desc')
+    .select('a.scope', 't.merchant_id', 't.merchant_name', 't.description', 'c.from_category', 'c.to_category')
+
+  const rejected: (KeyedRow & {
+    merchant_name: string | null
+    current_category: string | null
+    proposed_category: string
+  })[] = await db('category_proposals as p')
+    .join('transactions as t', 'p.transaction_id', 't.id')
+    .join('accounts as a', 't.account_id', 'a.akahu_id')
+    .where({ 'p.status': 'rejected' })
+    .orderBy('p.id', 'desc')
+    .select('a.scope', 't.merchant_id', 't.merchant_name', 't.description', 'p.current_category', 'p.proposed_category')
+
+  const corrections: Keyed<CorrectionExample>[] = []
+  for (const row of corrected) {
+    const key = keyOf(row)
+    if (key === null) continue
+    corrections.push({
+      scope: row.scope,
+      key,
+      example: { merchant: row.merchant_name, description: row.description, from: row.from_category, to: row.to_category },
+    })
+  }
+
+  const rejections: Keyed<RejectionExample>[] = []
+  for (const row of rejected) {
+    const key = keyOf(row)
+    if (key === null) continue
+    rejections.push({
+      scope: row.scope,
+      key,
+      example: {
+        merchant: row.merchant_name,
+        description: row.description,
+        current: row.current_category,
+        rejected: row.proposed_category,
+      },
+    })
   }
 
   return { corrections, rejections }
