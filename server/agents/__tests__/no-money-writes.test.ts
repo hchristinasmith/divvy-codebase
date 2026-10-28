@@ -25,7 +25,8 @@ import { assertInMemory, closeDb } from '../../test-utils/app.ts'
 //      transitively, a server/db/** module that does (rule 2 is run over
 //      every module in server/db/ and its subdirectories, then each one's
 //      server/db imports are followed; imports from outside server/db/ are
-//      not); a database driver; knex as a value; or a module in
+//      not); a database driver; knex as a value; the Anthropic SDK outside
+//      the Claude API client (Ruling 9, below); or a module in
 //      `BANNED_MODULES` (a module loader, the network, another process or
 //      thread, the file system);
 //   2. a knex write (`insert`, `update`, `del`, ...) whose chain does not
@@ -39,9 +40,16 @@ import { assertInMemory, closeDb } from '../../test-utils/app.ts'
 //      that could reach a write or raw SQL, every way of loading a module
 //      the import rule cannot see (`process.getBuiltinModule` included), and
 //      any reference to a global in `NETWORK_GLOBALS` (Ruling 7: agents call
-//      nothing over the network, this app's own API included).
+//      nothing over the network, this app's own API included; Ruling 9 is
+//      the one exception, below).
 // A table name built at run time is out of reach of any source check, this
 // one included.
+//
+// Ruling 7 applies to every agent module. Ruling 9 allows the network in one
+// place: server/agents/llm/client.ts, the Claude API client, is the only
+// module that may import `@anthropic-ai/sdk` or a subpath of it, type-only
+// imports included. Everywhere else under server/agents/ that import is
+// flagged, and the real-tree test pins the client as its only importer.
 //
 // The one exemption is the accept route. It may import exactly the names in
 // `EXEMPTION.names` from `EXEMPTION.module`, must pass as setUserCategory's
@@ -109,6 +117,13 @@ const EXEMPTION = {
   // getTransactionCategory only reads: the stale check (decision 70b41742).
   names: ['setUserCategory', 'getTransactionCategory'],
 } as const
+
+// The Claude API client, the one agent module the Anthropic SDK may be
+// imported from (prd-04 Ruling 9, #429).
+const LLM_CLIENT = 'server/agents/llm/client.ts'
+const ANTHROPIC_SDK = '@anthropic-ai/sdk'
+const isAnthropicSdk = (specifier: string): boolean =>
+  specifier === ANTHROPIC_SDK || specifier.startsWith(`${ANTHROPIC_SDK}/`)
 
 interface Context {
   // Repo-relative paths of the server/db/** modules that write.
@@ -366,6 +381,8 @@ function importProblems(path: string, source: ts.SourceFile, ctx: Context): stri
       if (!exempt) found.push(`imports writer ${target}`)
     } else if (DRIVERS.has(specifier)) {
       found.push(`imports driver ${specifier}`)
+    } else if (isAnthropicSdk(specifier) && path !== LLM_CLIENT) {
+      found.push(`imports banned module ${specifier}`)
     } else if (BANNED_MODULES.has(specifier.replace(/^node:/, ''))) {
       found.push(`imports banned module ${specifier}`)
     } else if (specifier === 'knex' && (clause === undefined || !isTypeOnly(clause))) {
@@ -610,6 +627,15 @@ describe('the real tree', () => {
       .filter(({ path, text }) => writerImports(path, text, ctx.writers).length > 0)
       .map((f) => f.path)
     expect(importers).toEqual([EXEMPTION.file])
+  })
+
+  // So the SDK allowance cannot outlive the client: if the client stops
+  // importing it, this goes red and the allowance must be removed.
+  it('the Claude API client is the only module under server/agents/ that imports the SDK', () => {
+    const importers = agentModules()
+      .filter(({ path, text }) => importTargets(path, text).some(isAnthropicSdk))
+      .map((f) => f.path)
+    expect(importers).toEqual([LLM_CLIENT])
   })
 
   it('goes red when a module in the list writes money state', () => {
@@ -883,6 +909,34 @@ describe('planted violations', () => {
         `imports banned module ${specifier}`,
       )
     }
+  })
+
+  it.each(['@anthropic-ai/sdk', '@anthropic-ai/sdk/resources'])(
+    'importing %s outside the Claude API client is flagged',
+    (specifier) => {
+      expect(problemsFor(RULES, `import Anthropic from '${specifier}'`, ctx)).toContain(
+        `imports banned module ${specifier}`,
+      )
+    },
+  )
+
+  it('a type-only import and a re-export of the SDK are flagged too', () => {
+    expect(problemsFor(RULES, "import type Anthropic from '@anthropic-ai/sdk'", ctx)).toContain(
+      'imports banned module @anthropic-ai/sdk',
+    )
+    expect(problemsFor(RULES, "export * from '@anthropic-ai/sdk'", ctx)).toContain(
+      'imports banned module @anthropic-ai/sdk',
+    )
+  })
+
+  // The allowance is the client's path, not the llm/ directory: a sibling
+  // module that imports the SDK is still flagged.
+  it('the SDK is allowed in the Claude API client, and in no sibling module', () => {
+    const sdk = "import Anthropic from '@anthropic-ai/sdk'"
+    expect(problemsFor(LLM_CLIENT, sdk, ctx)).toEqual([])
+    expect(problemsFor('server/agents/llm/config.ts', sdk, ctx)).toContain(
+      'imports banned module @anthropic-ai/sdk',
+    )
   })
 
   it('a nested server/db module that writes is a writer to import', () => {
