@@ -959,6 +959,35 @@ describe('the model fallback (Ruling 9, #430)', () => {
     expect(data.rejected).toEqual([])
   })
 
+  it("examples are the batch's own scope and merchant only, newest first, at most 20 of each kind", async () => {
+    await seedAccounts()
+    // agent.ts's EXAMPLES_PER_CALL, one over it. Alternating categories, so
+    // no run of moves reaches a rule and the florist's row still goes to the
+    // model.
+    const CAP = 20
+    for (let n = 1; n <= CAP + 1; n += 1) {
+      const id = await unruled({ description: `INVENTED FLORIST ${n}` })
+      await userMove(id, n % 2 === 0 ? CAFE : BAKERY)
+    }
+    // Newer than every one above, so they would be in the top 20 unfiltered.
+    const strawb = await unruled({ account_id: 'acc_fixture_s', description: 'STRAWB SAME MERCHANT' })
+    await userMove(strawb, CAFE)
+    const other = await tx({ merchant_id: 'merchant_fixture_three', description: 'PERSONAL OTHER MERCHANT' })
+    await userMove(other, CAFE)
+    await unruled()
+    const fake = model()
+    expect(await run({}, using(fake))).toMatchObject({ outcome: 'success' })
+
+    expect(fake.bodies).toHaveLength(1)
+    const data = dataOf(fake.bodies[0])
+    expect(data.rows).toHaveLength(1)
+    const expected = Array.from({ length: CAP }, (_, i) => `INVENTED FLORIST ${CAP + 1 - i}`)
+    expect(data.corrections.map((c) => c.description)).toEqual(expected)
+    const text = JSON.stringify(fake.bodies[0])
+    expect(text).not.toContain('STRAWB SAME MERCHANT')
+    expect(text).not.toContain('PERSONAL OTHER MERCHANT')
+  })
+
   it('Done-when 3: after a rejection, a re-run never proposes the pair again and the rejection is in the next prompt', async () => {
     await seedAccounts()
     const first = await unruled()
