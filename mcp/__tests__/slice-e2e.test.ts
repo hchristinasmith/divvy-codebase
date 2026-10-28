@@ -5,7 +5,9 @@
 //   - a successful `get_sync_status` returns no `data_as_of`, or leaves
 //     anything but exactly one `ok` row in the audit file;
 //   - a rejected call (`scope: "everyone"`) returns data, is not answered
-//     `invalid_arguments`, or is not recorded as exactly one `rejected` row.
+//     `invalid_arguments`, or is not recorded as exactly one `rejected` row;
+//   - a valid `get_safe_to_spend` returns no `data_as_of`, or leaves anything
+//     but exactly one more `ok` row in the audit file (#473).
 //
 // It spawns the entry the way the guard test does: a constructed clean
 // environment and scratch replica and audit paths, never the PRD defaults.
@@ -47,7 +49,11 @@ interface AuditRow {
   outcome: string
 }
 
-/** A replica holding only what `get_sync_status` reads, in the scrub's schema. */
+/**
+ * A replica holding what `get_sync_status` and `get_safe_to_spend` read, in
+ * the scrub's schema: one personal current account and nothing else, so the
+ * safe-to-spend tables exist and the settings take their defaults.
+ */
 async function writeReplica(): Promise<void> {
   const db = await openDatabase(REPLICA, sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE)
   try {
@@ -55,6 +61,24 @@ async function writeReplica(): Promise<void> {
     await run(db, 'INSERT INTO replica_meta VALUES (?, ?, ?)', [META.built_at, META.last_sync_at, META.data_as_of])
     await run(db, 'CREATE TABLE sync_runs (started_at datetime, finished_at datetime, outcome text)')
     await run(db, 'INSERT INTO sync_runs VALUES (?, ?, ?)', ['2026-10-28T00:57:00.000Z', META.last_sync_at, 'success'])
+    await run(db, 'CREATE TABLE settings (key varchar(255), value text)')
+    await run(
+      db,
+      'CREATE TABLE accounts (id integer, akahu_id varchar(255), source text, scope text, name varchar(255), balance_cents integer)',
+    )
+    await run(db, 'INSERT INTO accounts VALUES (?, ?, ?, ?, ?, ?)', [1, 'acc_1', 'akahu', 'personal', 'Everyday', 123456])
+    await run(db, 'CREATE TABLE account_settings (account_id integer, role text)')
+    await run(db, 'INSERT INTO account_settings VALUES (?, ?)', [1, 'current'])
+    await run(
+      db,
+      'CREATE TABLE bills (id integer, scope text, name varchar(255), amount_cents integer, repeat text, first_due_date date)',
+    )
+    await run(db, 'CREATE TABLE bill_payments (bill_id integer, due_date date)')
+    await run(db, 'CREATE TABLE budgets (id integer, scope text, category varchar(255), limit_cents integer)')
+    await run(
+      db,
+      'CREATE TABLE transactions (id integer, account_id varchar(255), source text, date datetime, amount_cents integer, category varchar(255), category_source text, status text)',
+    )
   } finally {
     await close(db)
   }
@@ -95,7 +119,7 @@ afterAll(async () => {
   rmSync(SCRATCH, { recursive: true, force: true })
 })
 
-// The two calls share one entry and one audit file, so they run in order.
+// The calls share one entry and one audit file, so they run in order.
 describe('the entry, wired to the real replica and audit sink', () => {
   it(
     'answers get_sync_status from the replica and records exactly one ok row',
@@ -138,6 +162,27 @@ describe('the entry, wired to the real replica and audit sink', () => {
       expect(rows).toHaveLength(2)
       expect(rows[1]).toMatchObject({ tool: 'get_safe_to_spend', outcome: 'rejected', row_count: null })
       expect(JSON.parse(rows[1].params_json)).toEqual({ scope: 'everyone' })
+    },
+    PROCESS_TIMEOUT_MS,
+  )
+
+  it(
+    'answers get_safe_to_spend for a valid scope from the replica and records exactly one ok row',
+    async () => {
+      const result = (await client.callTool({
+        name: 'get_safe_to_spend',
+        arguments: { scope: 'personal' },
+      })) as CallToolResult
+
+      expect(result.isError).toBeFalsy()
+      expect(bodyOf(result)).toMatchObject({ data_as_of: META.data_as_of, scope: 'personal', liquid_cents: 123456 })
+      expect(result.structuredContent).toMatchObject({ data_as_of: META.data_as_of })
+
+      const rows = await auditRows()
+      expect(rows).toHaveLength(3)
+      // The account and its role row; every other table is empty.
+      expect(rows[2]).toMatchObject({ tool: 'get_safe_to_spend', outcome: 'ok', row_count: 2 })
+      expect(JSON.parse(rows[2].params_json)).toEqual({ scope: 'personal' })
     },
     PROCESS_TIMEOUT_MS,
   )
