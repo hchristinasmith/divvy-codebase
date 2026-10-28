@@ -50,6 +50,14 @@ export interface CategoryProposal {
   created_at: IsoTimestamp
 }
 
+// A proposal as GET /api/v1/agents/proposals lists it (#439): its own columns,
+// plus the description and amount (integer cents) of the transaction it is
+// about, both null when that transaction is missing.
+export interface ListedProposal extends CategoryProposal {
+  description: string | null
+  amountCents: number | null
+}
+
 // ---- agent_runs (prd-04 Rulings 2, 5, 7 and 9; #31, #428) ----
 
 export const AGENT_KINDS = ['category', 'insights'] as const

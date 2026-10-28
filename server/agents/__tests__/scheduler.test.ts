@@ -175,6 +175,7 @@ describe('nothing runs until start()', () => {
     expect(vi.getTimerCount()).toBe(0)
     expect(mod.agentScheduler.getState()).toStrictEqual({
       started: false,
+      stopped: false,
       running: false,
       nextRunAt: null,
     })
@@ -282,6 +283,63 @@ describe('one pass at a time', () => {
     await s.whenIdle()
     s.stop()
     expect(s.getState().started).toBe(false)
+  })
+})
+
+describe('stop() during the shutdown drain (#462)', () => {
+  it('refuses trigger() and runNow() from stop() on, so the pass in flight is the only one', async () => {
+    await syncRun()
+    let release: (r: CategoryRunResult) => void = () => {}
+    const runCategory = vi.fn(
+      () =>
+        new Promise<CategoryRunResult>((resolve) => {
+          release = resolve
+        }),
+    )
+    const s = scheduler({ runCategoryAgent: runCategory })
+
+    expect(s.trigger()).toStrictEqual({ started: true })
+    await vi.waitFor(() => expect(runCategory).toHaveBeenCalledTimes(1))
+
+    s.stop()
+    expect(s.trigger()).toStrictEqual({ started: false, reason: 'stopped' })
+    expect(s.runNow({ agent: 'category' })).toStrictEqual({ started: false, reason: 'stopped' })
+    expect(s.getState()).toMatchObject({ running: true, stopped: true })
+
+    release({ runId: 1, outcome: 'success', considered: 0, written: 0, skipped: 0, cursor: null })
+    await s.whenIdle()
+
+    // Still refused after the drain: a manual run would call the agent again.
+    expect(s.trigger()).toStrictEqual({ started: false, reason: 'stopped' })
+    expect(s.runNow({ agent: 'category' })).toStrictEqual({ started: false, reason: 'stopped' })
+    expect(runCategory).toHaveBeenCalledTimes(1)
+    expect(s.getState()).toMatchObject({ running: false, stopped: true })
+  })
+
+  it('start() after stop() lifts the refusal, and runNow() runs the agent again', async () => {
+    const runCategory = vi.fn(
+      async (): Promise<CategoryRunResult> => ({
+        runId: 1,
+        outcome: 'success',
+        considered: 0,
+        written: 0,
+        skipped: 0,
+        cursor: null,
+      }),
+    )
+    const s = scheduler({ runCategoryAgent: runCategory })
+    s.stop()
+    expect(s.runNow({ agent: 'category' })).toStrictEqual({ started: false, reason: 'stopped' })
+    expect(runCategory).not.toHaveBeenCalled()
+
+    s.start()
+    await s.whenIdle()
+    const run = s.runNow({ agent: 'category' })
+    if (!run.started) throw new Error('runNow refused after start()')
+    await run.result
+    s.stop()
+
+    expect(runCategory).toHaveBeenCalledTimes(1)
   })
 })
 

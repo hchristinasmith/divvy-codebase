@@ -347,6 +347,27 @@ describe('POST /api/v1/sync/run', () => {
     }
   })
 
+  it('answers 503 while the scheduler is stopped for the shutdown drain, and starts no run (#462)', async () => {
+    vi.stubEnv('AKAHU_USER_TOKEN', 'invented-token')
+    vi.stubEnv('AKAHU_APP_ID', 'invented-app-id')
+    const trigger = vi
+      .spyOn(syncScheduler, 'trigger')
+      .mockReturnValue({ started: false, reason: 'stopped' })
+
+    try {
+      const res = await api.post('/api/v1/sync/run')
+
+      expect(res.status).toBe(503)
+      expect(Object.keys(res.body).sort()).toEqual(['reason', 'started'])
+      expect(res.body).toStrictEqual({ started: false, reason: 'shutting down' })
+      expect(trigger).toHaveBeenCalledTimes(1)
+      expect(fetchMock).not.toHaveBeenCalled()
+      expect(await connection('sync_runs').count({ n: '*' })).toEqual([{ n: 0 }])
+    } finally {
+      trigger.mockRestore()
+    }
+  })
+
   it('without Sec-Fetch-Site, refuses a request from another origin before starting anything', async () => {
     for (const origin of ['http://evil.example', 'null', 'not a url']) {
       const res = await api.post('/api/v1/sync/run').set('Origin', origin)

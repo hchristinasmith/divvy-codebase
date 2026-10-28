@@ -50,6 +50,10 @@ const PROPOSAL_KEYS = [
   'created_at',
 ]
 
+// The key set of each item the list route returns (#439): the proposal's own
+// columns plus the transaction's description and integer-cent amount.
+const LISTED_KEYS = [...PROPOSAL_KEYS, 'description', 'amountCents']
+
 // The key set of the transaction in accept's body (#297): the TransactionRow
 // columns, written out here rather than imported from production, so a column
 // added to or dropped from the shared list fails this pin.
@@ -872,7 +876,7 @@ describe('GET /api/v1/agents/proposals', () => {
     return { accepted: targetProposal, pending: [third, otherProposal], rejected: fourth }
   }
 
-  it('lists pending proposals by default, newest first, as full rows', async () => {
+  it('lists pending proposals by default, newest first, with the transaction’s description and amount', async () => {
     const { pending } = await seedEveryStatus()
 
     const res = await api.get('/api/v1/agents/proposals')
@@ -881,9 +885,37 @@ describe('GET /api/v1/agents/proposals', () => {
     expect(Object.keys(res.body)).toEqual(['items'])
     expect(res.body.items.map((p: Row) => p.id)).toEqual(pending)
     for (const item of res.body.items) {
-      expect(Object.keys(item).sort()).toEqual([...PROPOSAL_KEYS].sort())
+      expect(Object.keys(item).sort()).toEqual([...LISTED_KEYS].sort())
       expect(item.status).toBe('pending')
-      expect(item).toEqual(await proposalRow(item.id as number))
+      const { description, amountCents, ...own } = item
+      expect(own).toEqual(await proposalRow(item.id as number))
+      const tx = await transactionRow(item.transaction_id as number)
+      expect(description).toBe(tx.description)
+      expect(amountCents).toBe(tx.amount_cents)
+      expect(Number.isInteger(amountCents)).toBe(true)
+    }
+  })
+
+  it('a proposal whose transaction is gone is listed with null description and amount', async () => {
+    const { other, otherProposal, targetProposal } = await seedMain()
+    await connection.raw('PRAGMA foreign_keys = OFF')
+    try {
+      await connection('transactions').where({ id: other }).del()
+
+      const res = await api.get('/api/v1/agents/proposals')
+
+      expect(res.status).toBe(200)
+      const gone = res.body.items.find((p: Row) => p.id === otherProposal)
+      expect(gone).toEqual({
+        ...(await proposalRow(otherProposal)),
+        description: null,
+        amountCents: null,
+      })
+      const kept = res.body.items.find((p: Row) => p.id === targetProposal)
+      expect(kept.description).toBe(`${MERCHANT} A`)
+      expect(Number.isInteger(kept.amountCents)).toBe(true)
+    } finally {
+      await connection.raw('PRAGMA foreign_keys = ON')
     }
   })
 

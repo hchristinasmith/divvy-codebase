@@ -8,12 +8,13 @@ import {
 } from '@testing-library/react'
 import { renderWithProviders } from '../../Shell/__tests__/renderWithProviders.tsx'
 import type { ActivityRow } from '../../../../shared/contracts.ts'
-import type { CategoryProposal } from '../../../../server/agents/contracts.ts'
+import type { ListedProposal } from '../../../../server/agents/contracts.ts'
 import SuggestionsPill from '../SuggestionsPill.tsx'
 
-// The Overview's suggestions pill (prd-04 Ruling 2, #62). One describe per
-// Done-when line. Requests go through the real useProposals.ts to a routing
-// fetch stub. Every value is invented.
+// The Overview's suggestions pill (prd-04 Ruling 2, #62; #439). One describe
+// per Done-when line. Requests go through the real useProposals.ts to a
+// routing fetch stub. Every value is invented. The merchant and amount come
+// from each proposal (#439), so most renders pass no card rows at all.
 
 // The pill's query key, private to useProposals.ts.
 const PENDING = ['proposals', 'pending']
@@ -23,7 +24,8 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function proposal(id: number, over: Partial<CategoryProposal> = {}): CategoryProposal {
+// Its transaction is 100 + id; the description and amount are the listed fields.
+function proposal(id: number, over: Partial<ListedProposal> = {}): ListedProposal {
   return {
     id,
     transaction_id: 100 + id,
@@ -34,15 +36,19 @@ function proposal(id: number, over: Partial<CategoryProposal> = {}): CategoryPro
     origin: 'rule',
     status: 'pending',
     created_at: '2026-10-27T09:00:00.000Z',
+    description: 'Invented Cafe',
+    amountCents: -1250,
     ...over,
   }
 }
 
+// A card row whose id matches proposal 1's transaction, to prove the pill
+// ignores it.
 const CAFE: ActivityRow = {
   id: '101',
   date: '2026-10-27',
-  description: 'Invented Cafe',
-  amountCents: -1250,
+  description: 'Invented Card Row',
+  amountCents: -9999,
   scope: 'personal',
   accountName: 'Everyday',
   status: 'settled',
@@ -64,7 +70,7 @@ interface Call {
 // `decide` returns, or rejects when it throws (a network failure). A
 // promise from `decide` holds the request open.
 function installFetch(
-  list: CategoryProposal[],
+  list: ListedProposal[],
   decide: (call: Call) => Reply | Promise<Reply> = () => ({ body: {} }),
 ) {
   const calls: Call[] = []
@@ -111,34 +117,39 @@ function itemIds(): string[] {
 }
 
 describe('the pill counts the pending proposals and is absent at zero', () => {
-  it('reads "3 category suggestions" and lists each one', async () => {
+  it('reads "3 category suggestions" and lists each one, with the card having no rows', async () => {
     const fx = installFetch([
-      proposal(1, { current_category: 'Shopping', reason: 'Matches 2 corrections' }),
-      proposal(2),
+      proposal(1, {
+        current_category: 'Shopping',
+        reason: 'Matches 2 corrections',
+        description: 'Invented Shop',
+        amountCents: -4000,
+      }),
+      proposal(2, { description: null, amountCents: null }),
       proposal(3),
     ])
-    renderWithProviders(<SuggestionsPill rows={[CAFE]} />)
+    renderWithProviders(<SuggestionsPill rows={[]} />)
 
     await openList('3 category suggestions')
 
     expect(itemIds()).toEqual(['1', '2', '3'])
-    // A transaction among the card's rows shows its merchant and amount.
+    // The merchant and amount come from the proposal itself.
     const first = item(1)
-    expect(first.textContent).toContain('Invented Cafe')
-    expect(first.textContent).toContain('-$12.50')
+    expect(first.textContent).toContain('Invented Shop')
+    expect(first.textContent).toContain('-$40.00')
     expect(first.textContent).toContain('Shopping → Cafes and restaurants')
     expect(first.textContent).toContain('Matches 2 corrections')
-    // One that is not falls back to its id; a null category is named.
+    // A transaction with no description falls back to its id, and with no
+    // amount shows none; a null category is named.
     expect(item(2).textContent).toContain('Transaction #102')
+    expect(item(2).textContent).not.toContain('$')
     expect(item(2).textContent).toContain('Uncategorised → Cafes and restaurants')
     expect(fx.posts()).toHaveLength(0)
   })
 
   it('renders nothing when no proposal is pending', async () => {
     installFetch([])
-    const { container, client } = renderWithProviders(
-      <SuggestionsPill rows={[CAFE]} />,
-    )
+    const { container, client } = renderWithProviders(<SuggestionsPill />)
 
     // Settled, so the empty card is the zero case, not the loading one.
     await waitFor(() =>
@@ -153,14 +164,26 @@ describe('the pill counts the pending proposals and is absent at zero', () => {
       'fetch',
       vi.fn(() => Promise.reject(new TypeError('Failed to fetch'))),
     )
-    const { container, client } = renderWithProviders(
-      <SuggestionsPill rows={[]} />,
-    )
+    const { container, client } = renderWithProviders(<SuggestionsPill />)
 
     await waitFor(() =>
       expect(client.getQueryState(PENDING)?.status).toBe('error'),
     )
     expect(container.innerHTML).toBe('')
+  })
+})
+
+describe('the pill reads the merchant and amount from the proposal, not the card', () => {
+  it('shows the proposal’s description and amount even when the card has a row for the same transaction', async () => {
+    installFetch([proposal(1, { description: 'Invented Shop', amountCents: -4000 })])
+    renderWithProviders(<SuggestionsPill rows={[CAFE]} />)
+
+    await openList('1 category suggestion')
+
+    expect(item(1).textContent).toContain('Invented Shop')
+    expect(item(1).textContent).toContain('-$40.00')
+    expect(item(1).textContent).not.toContain('Invented Card Row')
+    expect(item(1).textContent).not.toContain('-$99.99')
   })
 })
 
@@ -171,7 +194,7 @@ describe('accept sends one request, drops the row and refreshes the Overview', (
       [proposal(1), proposal(2), proposal(3)],
       () => new Promise<Reply>((resolve) => (release = resolve)),
     )
-    const { client } = renderWithProviders(<SuggestionsPill rows={[CAFE]} />)
+    const { client } = renderWithProviders(<SuggestionsPill />)
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     await openList('3 category suggestions')
 
@@ -200,7 +223,7 @@ describe('accept sends one request, drops the row and refreshes the Overview', (
 
   it('removes the pill when the last proposal is accepted', async () => {
     const fx = installFetch([proposal(1)])
-    const { container } = renderWithProviders(<SuggestionsPill rows={[]} />)
+    const { container } = renderWithProviders(<SuggestionsPill />)
     await openList('1 category suggestion')
 
     fireEvent.click(within(item(1)).getByRole('button', { name: 'Accept' }))
@@ -214,7 +237,7 @@ describe('accept sends one request, drops the row and refreshes the Overview', (
 
   it('says "1 category suggestion" for one', async () => {
     installFetch([proposal(1)])
-    renderWithProviders(<SuggestionsPill rows={[]} />)
+    renderWithProviders(<SuggestionsPill />)
 
     expect(
       await screen.findByRole('button', { name: '1 category suggestion' }),
@@ -225,7 +248,7 @@ describe('accept sends one request, drops the row and refreshes the Overview', (
 describe('reject calls the reject route and removes the row', () => {
   it('posts to reject and drops the row', async () => {
     const fx = installFetch([proposal(1), proposal(2)])
-    renderWithProviders(<SuggestionsPill rows={[]} />)
+    renderWithProviders(<SuggestionsPill />)
     await openList('2 category suggestions')
 
     fireEvent.click(within(item(1)).getByRole('button', { name: 'Reject' }))
@@ -244,7 +267,7 @@ describe('a failure shows a message and keeps the row', () => {
       status: 409,
       body: { error: 'Invented: the category has changed since' },
     }))
-    renderWithProviders(<SuggestionsPill rows={[]} />)
+    renderWithProviders(<SuggestionsPill />)
     await openList('2 category suggestions')
 
     fireEvent.click(within(item(1)).getByRole('button', { name: 'Accept' }))
@@ -264,7 +287,7 @@ describe('a failure shows a message and keeps the row', () => {
     installFetch([proposal(1)], () => {
       throw new TypeError('Failed to fetch')
     })
-    renderWithProviders(<SuggestionsPill rows={[]} />)
+    renderWithProviders(<SuggestionsPill />)
     await openList('1 category suggestion')
 
     fireEvent.click(within(item(1)).getByRole('button', { name: 'Reject' }))
@@ -278,7 +301,7 @@ describe('a failure shows a message and keeps the row', () => {
 describe('proposal text is rendered as text, never as HTML', () => {
   it('shows markup in a reason literally', async () => {
     installFetch([proposal(1, { reason: '<b>x</b>' })])
-    renderWithProviders(<SuggestionsPill rows={[]} />)
+    renderWithProviders(<SuggestionsPill />)
     await openList('1 category suggestion')
 
     expect(item(1).querySelector('b')).toBeNull()
@@ -287,18 +310,15 @@ describe('proposal text is rendered as text, never as HTML', () => {
 
   it('shows markup in a merchant and in either category literally', async () => {
     installFetch([
-      proposal(1),
+      proposal(1, { description: '<b>x</b>' }),
       proposal(2, { current_category: '<b>x</b>' }),
       proposal(3, { proposed_category: '<b>x</b>' }),
     ])
-    renderWithProviders(
-      <SuggestionsPill rows={[{ ...CAFE, description: '<b>x</b>' }]} />,
-    )
+    renderWithProviders(<SuggestionsPill />)
     await openList('3 category suggestions')
 
     const list = screen.getByRole('list', { name: 'Category suggestions' })
     expect(list.querySelector('b')).toBeNull()
-    // Proposal 1's transaction is CAFE's row, so its merchant is the markup.
     expect(item(1).textContent).toContain('<b>x</b>')
     expect(item(2).textContent).toContain('<b>x</b> → Cafes and restaurants')
     expect(item(3).textContent).toContain('Uncategorised → <b>x</b>')

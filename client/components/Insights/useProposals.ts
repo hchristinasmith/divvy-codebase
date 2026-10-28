@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { invalidateOverview, queryKeys } from '../../apis/queryKeys.ts'
 import { call } from '../../apis/http.ts'
 // Type only: erased from the client bundle.
-import type { CategoryProposal } from '../../../server/agents/contracts.ts'
+import type { ListedProposal } from '../../../server/agents/contracts.ts'
 
 // The category agent's inbox as the Overview's suggestions pill reads it
 // (prd-04 Ruling 2, #62): the pending proposals, and the accept and reject
@@ -18,7 +18,7 @@ const PENDING_PROPOSALS_KEY = ['proposals', 'pending'] as const
 
 /** GET /api/v1/agents/proposals, whose status defaults to pending. */
 interface ListProposalsResponse {
-  items: CategoryProposal[]
+  items: ListedProposal[]
 }
 
 export type ProposalDecision = 'accept' | 'reject'
@@ -46,7 +46,7 @@ export function useProposalDecision() {
     // Not awaited: the row has already left the list, so nothing waits on
     // the refetch.
     onSuccess: (_body, { id, decision }) => {
-      client.setQueryData<CategoryProposal[]>(PENDING_PROPOSALS_KEY, (items) =>
+      client.setQueryData<ListedProposal[]>(PENDING_PROPOSALS_KEY, (items) =>
         items?.filter((p) => p.id !== id),
       )
       if (decision === 'accept') {

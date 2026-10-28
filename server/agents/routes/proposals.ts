@@ -4,9 +4,11 @@ import {
   PROPOSAL_STATUSES,
   parseProposedCategory,
   type CategoryProposal,
+  type ListedProposal,
   type ProposalStatus,
 } from '../contracts.ts'
 import { getProposal, listProposals, setStatus } from '../db/proposals.ts'
+import { transactionSummaries } from './proposal-transactions.ts'
 import connection from '../../db/connection.ts'
 import {
   getTransactionCategory,
@@ -14,6 +16,7 @@ import {
 } from '../../db/transactions.ts'
 import type { TransactionRow } from '../../../models/transactions.ts'
 import { errorClass } from '../../error-class.ts'
+import { parseId } from '../../http.ts'
 
 // /api/v1/agents/proposals (prd-04 Rulings 2 and 7, #51), mounted by
 // ./index.ts, which also refuses a cross-site POST before it reaches here.
@@ -51,7 +54,7 @@ class AcceptRefused extends Error {
 }
 
 interface ListProposalsResponse {
-  items: CategoryProposal[]
+  items: ListedProposal[]
 }
 
 interface AcceptProposalResponse {
@@ -61,15 +64,6 @@ interface AcceptProposalResponse {
 
 interface RejectProposalResponse {
   proposal: CategoryProposal
-}
-
-/**
- * A plain positive integer id, or null. Digits only, as PATCH
- * /api/v1/transactions/:id: Number() would also accept '1e3', '0x10' and ' 7'.
- */
-function parseId(raw: string): number | null {
-  const id = Number(raw)
-  return /^[1-9]\d*$/.test(raw) && Number.isSafeInteger(id) ? id : null
 }
 
 /** One known status; absent is `pending`; anything else, or repeated, null. */
@@ -84,6 +78,8 @@ function parseStatus(raw: unknown): ProposalStatus | null {
 const router = express.Router()
 
 // GET /api/v1/agents/proposals?status=pending|accepted|rejected
+// Each item is the proposal's row plus its transaction's description and
+// amount (#439), null for either when the transaction is missing.
 router.get('/', async (req, res) => {
   const status = parseStatus(req.query.status)
   if (status === null) {
@@ -93,7 +89,19 @@ router.get('/', async (req, res) => {
     return
   }
   try {
-    const body: ListProposalsResponse = { items: await listProposals({ status }) }
+    const proposals = await listProposals({ status })
+    const summaries = await transactionSummaries(
+      proposals.map((proposal) => proposal.transaction_id),
+    )
+    const items: ListedProposal[] = proposals.map((proposal) => {
+      const summary = summaries.get(proposal.transaction_id)
+      return {
+        ...proposal,
+        description: summary?.description ?? null,
+        amountCents: summary?.amountCents ?? null,
+      }
+    })
+    const body: ListProposalsResponse = { items }
     res.json(body)
   } catch (err) {
     // eslint-disable-next-line no-console

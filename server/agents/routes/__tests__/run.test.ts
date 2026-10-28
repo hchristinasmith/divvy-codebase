@@ -339,6 +339,56 @@ describe('500', () => {
   })
 })
 
+describe('503 while the scheduler is stopped for the shutdown drain (#462)', () => {
+  it('answers 503 before the gap check, so a recent manual run does not make it a 409, and starts nothing', async () => {
+    const recent = new Date(Date.now() - 5_000).toISOString()
+    await connection('agent_runs').insert({
+      kind: 'category',
+      trigger: 'manual',
+      started_at: recent,
+      finished_at: recent,
+      outcome: 'success',
+      considered_count: 0,
+      written_count: 0,
+    })
+    const getState = vi.spyOn(agentScheduler, 'getState').mockReturnValue({
+      started: false,
+      stopped: true,
+      running: false,
+      nextRunAt: null,
+    })
+
+    try {
+      const res = await post({ agent: 'category' })
+
+      expect(res.status).toBe(503)
+      expect(sorted(Object.keys(res.body))).toEqual(sorted(ERROR_KEYS))
+      expect(res.body).toStrictEqual({ error: 'Server is shutting down', runId: null })
+      expect(getState).toHaveBeenCalled()
+      expect((await runRows()).map((r) => r.trigger)).toEqual(['manual'])
+    } finally {
+      getState.mockRestore()
+    }
+  })
+
+  it('answers 503 when a stop lands during the gap read, so runNow refuses after it', async () => {
+    const runNow = vi
+      .spyOn(agentScheduler, 'runNow')
+      .mockReturnValue({ started: false, reason: 'stopped' })
+
+    try {
+      const res = await post({ agent: 'category' })
+
+      expect(res.status).toBe(503)
+      expect(res.body).toStrictEqual({ error: 'Server is shutting down', runId: null })
+      expect(runNow).toHaveBeenCalledTimes(1)
+      expect(await runRows()).toEqual([])
+    } finally {
+      runNow.mockRestore()
+    }
+  })
+})
+
 describe('403', () => {
   it('a cross-site request is refused before anything runs', async () => {
     const res = await post({ agent: 'category' }).set('Sec-Fetch-Site', 'cross-site')
