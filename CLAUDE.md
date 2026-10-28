@@ -56,7 +56,7 @@ Divvy is Hannah's private personal-and-business money app: one user, one server 
 
 - No Auth0, no login page: the app is reachable only over the tailnet (D4). Do not add a public auth layer.
 - Secrets come from the environment (`.env` locally, Fly secrets in prod). Never commit `.env`, tokens, or a real `.sqlite3`. Never log a token.
-- `AKAHU_*` and `XERO_*` env vars are read in `server/` only; never bundled into the client.
+- `AKAHU_*`, `XERO_*` and `ANTHROPIC_*` env vars are read in `server/` only, and `ANTHROPIC_*` only in `server/agents/llm/` (the API key in `config.ts` alone); never bundled into the client.
 - No raw-SQL endpoints. The MCP tool surface is fixed and typed (prd-03).
 
 ---
