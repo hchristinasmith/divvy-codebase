@@ -3,7 +3,9 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import connection from '../../db/connection.ts'
 import { setUserCategory } from '../../db/transactions.ts'
 import { assertInMemory } from '../../test-utils/app.ts'
-import type { CategoryRunResult } from '../category/agent.ts'
+import { runCategoryAgent, type CategoryRunResult } from '../category/agent.ts'
+import type { Transport } from '../llm/client.ts'
+import { recording, untouchable } from '../llm/__tests__/fakes.ts'
 import { finishRun, startRun } from '../db/agent-runs.ts'
 import { runInsightsAgent } from '../insights/agent.ts'
 import {
@@ -235,6 +237,82 @@ describe('the category agent per sync run', () => {
   })
 })
 
+describe('a blocked category run (#430)', () => {
+  it('counts as having processed its sync run, so the next tick does not retry it; the backlog resumes at the next sync', async () => {
+    await seedAccounts()
+    // A merchant with no rule: its row goes to the model.
+    seq += 1
+    await connection('transactions').insert({
+      akahu_id: `trans_fixture_${seq}`,
+      account_id: 'acc_fixture_p',
+      date: STAMP,
+      amount_cents: -1000,
+      merchant_id: 'merchant_fixture_two',
+      merchant_name: 'Invented Florist',
+      description: 'INVENTED FLORIST',
+      category: GROCER,
+      category_source: 'akahu',
+      status: 'settled',
+      source: 'akahu',
+    })
+    const first = await syncRun()
+    let deps: { transport: Transport; env: Record<string, string> } = {
+      transport: untouchable().transport,
+      env: { ANTHROPIC_API_KEY: 'sk-ant-invented', AGENT_KILL_SWITCH: '1' },
+    }
+    const s = scheduler({
+      runCategoryAgent: (options, clock, db) => runCategoryAgent(options, clock, db, deps),
+    })
+
+    await tick(s)
+    await tick(s)
+    expect((await categoryRuns()).map((r) => [r.outcome, r.sync_run_id])).toEqual([['blocked', first]])
+
+    // Switched off, and a new sync: that sync's run sends the row.
+    const sent = recording([[100, 20]])
+    deps = { transport: sent.transport, env: { ANTHROPIC_API_KEY: 'sk-ant-invented' } }
+    const second = await syncRun()
+    await tick(s)
+    await tick(s)
+    expect((await categoryRuns()).map((r) => [r.outcome, r.sync_run_id])).toEqual([
+      ['blocked', first],
+      ['success', second],
+    ])
+    expect(sent.bodies).toHaveLength(1)
+  })
+})
+
+describe('no API key (#430)', () => {
+  it('a sync whose only rows need the model is run once and processed, not retried every tick', async () => {
+    await seedAccounts()
+    seq += 1
+    await connection('transactions').insert({
+      akahu_id: `trans_fixture_${seq}`,
+      account_id: 'acc_fixture_p',
+      date: STAMP,
+      amount_cents: -1000,
+      merchant_id: 'merchant_fixture_two',
+      merchant_name: 'Invented Florist',
+      description: 'INVENTED FLORIST',
+      category: GROCER,
+      category_source: 'akahu',
+      status: 'settled',
+      source: 'akahu',
+    })
+    const sync = await syncRun()
+    const never = untouchable()
+    const s = scheduler({
+      runCategoryAgent: (options, clock, db) =>
+        runCategoryAgent(options, clock, db, { transport: never.transport, env: { ANTHROPIC_API_KEY: '' } }),
+    })
+
+    await tick(s)
+    await tick(s)
+    expect((await categoryRuns()).map((r) => [r.outcome, r.sync_run_id])).toEqual([['success', sync]])
+    expect(never.calls()).toBe(0)
+  })
+})
+
 describe('one pass at a time', () => {
   it('two overlapping triggers, and a manual run during them, run one agent pass', async () => {
     await syncRun()
@@ -253,7 +331,7 @@ describe('one pass at a time', () => {
     expect(s.getState().running).toBe(true)
 
     await vi.waitFor(() => expect(runCategory).toHaveBeenCalledTimes(1))
-    release({ runId: 1, outcome: 'success', considered: 0, written: 0, skipped: 0, cursor: null })
+    release({ runId: 1, outcome: 'success', considered: 0, written: 0, skipped: 0, discarded: 0, cursor: null })
     await s.whenIdle()
 
     expect(runCategory).toHaveBeenCalledTimes(1)
@@ -279,7 +357,7 @@ describe('one pass at a time', () => {
     await vi.advanceTimersByTimeAsync(AGENT_INTERVAL_MS * 2)
     expect(runCategory).toHaveBeenCalledTimes(1)
 
-    release({ runId: 1, outcome: 'success', considered: 0, written: 0, skipped: 0, cursor: null })
+    release({ runId: 1, outcome: 'success', considered: 0, written: 0, skipped: 0, discarded: 0, cursor: null })
     await s.whenIdle()
     s.stop()
     expect(s.getState().started).toBe(false)
@@ -306,7 +384,7 @@ describe('stop() during the shutdown drain (#462)', () => {
     expect(s.runNow({ agent: 'category' })).toStrictEqual({ started: false, reason: 'stopped' })
     expect(s.getState()).toMatchObject({ running: true, stopped: true })
 
-    release({ runId: 1, outcome: 'success', considered: 0, written: 0, skipped: 0, cursor: null })
+    release({ runId: 1, outcome: 'success', considered: 0, written: 0, skipped: 0, discarded: 0, cursor: null })
     await s.whenIdle()
 
     // Still refused after the drain: a manual run would call the agent again.
@@ -324,6 +402,7 @@ describe('stop() during the shutdown drain (#462)', () => {
         considered: 0,
         written: 0,
         skipped: 0,
+        discarded: 0,
         cursor: null,
       }),
     )

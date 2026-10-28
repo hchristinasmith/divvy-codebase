@@ -30,11 +30,15 @@ import { isoWeekOf } from './insights/queries.ts'
 //
 // Each tick is one pass:
 // - the category agent, once, for the oldest successful `sync_runs` row that
-//   no successful category run has named yet (Ruling 5's polling, on
-//   `processedSyncRunIds`). One sync run per tick, and the agent examines one
-//   batch per run, so a backlog is swept over several ticks. No transaction
-//   is linked to the sync run that wrote it, so no changed rows are named;
-//   new rows have higher ids, and the cursor sweep reaches them.
+//   no successful or blocked category run has named yet (Ruling 5's polling,
+//   on `processedSyncRunIds`). One sync run per tick, and the agent examines
+//   one batch per run, so a backlog is swept over several ticks. No
+//   transaction is linked to the sync run that wrote it, so no changed rows
+//   are named; new rows have higher ids, and the cursor sweep reaches them.
+//   A blocked run (the kill switch or the daily token budget stopped its
+//   model calls, Ruling 9) counts as processed: its rules ran and its cursor
+//   holds what the model was sent, so the backlog resumes at the next sync
+//   instead of the same sync being retried every tick (#430).
 // - the weekly insights pass, when it is due: every insight scope, once per
 //   NZ ISO week, from WEEKLY_DUE_WEEKDAY at 00:00 Pacific/Auckland, a few
 //   days after the week it reports on ends, so late-settling weekend rows
@@ -62,7 +66,8 @@ import { isoWeekOf } from './insights/queries.ts'
 // Failure is recorded, not thrown. A failed agent run is in `agent_runs`
 // (each agent logs its own). If an agent call rejects, the scheduler logs
 // fixed text with the error's class, never its message, and the next tick
-// tries again. No model is called here or by either agent (Ruling 7).
+// tries again. No model is called here; the category agent's model calls go
+// through its own client (Ruling 9).
 
 export const AGENT_INTERVAL_MS = 300_000
 
@@ -217,6 +222,13 @@ export function createAgentScheduler(
 
   async function categoryStep(): Promise<void> {
     const processed = new Set(await processedSyncRunIds('category', db))
+    // Blocked counts as processed (see the header). A local read: the
+    // accessor's own definition stays successful runs only.
+    const blocked: { sync_run_id: number }[] = await db('agent_runs')
+      .where({ kind: 'category', outcome: 'blocked' satisfies AgentRunOutcome })
+      .whereNotNull('sync_run_id')
+      .distinct('sync_run_id')
+    for (const row of blocked) processed.add(row.sync_run_id)
     const done: { id: number }[] = await db('sync_runs')
       .where({ outcome: 'success' })
       .orderBy('id', 'asc')

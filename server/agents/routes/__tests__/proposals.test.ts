@@ -630,7 +630,8 @@ describe('POST /api/v1/agents/proposals/:id/accept', () => {
     })
   })
 
-  it('survives a later sync that changes Akahu’s category', async () => {
+  // Done-when 1: a `claude` proposal as much as a `rule` one (#430).
+  it.each(['rule', 'claude'] as const)('a %s proposal survives a later sync that changes Akahu’s category', async (origin) => {
     // A copy of item()/syncWith() in server/sync/__tests__/category-survival.test.ts.
     const item = (id: string, category: { id: string; name: string }) =>
       `{"_id":"${id}","_account":"acc_fixture0001everyday","_connection":"conn_fixture0001","amount":-12.5,"date":"2026-10-20T00:00:00.000Z","description":"${MERCHANT} ${id}","type":"EFTPOS","created_at":"2026-10-20T01:00:00.000Z","updated_at":"2026-10-20T01:00:00.000Z","category":{"_id":"${category.id}","name":"${category.name}","groups":{"personal_finance":{"_id":"group_fixture_food","name":"Food"}}}}`
@@ -651,7 +652,7 @@ describe('POST /api/v1/agents/proposals/:id/accept', () => {
       .first()
     expect(synced).toMatchObject({ category: CAFES.name, category_source: 'akahu' })
     const id = await seedProposal(
-      proposal(synced.id, { current_category: CAFES.name, proposed_category: 'Bakeries' }),
+      proposal(synced.id, { current_category: CAFES.name, proposed_category: 'Bakeries', origin }),
     )
 
     expect((await accept(id)).status).toBe(200)
@@ -662,13 +663,13 @@ describe('POST /api/v1/agents/proposals/:id/accept', () => {
 
     expect(await transactionRow(synced.id)).toMatchObject({
       category: 'Bakeries',
-      category_source: 'rule',
+      category_source: origin,
       akahu_category_id: GROCERY.id,
       akahu_category_name: GROCERY.name,
     })
     const corrections = await connection('category_corrections').select()
     expect(corrections).toHaveLength(1)
-    expect(corrections[0]).toMatchObject({ transaction_id: synced.id, source: 'rule' })
+    expect(corrections[0]).toMatchObject({ transaction_id: synced.id, source: origin })
   })
 })
 
